@@ -39,6 +39,7 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
     {
         needed = 3;
         cp = lead & 0x0Fu;
+
         if (lead == 0xE0)
         {
             low = 0xA0; /* no overlong forms */
@@ -52,6 +53,7 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
     {
         needed = 4;
         cp = lead & 0x07u;
+
         if (lead == 0xF0)
         {
             low = 0x90; /* no overlong forms */
@@ -79,6 +81,7 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
         }
 
         cp = (cp << 6) | (uint32_t)(s[i] & 0x3Fu);
+
         low = 0x80;
         high = 0xBF;
     }
@@ -105,6 +108,7 @@ size_t amark_utf8_decode(const char *text, size_t length, uint32_t *out_codepoin
     }
 
     n = decode_one((const unsigned char *)text, length, &cp, &valid);
+
     if (out_codepoint != NULL)
     {
         *out_codepoint = cp;
@@ -174,6 +178,7 @@ bool amark_utf8_validate(const char *text, size_t length, size_t *out_error_offs
 
         return false;
     }
+
     while (offset < length)
     {
         uint32_t cp;

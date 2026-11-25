@@ -93,6 +93,7 @@ static amark_error_t ensure_room(amark_buffer_t *buffer, size_t additional)
 
     buffer->data = new_data;
     buffer->capacity = new_capacity;
+
     return AMARK_ERROR_NONE;
 }
 
@@ -125,6 +126,7 @@ amark_error_t amark_buffer_create(amark_buffer_t **out_buffer)
 
     amark_buffer_init(buffer);
     *out_buffer = buffer;
+
     return AMARK_ERROR_NONE;
 }
 
@@ -210,6 +212,7 @@ amark_error_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size
     memmove(buffer->data + buffer->length, source, size);
     buffer->length += size;
     buffer->data[buffer->length] = '\0';
+
     return AMARK_ERROR_NONE;
 }
 
@@ -242,6 +245,7 @@ amark_error_t amark_buffer_append_repeat(amark_buffer_t *buffer, unsigned char b
     memset(buffer->data + buffer->length, byte, count);
     buffer->length += count;
     buffer->data[buffer->length] = '\0';
+
     return AMARK_ERROR_NONE;
 }
 
@@ -333,6 +337,8 @@ amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_
 
     *out_data = data;
     *out_length = buffer->length;
+
     amark_buffer_init(buffer);
+
     return AMARK_ERROR_NONE;
 }
