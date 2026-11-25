@@ -657,12 +657,16 @@ typedef struct amark_inline_node_traits {
 | Field | Detail |
 |-------|--------|
 | Intent | 隣り合う text のまとめと、きっかけの文字を持たない構文の適用 |
-| Requirements | 2.2, 4.1–4.4, 5.5 |
+| Requirements | 2.2, 4.1–4.5, 5.5 |
 
 **Responsibilities & Constraints**
 - まとめ：葉の部分木を反復でたどり、隣り合う text の並びごとに、リテラルを 1 つのバッファにつないで最初の text に 1 回だけ設定し、他の text のトークンを `amark_node_transfer_tokens` で移して解放する。空のリテラルでトークンもない text は解放する（2.2）。
 - 走査：まとめの後、テキストの走査を優先度の順に、葉の部分木の各 text に適用する。たどりの中で、`AMARK_INLINE_TRAIT_LINK` の型の祖先の数を数えて `in_link` を求める（祖先をたどらない）。直前の文字は、text の最初のトークンのソース上の位置から求めた論理的な位置の `char_before`。
-- 1 つの text について、`scan(from)` を繰り返して一致 `[s, e)`（リテラルの位置）を左から集める。各一致について、境界がトークンの境目か `TEXT` のトークンの中にあることを確かめ（そうでなければその一致を飛ばす）、text を「前」「一致」「後」に分ける（トークンも分け、`TEXT` のトークンは境界で 2 つにする）。`build(match)` を呼び、返したノード（`match` を子に持つ切り離したノード）を元の位置に置く。NULL なら一致をテキストのまま戻す。分割は左から 1 回ずつ行い、リテラルの複製は各部分について 1 回だけにする（線形）。
+- 1 つの text について、`scan(from)` を繰り返して一致 `[s, e)`（リテラルの位置）を左から集める。各一致について、次の採否の規則を確かめ、採らない一致は飛ばして `from = e` から走査を続ける（一致はテキストのまま残る）：
+  - 境界（`s` と `e`）がトークンの境目か `TEXT` のトークンの中にある（`ESCAPE`・`CHAR_REF`・`REPLACED` のトークンの途中でない）。
+  - 範囲 `[s, e)` が `ESCAPE` か `CHAR_REF` のトークンで表された文字を 1 つも含まない（4.5）。エスケープや文字参照で書いた文字は「構文として読ませない」という書き手の意図なので、きっかけの文字を持たない構文（拡張オートリンクなど）もそれを構文にしない。これにより、`markdown-renderer` が構文になりうるテキストをエスケープ（か文字参照）で保護すれば、再パースでテキストのまま残ることが保証される。`REPLACED`（NUL と不正な UTF-8 の置き換え）は判定の対象にしない。
+  - 判定は、text のトークンを先頭から順に見る 1 つのカーソル（リテラルの位置とトークンの対応）で行い、一致ごとに巻き戻さないので、1 つの text の全体で線形。
+- 採った一致について、text を「前」「一致」「後」に分ける（トークンも分け、`TEXT` のトークンは境界で 2 つにする）。`build(match)` を呼び、返したノード（`match` を子に持つ切り離したノード）を元の位置に置く。NULL なら一致をテキストのまま戻す。分割は左から 1 回ずつ行い、リテラルの複製は各部分について 1 回だけにする（線形）。
 - 適用の後にもう一度まとめる。
 - リテラルの位置とトークンの対応：`TEXT` はバイト数、`ESCAPE` は 1、`CHAR_REF` は `amark_char_ref_decode` の結果の長さ、`REPLACED` は U+FFFD の 3 バイト × `amark_utf8_decode` で数えた不正な並びの数（`amark_parse_add_text` と同じ規則）。
 
@@ -690,6 +694,7 @@ amark_status amark__inline_merge_texts(amark_inline_context *ctx);
 amark_status amark__inline_apply_scanners(amark_inline_context *ctx);
 ```
 - Preconditions：`*out_end > *out_start ≥ from`、`*out_end ≤ length`（違反は `AMARK_ERROR_INVALID_STATE`）。`build` が返したノードが `match` の親でなければ `AMARK_ERROR_INVALID_STATE`。
+- 採らなかった一致について `build` は呼ばれない。`scan` は採否を知らずに次の一致を探すだけでよい（拡張の側で採否の規則を実装しない）。
 
 #### InlineEngine
 
@@ -725,7 +730,7 @@ extern const amark_inline_delegate amark__inline_engine_delegate;   /* begin / p
 | Field | Detail |
 |-------|--------|
 | Intent | CommonMark 0.31.2 の各インライン構文を公開 API だけで実装する |
-| Requirements | 5.6, 7.1, 7.2, 7.4–7.6, 8.2–8.5 |
+| Requirements | 5.6, 7.1, 7.2, 7.4–7.7, 8.2–8.5 |
 
 **Responsibilities & Constraints（構文ごと）**
 
@@ -736,7 +741,7 @@ extern const amark_inline_delegate amark__inline_engine_delegate;   /* begin / p
 | code_span | 構文、300、`` ` ``。作業領域：葉のバッククォートの並びの索引（最初の使用時に 1 回走査、`leaf_end` で解放） | 同じ長さの閉じの並び。中身の改行は空白、両端が空白で全部が空白でなければ 1 つずつ除く。リテラル（code） | 開き・閉じ（`MARKER`、`CODE_OPEN`/`CODE_CLOSE`）、除いた空白か改行（`SPACE`/`LINE_ENDING`、`CODE_PADDING`）、中身（`TEXT`/`LINE_ENDING`/`REPLACED`、`CODE_CONTENT`）（code）。閉じがなければ並び全体を `append_text`（`AMARK_ROLE_INLINE_UNMATCHED`） |
 | emphasis | 区切り文字 `*`（ASTERISK）と `_`（UNDERSCORE）、600、EMPHASIS、`emph`/`strong` | process emphasis | `EMPH_OPEN`、`EMPH_CLOSE`（emph / strong） |
 | autolink | 構文、400、`<`。性質：`link` に LINK | URI（scheme 2–32 文字、`<`・`>`・空白・制御文字なし）かメール。宛先は `cmark_clean_autolink` と同じ（メールは `mailto:`、URL の文字参照を解読）。子の text は文字参照を解読した値 | `<`・`>`（`MARKER`、`AUTOLINK_OPEN`/`AUTOLINK_CLOSE`、link）、中身（`AUTOLINK_URI` か `AUTOLINK_EMAIL`、子の text） |
-| raw_html | 構文、500、`<`。作業領域：コメント・処理命令・宣言・CDATA の「閉じがない」の印 | 開始タグと終了タグは `amark_scan_html_open_tag` / `_closing_tag`、コメント（`<!-->`、`<!--->` を含む 0.31.2 の規則）、処理命令、宣言、CDATA はこのファイルの走査。リテラル（html_inline、改行は LF） | 全体（`TEXT`/`LINE_ENDING`/`REPLACED`、`HTML_INLINE`、html_inline） |
+| raw_html | 構文、500、`<`。作業領域：コメント・処理命令・宣言・CDATA の「閉じがない」の印 | 開始タグと終了タグは `block-parser` の `amark_scan_html_open_tag` / `_closing_tag`、コメント（`<!-->`、`<!--->` を含む 0.31.2 の規則）、処理命令、宣言、CDATA はこのファイルの唯一の走査（RawHtml を参照）。リテラル（html_inline、改行は LF） | 全体（`TEXT`/`LINE_ENDING`/`REPLACED`、`HTML_INLINE`、html_inline） |
 | link | 構文、700、`[`（`push_bracket(LINK, ']')`）。後処理、mask LINK、100。性質：`link` に LINK。宣言：`]` | LinkCommon の後ろの部分（インライン → 完全参照 → 省略参照 → ショートカット）。CHILDREN | LinkCommon の表 |
 | image | 構文、700、`!`（次が `[` のとき `push_bracket(IMAGE, ']')`）。後処理、mask IMAGE、100 | link と同じ。image のノード。CHILDREN（代替テキスト） | LinkCommon の表（開きは `![` の 2 文字） |
 | hard_break | 構文、800、LF・CR・`\` | 改行の前の未確定のテキストの末尾が 2 つ以上の空白（`claim_preceding`）、または `\` の直後が改行 | 空白（`SPACE`、`HARDBREAK_SPACES`）か `\`（`MARKER`、`HARDBREAK_BACKSLASH`）、改行（`LINE_ENDING`、`BREAK_LINE_ENDING`）（linebreak） |
@@ -761,6 +766,36 @@ AMARK_API const amark_extension *amark_commonmark_hard_break(void);
 AMARK_API const amark_extension *amark_commonmark_soft_break(void);
 ```
 
+#### RawHtml（`commonmark.raw_html` と `amark_scan_raw_html`）
+
+| Field | Detail |
+|-------|--------|
+| Intent | 生の HTML の判定の規則を 1 か所に保ち、構文とパースの文脈なしの判定の両方に使う |
+| Requirements | 7.1, 7.7, 8.3, 11.1 |
+
+**Responsibilities & Constraints**
+- 規則の所有の分担（重複の実装をしない）：
+  - 開始タグと終了タグ：`block-parser` が所有する（HTML ブロックの種類 7 と共有する規則）。区間の並びの版 `amark_scan_html_open_tag` / `_closing_tag` と、バイト列の版 `amark_scan_html_open_tag_bytes` / `_closing_tag_bytes` は `block-parser` の中で 1 つの実装を共有する。この spec はタグの規則を実装しない。
+  - コメント・処理命令・宣言・CDATA：インラインの生の HTML だけの規則（HTML ブロックの開始と終わりの条件とは別の文法）なので、この spec が所有し、`src/syntax/raw_html.c` に 1 つだけ置く。
+  - 種類の振り分け（`<` の次のバイトで、`/` は終了タグ、`!--` はコメント、`?` は処理命令、`![CDATA[` は CDATA、`!` と ASCII の英字は宣言、ASCII の英字は開始タグ）も同じファイルの 1 つの関数にする。
+- 1 つの実装を 2 つの入力に使う：コメント・処理命令・宣言・CDATA の走査と振り分けは、バイトを前から読むだけの小さな読み手（`{次のバイト, 位置}` を返す静的な構造体）の上に書く。読み手は、連続するバイト列（公開の関数）と、`amark_text_input_chunk` で区間を順にたどる区間の並び（構文）の 2 通り。タグは、読み手の種類に応じて `block-parser` のバイト列の版か区間の並びの版を呼ぶ。
+- `amark_scan_raw_html(data, length, out_end)`：`data[0]` が `<` で、先頭から 1 つの生の HTML が成立すれば真を返し、`*out_end` にその直後の位置を入れる（`length` より前で終わってよい。呼び出し側は `*out_end == length` で「全体が 1 つの生の HTML」かを判定する）。不成立なら偽で `*out_end` を変えない。確保しない。時間は O(length)。改行（LF、CR、CRLF）はタグの中と各種類の中身で構文と同じに扱う。空行を含むかは判定しない（段落の中身は空行を含まないので構文では起きない。必要なら呼び出し側が確かめる）。
+- 構文（`commonmark.raw_html`）：同じ振り分けと走査を区間の並びの上で行う。作業領域の「閉じがない」の印（コメント・処理命令・宣言・CDATA）で、閉じがないと分かった種類を葉の中で再び探さない（11.1）。この印は構文の側だけのもので、公開の関数は 1 回の判定なので持たない。印があるときに走査を省いた結果は、走査した場合と同じ（閉じがないので不成立）。
+- 同値性：同じバイトについて、構文が成立する範囲と `amark_scan_raw_html` の結果は一致する（同じ関数を通るため）。テストで、`raw_html.txt` の各入力を両方で判定して確かめる。
+
+**Contracts**: Service [x]
+```c
+/* include/amark/inline.h */
+/* data の先頭（'<'）から 1 つの生の HTML（開始タグ、終了タグ、コメント、処理命令、宣言、CDATA。CommonMark 0.31.2 の
+   6.6）を判定する。成立すれば true と *out_end（直後の位置）。data か out_end が NULL なら false */
+AMARK_API bool amark_scan_raw_html(const char *data, size_t length, size_t *out_end);
+
+/* include/amark/scan.h（block-parser が提供。名前と引数は block-parser の design に従う） */
+AMARK_API bool amark_scan_html_open_tag_bytes(const char *data, size_t length, size_t *out_end);
+AMARK_API bool amark_scan_html_closing_tag_bytes(const char *data, size_t length, size_t *out_end);
+```
+- 実装の場所：`amark_scan_raw_html` は `src/syntax/raw_html.c` に置く（公開ヘッダだけを include する規則を守る。エンジンの `src/parse/` からは呼ばない）。
+
 #### LinkCommon
 
 | Field | Detail |
@@ -770,7 +805,7 @@ AMARK_API const amark_extension *amark_commonmark_soft_break(void);
 
 **Responsibilities & Constraints**
 - 後ろの部分の解析（`closer_end` から）：
-  1. インライン：`(`、空白（改行 1 つまで含む）、宛先（`amark_scan_link_destination`。山括弧か、括弧の入れ子が 32 以下の並び）、空白、タイトル（`amark_scan_link_title`。宛先との間に空白が必要）、空白、`)`。
+  1. インライン：`(`、空白（改行 1 つまで含む）、宛先（`amark_scan_link_destination`。山括弧か、括弧の入れ子が `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`（32。`block-parser` が定め、リンク参照定義と同じ）以下の並び）、空白、タイトル（`amark_scan_link_title`。宛先との間に空白が必要）、空白、`)`。
   2. 完全参照：`amark_scan_link_label` が成立し、中身が空でない。ラベルで定義を引く。
   3. 省略参照：`[]`。開きの中身をラベルにする。
   4. ショートカット：`bracket_after` が偽のときだけ、開きの中身をラベルにする。
@@ -826,8 +861,8 @@ amark_status amark__cm_link_match(amark_inline_context *ctx, const amark_bracket
 
 | Field | Detail |
 |-------|--------|
-| Intent | 生成テストと手書きのテストが共有する例の照合 |
-| Requirements | 12.1, 12.2, 13.3, 14.1 |
+| Intent | 生成テストと手書きのテストが共有する例の照合と、例の区切りのデータからのテストの生成 |
+| Requirements | 12.1, 12.2, 13.3, 14.1, 14.4 |
 
 **Contracts**: Service [x]
 ```c
@@ -841,8 +876,15 @@ typedef enum amark_test_expect { AMARK_TEST_EXPECT_DUMP = 1, AMARK_TEST_EXPECT_H
    違えば入力、期待、実際を表示して失敗する */
 void amark_test_check_example(amark_test_set_factory factory, const unsigned char *input, size_t input_length,
                               amark_test_expect expect, const unsigned char *expected, size_t expected_length);
+
+/* gen_examples.cmake の CHECK= で指定する検査の関数の形（例：markdown-renderer の amark_test_md_check_example）。
+   失敗は Naos の検査で報告する */
+typedef void (*amark_test_example_check_fn)(amark_test_set_factory factory, const unsigned char *input,
+                                            size_t input_length, const unsigned char *expected,
+                                            size_t expected_length);
 ```
-- `tests/support/gen_examples.cmake`：spec.txt と同じ区切り（32 個のバッククォートと ` example` の行、`.` の行、閉じの行）。`→` はタブ。見出しの行（`#`、`##`）を節の名前とし、テストの名前は `ex<4 桁の番号>_<節の名前の C の識別子>`。ARGS：`EXPECT=dump|html`、`FACTORY=<C の関数名>`。`AmarkTestGen.cmake` の 16 進の補助で NUL と CR を失わない。
+- `amark_test_check_example` は `amark_test_parse_check`（`block-parser` が関数の形で提供。検査の後に一括の文書を返す）を呼び、返った文書のダンプか HTML を比べて解放する。検査の補助をこの spec で作り直さない。
+- `tests/support/gen_examples.cmake`：spec.txt と同じ区切り（32 個のバッククォートと ` example` の行、`.` の行、閉じの行）。`→` はタブ。見出しの行（`#`、`##`）を節の名前とし、テストの名前は `ex<4 桁の番号>_<節の名前の C の識別子>`。ARGS：`EXPECT=dump|html`、`FACTORY=<C の関数名>`、`CHECK=<C の関数名>`（任意）。`CHECK=` がなければ各テストは `amark_test_check_example(FACTORY, input, len, EXPECT, expected, len)` を呼ぶ（従来どおり）。`CHECK=` があれば、生成するソースに `amark_test_example_check_fn` の形の関数の宣言を出し、各テストは `<CHECK>(FACTORY, input, len, expected, len)` を呼ぶ（`EXPECT=` は使わない。両方を指定したら構成の失敗）。関数の定義は呼び出し側が `LIBRARIES` でリンクする（`markdown-renderer` は `CHECK=amark_test_md_check_example` で `tests/spec/data/spec.txt` と自分のコーパスを登録する）。`AmarkTestGen.cmake` の 16 進の補助で NUL と CR を失わない。
 
 #### SpecTests
 - `tests/spec/spec_version.cmake`：`set(AMARK_COMMONMARK_SPEC_VERSION 0.31.2)`、`set(AMARK_COMMONMARK_SPEC_SHA256 257c41ad946f7a1414a499aca402a1aa8fdac3678532266611348c1cf54f4b80)`（12.3）。
@@ -861,9 +903,9 @@ void amark_test_check_example(amark_test_set_factory factory, const unsigned cha
 | `test.inline.autolink` | テキストの走査、優先度 100。性質なし | `www.`、`http://`、`https://`、メール。直前の文字（行頭、空白、`*`、`_`、`~`、`(`）、ドメインの検査（最後の 2 つの部分に `_` なし）、末尾の句読点と括弧の釣り合いと `&…;` の除外（GFM 6.9 の規則）。`in_link` なら探さない。`build` は link を作り（宛先は `www.` なら `http://` を前に、メールは `mailto:`）、長さ 0 の `TEXT`（役割は拡張オートリンクの印）を link に記録する | 一致の text のトークンはそのまま |
 | `test.inline.footnote_ref` | ブラケットの後処理、mask LINK、優先度 50 | 中身が `^` で始まり、`^` の後のラベルが `amark_test_parse_gfm` の脚注の定義の表にある（`amark_inline_lookup_label`）。`test.footnote_ref`（ラベル）、DISCARD | `[`、`^`、ラベル、`]`（`MARKER` / `TEXT`、テスト用の役割） |
 
-- `tests/extensions/gfm_set.{h,c}`：`amark_test_gfm_set_new(allocator, &set)` は、`amark_syntax_set_new` → `amark_syntax_set_add_commonmark` → `amark_test_parse_gfm` の `test.block.table`、`test.block.footnote_def`、`test.block.tasklist` → `test.inline.*` → `amark_test_html_gfm` の各部品（表、取り消し線、タスク項目、脚注、タグフィルタのフィルタ方式）→ 凍結、の順で作る。
-- INTERFACE ライブラリ `amark_test_gfm`（`gfm_inline_ext.c`、`gfm_set.c`。`amark_test_parse_gfm` と `amark_test_html_gfm` に依存）。配布物とインストールには含めない（13.4）。
-- `data/gfm_cases.txt`：自前の代表的な入力（GFM spec の文章は写さない）と、cmark-gfm と同じ形の HTML。節は 表、取り消し線、タスクリスト、拡張オートリンク、タグフィルタ、脚注、組み合わせ（表のセルの中の取り消し線とオートリンク、脚注の中のタスクリストと表、強調の中のオートリンク）。`gen_examples.cmake` で `EXPECT=html FACTORY=amark_test_gfm_set_new`（13.2、13.3）。
+- `tests/extensions/gfm_set.{h,c}`：`amark_test_gfm_set_new(allocator, &set)` は、`amark_syntax_set_new` → `amark_syntax_set_add_commonmark` → `amark_test_parse_gfm` の `test.block.table`、`test.block.footnote_def`、`test.block.tasklist` → `test.inline.*` → `amark_test_html_gfm` の各部品（表、取り消し線、タスク項目、脚注、タグフィルタのフィルタ方式）→ 凍結、の順で作る。部品は `gfm_set.c` の中の 1 つの配列（取得関数の並び）に置き、後の spec が 1 か所に足せる形にする。`markdown-renderer` のタスク 4.2 が HTML の部品の後に `amark_test_md_gfm` の部品を足し、`amark_test_gfm` に依存を足す（その編集は `markdown-renderer` が行う。この spec の HTML の照合の結果は変わらない）。
+- INTERFACE ライブラリ `amark_test_gfm`（`gfm_inline_ext.c`、`gfm_set.c`。`block-parser` が提供する `amark_test_parse_gfm` と、`amark_test_html_gfm` に依存）。配布物とインストールには含めない（13.4）。
+- `data/gfm_cases.txt`：自前の代表的な入力（GFM spec の文章は写さない）と、cmark-gfm と同じ形の HTML。拡張オートリンクの範囲にエスケープか文字参照を含む入力は、4.5 の規則で cmark-gfm と結果が違いうるので、このデータには入れず `gfm_compose_test.c` と `text_scanner_test.c` で確かめる。節は 表、取り消し線、タスクリスト、拡張オートリンク、タグフィルタ、脚注、組み合わせ（表のセルの中の取り消し線とオートリンク、脚注の中のタスクリストと表、強調の中のオートリンク）。`gen_examples.cmake` で `EXPECT=html FACTORY=amark_test_gfm_set_new`（13.2、13.3）。
 - `gfm_compose_test.c`：各部品を構文セットから取り除いたとき、残りの部品と CommonMark の結果が変わらないこと、組み合わせた文書の被覆と逐次の一致、エスケープに関わる文字の問い合わせに `~` と `"www."` などが出ること（13.2、13.3、9.2）。
 
 ## Data Models
@@ -967,16 +1009,18 @@ struct amark_inline_context {
 ### Unit Tests（`tests/inline/`、`test_inline_syntaxes`）
 - **engine**：既定の委譲先で段落と見出しがインラインまで解析され、単純な委譲先を明示すると従来の木になること（1.1、1.2）。同じバイトの候補が優先度、次に構文セットの順で試されること（2.1）。隣り合うテキストが 1 つになり空の text がないこと（2.2）。`commonmark.emphasis` を取り除くと `*` がテキストになり他が変わらないこと（2.3）。改行の構文を取り除くと受け皿の softbreak になり被覆が保たれること（2.4）。副作用のある `NONE` と進まない `MATCHED` が状態の誤りになること（2.5）。コールバックの失敗と確保の失敗がパースの失敗として返り `leaf_end` が呼ばれること（1.5）。
 - **context**：区間をまたぐ `char_before` と `record`（引用の中の 2 行）、`claim_preceding` の範囲の規則、作業領域が葉ごとに 0 で始まり `leaf_end` が使った葉だけで呼ばれること、`lookup_label` の正規化と 999 文字の上限（1.3、3.2–3.4、6.6）。
-- **delimiter**：ASTERISK と UNDERSCORE の flanking（句読点と空白、語の中の `_`）、3 の倍数の規則、EXACT の長さの一致と `max_run_length`、2 つの種類が混ざっても一致しないこと、`amark_inline_push_delimiter` で積んだ並びが同じ規則で処理されること、使った文字の `MARKER` と残りの `UNMATCHED` のトークン、同じ文字の 2 つの種類の拒否（5.1–5.5）。
+- **delimiter**：ASTERISK と UNDERSCORE の flanking（句読点と空白、語の中の `_`）、3 の倍数の規則、EXACT の長さの一致と `max_run_length`、2 つの種類が混ざっても一致しないこと、`amark_inline_push_delimiter` で積んだ並びが同じ規則で処理されること、使った文字の `MARKER` と残りの `UNMATCHED` のトークン、同じ文字の 2 つの種類の拒否（5.1–5.5）。`amark_inline_delimiter_flanks` の表（2 つの方式 × 直前・直後の空白・句読点・英数字・`AMARK_INLINE_NO_CHAR`）、`amark_inline_match_delimiters` の照合の列（`*a **b** c*`、3 の倍数の例、EXACT、使える数の印、`capacity` の不足と不正な並びの拒否、`count` 0）、パースした段落の区切り文字の並びから作った配列で公開の関数を呼んだ結果と、パースの木の照合が一致すること（5.7）。
 - **bracket**：後処理の優先度と `opener_mask`、CHILDREN と DISCARD の木とトークン、LINK の性質による無効化（`[a [b](c) d](e)`）、`bracket_after`、利用者の開きのビットと閉じの文字（6.1–6.5）。
-- **text_scanner**：一致の範囲の分割とトークンの分配、エスケープのトークンの途中の一致を飛ばすこと、`prev_char`（強調の後、葉の先頭）、`in_link`（オートリンクとリンクの中）、1 つの text の 1 万の一致でカウンタが線形（4.1–4.4）。
+- **text_scanner**：一致の範囲の分割とトークンの分配、エスケープのトークンの途中の一致を飛ばすこと、範囲に `ESCAPE` か `CHAR_REF` のトークンの文字を含む一致を採らず `build` を呼ばずに範囲の後ろから続けること（同じ text の後ろの一致は採られる。`REPLACED` を含む一致は採られる）（4.5）、`prev_char`（強調の後、葉の先頭）、`in_link`（オートリンクとリンクの中）、1 つの text の 1 万の一致でカウンタが線形（4.1–4.4）。
 - **special**：宣言、きっかけの文字と区切り文字の自動の追加、和、凍結前の誤り（9.1–9.3）。
 - **fragment**：インラインの文脈で `*a* [b]` を挿入して強調とリンクになること、`AMARK_FRAGMENT_TARGET_DEFINITIONS` で挿入先の定義が解決されること（10.1、10.2）。
 
 ### Integration Tests
+- **raw_html の同値性**：`raw_html.txt` の各入力と、各種類の成立と不成立・閉じのない種類・改行をまたぐタグの入力について、`amark_scan_raw_html` の判定と構文の成立の範囲が一致すること（7.7）。
 - **構文ごとのデータ**（`tests/inline/data/*.txt`、`EXPECT=dump`）：各構文の成立と不成立、値（宛先、タイトル、コードの中身、オートリンクの宛先）、トークン（役割、書式の区別、区切り文字の文字と長さ、改行の表記）（7.1、7.4、8.2–8.6、14.1）。`lossless_inline.txt`：引用やリストの中の複数行のリンクとコードスパン、CRLF、タブ、NUL、不正な UTF-8、行末の空白（1.3、8.1、8.5、11.4）。
 - **準拠テスト**（`tests/spec/`）：spec.txt 0.31.2 の 652 例の HTML のバイト単位の一致と、被覆・不変条件・逐次の一致（7.1、7.6、12.1、12.2）。spec.txt を一時的に除いた構成でスキップが報告され、`AMARK_REQUIRE_SPEC_TESTS=ON` で構成が失敗すること、SHA-256 の不一致で構成が失敗することは、CMake のスクリプトのテスト（`tests/spec/CMakeLists.txt` の `spec.config_checks`、`cmake -P` で別の作業ディレクトリに構成する）で確かめる（12.3、12.5、12.6）。
-- **GFM 相当**（`tests/extensions/`）：`gfm_cases.txt` の HTML、組み合わせのテスト（13.1–13.3）。
+- **GFM 相当**（`tests/extensions/`）：`gfm_cases.txt` の HTML、組み合わせのテスト（13.1–13.3）。`www\.example.com` や `www.example&#46;com` が拡張オートリンクにならないこと（4.5）。
+- **生成の手順**：自己テストのデータを `CHECK=` で数える検査の関数に渡したテストと、`EXPECT=` の既定のテストの両方がビルドされて実行されること、`CHECK=` と `EXPECT=` を両方指定すると構成が失敗すること（14.4）。
 - **oom**：`AMARK_CHECK_OOM_SWEEP` で、すべてのインライン構文を含む文書の一括のパース、GFM の構文セットのパース、インラインの断片のパースが、メモリ不足を返してリークしないこと（14.3、1.5）。
 - **エクスポートとヘッダ**：`inline.h` の単独コンパイル、公開シンボルの検査（`foundation` の仕組み）。
 
@@ -997,12 +1041,19 @@ struct amark_inline_context {
 
 ## Integration & Upstream Changes
 - **`block-parser` が予定している変更（この spec が行う）**：`amark_inline_delegate_default()` をこのエンジンに変える。`amark_syntax_set_add_commonmark` にインラインの拡張を足す。
-- **`block-parser` の spec への変更の依頼（実装の前に更新する）**：
-  1. `amark_scan_link_destination` の括弧の入れ子の上限を 32 と明記し、`scan.h` に `AMARK_SCAN_MAX_LINK_PAREN_DEPTH 32` として公開する（11.1、11.3。リンク参照定義とインラインのリンクで同じ値。cmark と同じ）。
-  2. 役割の番号のエンジン用の範囲 0xFF00–0xFFFF を、ブロックのエンジン 0xFF00–0xFF0F、インラインのエンジン 0xFF10–0xFF1F に分けることを `block.h` の注記に加える。
-  3. `tests/parse/gfm_block_ext.{h,c}` を INTERFACE ライブラリ `amark_test_parse_gfm` として公開し、`gfm_block_ext.h` で次を提供する：3 つの拡張の取得関数、脚注の定義の表を引く関数（`amark_test_gfm_footnote_definitions(amark_parse_context *ctx)` が拡張の状態の `amark_label_map *` を返す）。表のセルの区間は、`|` の前の `\` を区間から除いてセルのトークン（`MARKER`）として記録する（GFM の「セルの中の `\|` はコードスパンの中でも `|`」を表すため）。
-  4. `tests/support/parse_check.h` の `amark_test_parse_check` を、検査（被覆、不変条件、逐次の一致）の後に一括でパースした文書を返す関数の形とする（`amark_status amark_test_parse_check(const amark_test_parse_spec *spec, const char *input, size_t length, amark_document **out_document)`。`AMARK_CHECK_PARSE` はその上のマクロ）。
+- **`block-parser` への依頼 1–4（2026-11-25 に `block-parser` の spec に反映済み。`block-parser` が実装し、この spec は確かめて使うだけ）**：
+  1. `amark_scan_link_destination` の括弧の入れ子の上限 32 を `scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH` として公開する（11.1、11.3。リンク参照定義とインラインのリンクで同じ値。cmark と同じ）。→ `block-parser` のタスク 1.1（定数の宣言）、3.3（走査と深さ 32/33 のテスト）、10.2（深い括弧の計算量）。
+  2. 役割の番号のエンジン用の範囲を、ブロックのエンジン 0xFF00–0xFF0F、インラインのエンジン 0xFF10–0xFF1F に分け、0xFF20–0xFFFF を予約することを `block.h` の注記に書く。→ `block-parser` のタスク 1.1。この spec は 0xFF10–0xFF1F の中で `AMARK_ROLE_INLINE_*` の値を定めるだけ。
+  3. `tests/parse/gfm_block_ext.{h,c}` を INTERFACE ライブラリ `amark_test_parse_gfm` として公開し、3 つの拡張の取得関数、`amark_test_gfm_footnote_definitions(amark_parse_context *ctx)`、表のセルの中の `\|` の `\` をセルの `MARKER`（`AMARK_TEST_GFM_ROLE_CELL_PIPE_ESCAPE`）として区間から除く扱いを提供する。→ `block-parser` のタスク 9.1、9.2、9.3。
+  4. `amark_test_parse_check` を、検査（被覆、不変条件、逐次の一致）の後に一括でパースした文書を返す関数の形とし、`AMARK_CHECK_PARSE` をその上のマクロにする。→ `block-parser` のタスク 1.4。
+  - この spec のタスク 1.2、1.3 は、これらを実装せず、公開 API とテストのライブラリをリンクして確かめる作業にした（実装の重複をなくす）。欠けていれば `block-parser` の不足として報告し、この spec の中で代わりを作らない（13.5）。
+- **`block-parser` の HTML のタグのバイト列の走査（`markdown-renderer` の依頼。2026-11-25 に `block-parser` の spec に反映済み）**：`scan.h` の `amark_scan_html_open_tag_bytes` / `amark_scan_html_closing_tag_bytes`（区間の並びの版と同じ規則、同じ実装）。この spec の `amark_scan_raw_html` はタグの判定にこれを使い、タグの規則を実装しない（RawHtml）。名前と引数は `block-parser` の design（Scanners の `scan_html.c`）に従い、変われば RawHtml の参照を揃える。→ `block-parser` のタスク 1.1（宣言）、3.4（実装）。
+- **`markdown-renderer` からの依頼（2026-11-25 に反映。`markdown-renderer` の design の Integration & Upstream Changes の `inline-parser` の 1–4）**：
+  1. `inline.h` に `amark_inline_delimiter_flanks` と `amark_inline_match_delimiters`（`amark_inline_run`、`amark_inline_run_match`）を公開し、InlineDelimiters が内部でも同じ実装（`amark__inline_match_runs`）を使う（5.7）。→ この spec のタスク 2.5、3.3。
+  2. `amark_scan_raw_html` を公開する。所有の判断：タグの規則は `block-parser`（`scan_html.c` の 1 つの実装。バイト列の版と区間の並びの版）、コメント・処理命令・宣言・CDATA の規則と振り分けはこの spec の `raw_html.c` が持ち、構文と公開の関数が同じ実装を使う（7.7、RawHtml）。`markdown-renderer` は HTML ブロックの開始と終わりの条件を `block-parser` の `amark_scan_html_block_start` / `_end` から、インラインの生の HTML をこの関数から得る。→ この spec のタスク 1.2（前提の確認）、4.5。
+  3. テキストの走査の一致の範囲に `ESCAPE` か `CHAR_REF` のトークンの文字が含まれるなら採らない規則を InlineText に加える（4.5）。→ この spec のタスク 2.7、3.4、7.2。
+  4. `gen_examples.cmake` に `CHECK=` を足す（14.4、InlineCheck）。→ この spec のタスク 1.4。`tests/extensions/gfm_set.c` に `amark_test_md_gfm` を加える編集と `amark_test_gfm` の依存の追加は、`markdown-renderer` のタスク 4.2 が行う（この spec は部品の並びを 1 か所の配列にしておくだけ）。
 - **`syntax-tree`**：並行して追加中の `amark_document_take_syntax_set`、`amark_node_import_children`、スロットの範囲の表に依存する。範囲の表の `inline-parser` の行（0x0200–0x02FF、0x0201–0x0206 の名前）をこの spec が `extension.h` に追記する。それ以外の変更は要らない。
 - **`html-renderer`**：変更は要らない。`gfm_html_ext.h` が公開する記述子（`test.strikethrough`、`test.footnote_ref` とそのラベルの設定）と部品の拡張をそのまま使う。準拠テストで出力の差が見つかったら、`html-renderer` の出力の表を直す。
 - **`foundation`**：予定どおり、`.gitattributes` に spec.txt の `export-ignore` を加える。CI の構成に `AMARK_REQUIRE_SPEC_TESTS=ON` を加える。
-- **`markdown-renderer` への提供**：インラインの役割の番号、トークンの所有の規則（区切り文字は作ったノード、リンクの表記はリンク、改行の前の空白は改行のノード、残りの区切り文字とブラケットは text の `UNMATCHED`）、エスケープに関わる文字の問い合わせ。エスケープの方式はこの spec では決めない。
+- **`markdown-renderer` への提供**：インラインの役割の番号、トークンの所有の規則（区切り文字は作ったノード、リンクの表記はリンク、改行の前の空白は改行のノード、残りの区切り文字とブラケットは text の `UNMATCHED`）、エスケープに関わる文字の問い合わせ、`amark_inline_delimiter_flanks`・`amark_inline_match_delimiters`・`amark_scan_raw_html`、テキストの走査の採否の規則（4.5）、`gen_examples.cmake` の `CHECK=`。エスケープの方式はこの spec では決めない。
