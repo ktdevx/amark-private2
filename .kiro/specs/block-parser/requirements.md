@@ -28,8 +28,8 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
 - **Adjacent expectations**：
   - `syntax-tree` のノード、構文トークン、編集の追跡、拡張のレジストリを使う。不足が見つかったら `syntax-tree` に戻って更新する。
   - `inline-parser` は、この spec の委譲の取り決めとリンク参照定義の表を使ってインラインを解析し、インラインの構文トークンを記録する。エンジンの役割の番号はこの spec が分けた範囲の中で定め、GFM 相当の検証ではこの spec の検証用の構文とパースの検査の補助をテストの中で再利用する。
-  - `markdown-renderer` は、この spec が記録した構文トークンから元の表記を復元する。
-  - `html-renderer` は組み込みのノード型の HTML 出力を 1 つの構文拡張 `amark.core.html` として提供する（`markdown-renderer` も同じ形を予定する）。この spec の CommonMark の構文セットを作る手段は、それを `amark.core` の直後に加える。
+  - `markdown-renderer` は、この spec が記録した構文トークンから元の表記を復元する。HTML ブロックとして再パースされるかの判定には、この spec が公開する HTML ブロックの開始と終わりの条件、HTML のタグの走査（1 行のバイト列の版）を使い、規則を複製しない。
+  - `html-renderer` は組み込みのノード型の HTML 出力を 1 つの構文拡張 `amark.core.html` として提供し、`markdown-renderer` は同じ形の `amark.core.markdown` を提供する。この spec の CommonMark の構文セットを作る手段は、`amark.core.html` を `amark.core` の直後に、`amark.core.markdown` をその直後に加える。`amark.core.markdown` を加える 1 行の変更は `markdown-renderer` のタスクが行い、この spec はその 1 行で足せる形を用意する。
 
 ## Requirements
 
@@ -116,6 +116,8 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
 4. The Amark Block Parser shall 各組み込み拡張を名前で取り除いたり、別の拡張に置き換えたりできるようにする
 5. The Amark Block Parser shall リストのタイトかどうか、リストの種類と開始番号、見出しのレベル、コードブロックの情報文字列とリテラル、HTML ブロックのリテラルを、CommonMark の規則どおりにノードの属性とリテラルとして設定する
 6. The Amark Block Parser shall 組み込み拡張の構造を、ノード型ごとの出力の拡張（`html-renderer` の HTML、後の `markdown-renderer` の Markdown）を構文セットに組み込め、特定の構文だけが独自の出力を必要とする場合はその構文の拡張にも構造を変えずに足せる形にする
+7. The Amark Block Parser shall HTML ブロックの 7 種類の開始の条件（段落を中断する場面かどうかを含む）、種類 1–5 の終わりの条件、HTML の開始タグと終了タグの走査を、区間の並びのテキストを作らずに 1 行のバイト列の上で使える公開の関数として提供する
+8. The Amark Block Parser shall HTML ブロックの組み込み拡張と区間の並びの上の HTML のタグの走査を、7 の関数と同じ規則の 1 つの実装の上に置き、同じ入力に対してバイト列の版と区間の並びの版が同じ判定と同じ終わりの位置を返すようにする
 
 ### Requirement 8: リンク参照定義とラベルの表
 **Objective:** As a インラインの解析と拡張の実装者, I want リンク参照定義が CommonMark どおりに解析され、正規化したラベルで引ける表として共有されること, so that 参照リンクや脚注のような、ラベルで対応付ける構文を一貫して実装できる
