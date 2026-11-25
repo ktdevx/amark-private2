@@ -21,3 +21,11 @@ amark_add_test(unicode_test SOURCES unicode_test.c)
 # (amark_internal).
 amark_add_test(buffer_test SOURCES buffer_test.c)
 amark_add_test(buffer_internal_test SOURCES buffer_internal_test.c INTERNAL)
+
+# The data-driven UTF-8 test vectors (4.7, 13.1, 13.2): gen_utf8_cases.cmake
+# turns each data line of data/utf8_cases.txt into one test of the suite
+# utf8_cases_test_utf8_cases.
+amark_add_generated_tests(utf8_cases_test
+  GENERATOR gen_utf8_cases.cmake
+  DATA data/utf8_cases.txt
+)
