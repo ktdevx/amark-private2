@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) The Amark Authors
+#
+# The entry point of find_package(Amark). Generated from cmake/AmarkConfig.cmake.in.
+#
+# Provides the imported target Amark::amark.
+#
+# Components: "static" and "shared". This prefix holds the @AMARK_PACKAGE_KIND@ library.
+#   - Without components, the installed kind is loaded (BUILD_SHARED_LIBS is not
+#     consulted).
+#   - Amark_<component>_FOUND is true only for the installed kind.
+#   - A required component that does not match the installed kind (including both
+#     kinds at once, or an unknown name) makes the package "not found":
+#     Amark_FOUND is set to FALSE, Amark_NOT_FOUND_MESSAGE names the requested and
+#     the installed kinds, and no target is loaded. An optional component that does
+#     not match does not fail.
+
+@PACKAGE_INIT@
+
+set(_amark_installed_kind "@AMARK_PACKAGE_KIND@")
+
+set(Amark_static_FOUND FALSE)
+set(Amark_shared_FOUND FALSE)
+set(Amark_${_amark_installed_kind}_FOUND TRUE)
+
+set(_amark_missing_components "")
+foreach(_amark_component IN LISTS Amark_FIND_COMPONENTS)
+  if(NOT _amark_component STREQUAL _amark_installed_kind)
+    set(Amark_${_amark_component}_FOUND FALSE)
+    if(Amark_FIND_REQUIRED_${_amark_component})
+      list(APPEND _amark_missing_components "${_amark_component}")
+    endif()
+  endif()
+endforeach()
+
+if(_amark_missing_components)
+  list(JOIN Amark_FIND_COMPONENTS ", " _amark_requested)
+  list(JOIN _amark_missing_components ", " _amark_missing)
+  set(Amark_FOUND FALSE)
+  string(CONCAT Amark_NOT_FOUND_MESSAGE
+    "the requested kind of Amark (components: ${_amark_requested}) is not installed "
+    "in ${PACKAGE_PREFIX_DIR}: unavailable component(s): ${_amark_missing}; "
+    "the installed kind is \"${_amark_installed_kind}\". "
+    "The components are \"static\" and \"shared\", and a prefix holds one of them.")
+  unset(_amark_requested)
+  unset(_amark_missing)
+  unset(_amark_component)
+  unset(_amark_missing_components)
+  unset(_amark_installed_kind)
+  return()
+endif()
+unset(_amark_component)
+unset(_amark_missing_components)
+unset(_amark_installed_kind)
+
+include("${CMAKE_CURRENT_LIST_DIR}/AmarkTargets.cmake")
+
+check_required_components(Amark)

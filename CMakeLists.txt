@@ -58,6 +58,12 @@ include(AmarkFuzz OPTIONAL)
 
 add_subdirectory(src)
 
+# Install rules, export and package files (headers, library, CMake package,
+# amark.pc, LICENSE). Nothing of the tests or the fuzz targets is installed.
+if(AMARK_INSTALL)
+  include(AmarkInstall)
+endif()
+
 # tests/ comes before fuzz/: it defines the support libraries the fuzz targets
 # link, also in a fuzz-only configuration. Subdirectories added by later specs
 # (such as bench/) go after fuzz/.

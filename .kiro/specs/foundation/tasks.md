@@ -133,7 +133,7 @@
   - _Depends: 2.4_
   - _Requirements: 4.7, 13.1, 13.2_
 
-- [ ] 3.3 インストール、エクスポート、パッケージ設定を作る
+- [x] 3.3 インストール、エクスポート、パッケージ設定を作る
   - インストールの有効時だけ、公開ヘッダ、ライブラリ（DLL と MSVC の PDB を含む）、ライセンスを設計どおりの場所に置く規則を作る
   - エクスポートファイルと、版の互換性の判定（1.0 未満は同じマイナー版、以降は同じメジャー版）を生成する
   - パッケージ設定にインストールした種類（static / shared）を埋め込み、コンポーネントの指定がなければその種類を読み込み、必須のコンポーネントが一致しなければ理由を示して「見つからない」にする
@@ -232,3 +232,4 @@
 - 2.3: 確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP(scenario, ctx)`（tests/support/test_allocator.h）。結果の構造体に設計にない `truncated` を加えた。総当たりの中で `NAOS_FAIL` が起きると既定のアロケータに戻らないので、テストの teardown で `amark_allocator_set(NULL)` を呼ぶ
 - 2.5: `src/base/unicode_tables.inc` は `amark_unicode_range_t` を定義しない。2.6 の unicode.c は `<stdint.h>` と `typedef struct { uint32_t first; uint32_t last; } amark_unicode_range_t;` を include より前に置く。生成スクリプトは `include/amark/unicode.h` がないと版の照合を警告で飛ばすので、2.6 でヘッダを加えたらエラーに変える（この目的に限り 2.6 は tools/gen_unicode_tables.py を編集してよい）
 - 3.1: データ駆動のテストは `amark_add_generated_tests(<target> GENERATOR <script> DATA <files…> …)`。生成スクリプトは先頭で `cmake_minimum_required(VERSION 3.21)` を呼び、`include(AmarkTestGen)` の補助を使う。Makefiles では生成物（`.c`）を手で消したら `.stamp` も消す。スイート名の識別子への変換は AmarkTesting.cmake と AmarkTestGen.cmake の 2 か所にあるので、変えるときは両方を直す
+- 3.3: パッケージは `lib/cmake/Amark/`（AmarkConfig、AmarkConfigVersion、AmarkTargets）、`lib/pkgconfig/amark.pc`、`share/licenses/amark/LICENSE`。必須のコンポーネントが一致しないときの理由のメッセージは「the requested kind of Amark (components: …) is not installed in <prefix> … the installed kind is "static"」で、3.4 はこれを照合できる
