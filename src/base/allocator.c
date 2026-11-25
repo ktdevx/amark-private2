@@ -8,11 +8,36 @@
 #include <stdlib.h>
 
 /* The default allocator: the only place in Amark that uses the allocation
- * functions of the C standard library directly. */
-static const amark_allocator_t default_allocator = {malloc, calloc, realloc, free};
+ * functions of the C standard library directly. They are called through small
+ * wrappers rather than stored as pointers, because the C library functions may
+ * be imported from a DLL (MSVC's UCRT), whose addresses are not address
+ * constants (MSVC warning C4232). */
+static void *default_malloc(size_t size)
+{
+    return malloc(size);
+}
+
+static void *default_calloc(size_t count, size_t size)
+{
+    return calloc(count, size);
+}
+
+static void *default_realloc(void *ptr, size_t size)
+{
+    return realloc(ptr, size);
+}
+
+static void default_free(void *ptr)
+{
+    free(ptr);
+}
+
+static const amark_allocator_t default_allocator = {
+    default_malloc, default_calloc, default_realloc, default_free};
 
 /* The global allocator setting: the only mutable global state of Amark. */
-static amark_allocator_t current_allocator = {malloc, calloc, realloc, free};
+static amark_allocator_t current_allocator = {
+    default_malloc, default_calloc, default_realloc, default_free};
 
 amark_error_t amark_allocator_set(const amark_allocator_t *allocator)
 {
