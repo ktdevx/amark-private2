@@ -45,6 +45,15 @@ set(_amark_package_sanitize "")
 if(PROJECT_IS_TOP_LEVEL AND AMARK_SANITIZE)
   list(JOIN AMARK_SANITIZE "," _amark_package_sanitize)
 endif()
+# The coverage instrumentation of libFuzzer (AmarkFuzz.cmake) is in the library as
+# well; the consumer needs its runtime callbacks.
+if(AMARK_FUZZ AND AMARK_HAVE_LIBFUZZER)
+  if(_amark_package_sanitize STREQUAL "")
+    set(_amark_package_sanitize "fuzzer-no-link")
+  else()
+    string(APPEND _amark_package_sanitize ",fuzzer-no-link")
+  endif()
+endif()
 
 set(_amark_package_args
   "-DAMARK_SOURCE_DIR=${PROJECT_SOURCE_DIR}"

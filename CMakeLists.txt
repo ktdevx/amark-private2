@@ -50,11 +50,10 @@ include(AmarkCompilerOptions)
 # The testing and fuzzing modules are always included: they always define their
 # functions (amark_add_test, amark_add_generated_tests, amark_add_fuzzer), which do
 # nothing when testing or fuzzing is disabled. They are included before the library
-# so that settings they apply to the directory reach the library as well.
-# OPTIONAL and the EXISTS check below let the build configure while the fuzzing
-# module and directory are added by their own task.
+# so that settings they apply to the directory (the coverage instrumentation of
+# libFuzzer) reach the library as well.
 include(AmarkTesting)
-include(AmarkFuzz OPTIONAL)
+include(AmarkFuzz)
 
 add_subdirectory(src)
 
@@ -69,7 +68,5 @@ endif()
 # (such as bench/) go after fuzz/.
 if(AMARK_BUILD_TESTS OR AMARK_FUZZ)
   add_subdirectory(tests)
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fuzz/CMakeLists.txt")
-    add_subdirectory(fuzz)
-  endif()
+  add_subdirectory(fuzz)
 endif()

@@ -150,7 +150,7 @@
   - _Depends: 3.3_
   - _Requirements: 1.5, 3.2, 3.3, 3.4, 3.6, 3.7, 4.11, 4.12_
 
-- [ ] 3.5 ファジングの仕組みを作る
+- [x] 3.5 ファジングの仕組みを作る
   - ファジングの有効時に libFuzzer の対応を判定し、対応していればライブラリを含む全体にカバレッジの計測を加える
   - ファジングターゲットを追加する関数を作る。libFuzzer があれば libFuzzer の実行ファイルを、なければファイルを読んで入口を 1 回ずつ呼ぶ代替の main をリンクした実行ファイルを作る。既定で内部用のライブラリをリンクする
   - テストを作るときは、コーパスのファイルを集めて引数に渡す再生のテストを、ファジングの有効・無効にかかわらず CTest に登録する
@@ -233,3 +233,4 @@
 - 2.5: `src/base/unicode_tables.inc` は `amark_unicode_range_t` を定義しない。2.6 の unicode.c は `<stdint.h>` と `typedef struct { uint32_t first; uint32_t last; } amark_unicode_range_t;` を include より前に置く。生成スクリプトは `include/amark/unicode.h` がないと版の照合を警告で飛ばすので、2.6 でヘッダを加えたらエラーに変える（この目的に限り 2.6 は tools/gen_unicode_tables.py を編集してよい）
 - 3.1: データ駆動のテストは `amark_add_generated_tests(<target> GENERATOR <script> DATA <files…> …)`。生成スクリプトは先頭で `cmake_minimum_required(VERSION 3.21)` を呼び、`include(AmarkTestGen)` の補助を使う。Makefiles では生成物（`.c`）を手で消したら `.stamp` も消す。スイート名の識別子への変換は AmarkTesting.cmake と AmarkTestGen.cmake の 2 か所にあるので、変えるときは両方を直す
 - 3.3: パッケージは `lib/cmake/Amark/`（AmarkConfig、AmarkConfigVersion、AmarkTargets）、`lib/pkgconfig/amark.pc`、`share/licenses/amark/LICENSE`。必須のコンポーネントが一致しないときの理由のメッセージは「the requested kind of Amark (components: …) is not installed in <prefix> … the installed kind is "static"」で、3.4 はこれを照合できる
+- 3.5: ファジングターゲットは `amark_add_fuzzer(<name> SOURCES … CORPUS <dir> [LIBRARIES …])`。再生のテスト名は末尾の `_fuzz` を除いた `fuzz.<name>.corpus`（ラベル fuzz）。空のコーパスは構成時のエラー。libFuzzer の実行はこのコンテナでは確かめられない（compiler-rt がない）ので、CI のファジングのジョブで確かめる
