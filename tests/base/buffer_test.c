@@ -60,6 +60,7 @@ NAOS_TEST(create_gives_an_empty_terminated_buffer)
     NAOS_CHECK_NOT_NULL(amark_buffer_data(b));
     NAOS_CHECK_UINT_EQ(0, amark_buffer_length(b));
     NAOS_CHECK_STR_EQ("", amark_buffer_data(b));
+
     amark_buffer_destroy(b);
 }
 
@@ -74,6 +75,7 @@ NAOS_TEST(create_allocates_only_the_buffer_itself)
     CHECK_CREATE(b);
     calls = counting.calls;
     live = counting.live_blocks;
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(1, calls);
     NAOS_CHECK_UINT_EQ(1, live);
@@ -94,6 +96,7 @@ NAOS_TEST(create_out_of_memory_sets_out_buffer_to_null)
 
     SET_COUNTING();
     counting.fail_at = 1;
+
     err = amark_buffer_create(&b);
     amark_allocator_set(NULL);
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY, err);
@@ -114,6 +117,7 @@ NAOS_TEST(queries_on_null_are_safe)
     NAOS_CHECK_NOT_NULL(amark_buffer_data(NULL));
     NAOS_CHECK_STR_EQ("", amark_buffer_data(NULL));
     NAOS_CHECK_UINT_EQ(0, amark_buffer_length(NULL));
+
     amark_buffer_clear(NULL);
 }
 
@@ -131,6 +135,7 @@ NAOS_TEST(null_buffer_is_an_invalid_argument)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_append_cstr(NULL, "a"));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_append_codepoint(NULL, 0x41));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_truncate(NULL, 0));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_detach(NULL, &data, &length));
     NAOS_CHECK_NULL(data);
     NAOS_CHECK_UINT_EQ(0, length);
@@ -144,11 +149,14 @@ NAOS_TEST(append_bytes)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "Hello", 5));
     AMARK_CHECK_BUFFER_EQ(b, "Hello");
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, ", world", 7));
     AMARK_CHECK_BUFFER_EQ(b, "Hello, world");
     NAOS_CHECK_STR_EQ("Hello, world", amark_buffer_data(b));
+
     amark_buffer_destroy(b);
 }
 
@@ -158,13 +166,17 @@ NAOS_TEST(append_keeps_nul_bytes_and_stays_terminated)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "a\0b", 3));
     AMARK_CHECK_BUFFER_EQ(b, "a\0b");
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "\0", 1));
     AMARK_CHECK_BUFFER_EQ(b, "a\0b\0");
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "\xC0\x80\xFF", 3));
     AMARK_CHECK_BUFFER_EQ(b, "a\0b\0\xC0\x80\xFF");
     NAOS_CHECK_UINT_EQ(7, amark_buffer_length(b));
+
     amark_buffer_destroy(b);
 }
 
@@ -177,6 +189,7 @@ NAOS_TEST(append_of_nothing_succeeds_and_allocates_nothing)
     SET_COUNTING();
     CHECK_CREATE(b);
     calls = counting.calls;
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, NULL, 0));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "x", 0));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, 'x', 0));
@@ -184,6 +197,7 @@ NAOS_TEST(append_of_nothing_succeeds_and_allocates_nothing)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(b, 0));
     NAOS_CHECK_UINT_EQ(calls, counting.calls);
     AMARK_CHECK_BUFFER_EQ(b, "");
+
     amark_buffer_destroy(b);
 }
 
@@ -194,9 +208,11 @@ NAOS_TEST(append_null_data_with_size_is_an_invalid_argument)
 
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "keep", 4));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_append(b, NULL, 1));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_append_cstr(b, NULL));
     AMARK_CHECK_BUFFER_EQ(b, "keep");
+
     amark_buffer_destroy(b);
 }
 
@@ -206,10 +222,12 @@ NAOS_TEST(append_byte)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(b, 'x'));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(b, 0x00));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(b, 0xFF));
     AMARK_CHECK_BUFFER_EQ(b, "x\0\xFF");
+
     amark_buffer_destroy(b);
 }
 
@@ -221,12 +239,14 @@ NAOS_TEST(append_many_bytes_one_by_one)
     size_t i;
 
     CREATE(b);
+
     for (i = 0; i < 10000; i++)
     {
         NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(b, (unsigned char)i));
     }
 
     NAOS_CHECK_UINT_EQ(10000, amark_buffer_length(b));
+
     data = (const unsigned char *)amark_buffer_data(b);
     for (i = 0; i < 10000; i++)
     {
@@ -238,6 +258,7 @@ NAOS_TEST(append_many_bytes_one_by_one)
     }
 
     NAOS_CHECK_UINT_EQ(0, data[10000]);
+
     amark_buffer_destroy(b);
 }
 
@@ -247,10 +268,12 @@ NAOS_TEST(append_repeat)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, '-', 3));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, 0x00, 2));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, '>', 1));
     AMARK_CHECK_BUFFER_EQ(b, "---\0\0>");
+
     amark_buffer_destroy(b);
 }
 
@@ -260,9 +283,11 @@ NAOS_TEST(append_cstr)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, "abc"));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, "de\0f"));
     AMARK_CHECK_BUFFER_EQ(b, "abcde");
+
     amark_buffer_destroy(b);
 }
 
@@ -272,6 +297,7 @@ NAOS_TEST(append_codepoint_encodes_utf8)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0x41));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0x00));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0xE9));
@@ -279,6 +305,7 @@ NAOS_TEST(append_codepoint_encodes_utf8)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0x1F600));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0x10FFFF));
     AMARK_CHECK_BUFFER_EQ(b, "A\0\xC3\xA9\xE3\x81\x82\xF0\x9F\x98\x80\xF4\x8F\xBF\xBF");
+
     amark_buffer_destroy(b);
 }
 
@@ -288,11 +315,13 @@ NAOS_TEST(append_codepoint_replaces_invalid_values)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0xD800));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0xDFFF));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0x110000));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, UINT32_MAX));
     AMARK_CHECK_BUFFER_EQ(b, "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD");
+
     amark_buffer_destroy(b);
 }
 
@@ -306,6 +335,7 @@ NAOS_TEST(append_own_content_while_growing)
 
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "ab\0c", 4));
+
     for (i = 0; i < 6; i++)
     {
         NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
@@ -319,6 +349,7 @@ NAOS_TEST(append_own_content_while_growing)
     }
 
     NAOS_CHECK_INT_EQ(0, amark_buffer_data(b)[4 << 6]);
+
     amark_buffer_destroy(b);
 }
 
@@ -328,8 +359,10 @@ NAOS_TEST(append_part_of_own_content)
 
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "0123456789", 10));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, amark_buffer_data(b) + 3, 4));
     AMARK_CHECK_BUFFER_EQ(b, "01234567893456");
+
     amark_buffer_destroy(b);
 }
 
@@ -341,9 +374,11 @@ NAOS_TEST(append_own_content_without_growing)
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(b, 64));
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "xyz", 3));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, amark_buffer_data(b), 3));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, amark_buffer_data(b) + 4));
     AMARK_CHECK_BUFFER_EQ(b, "xyzxyzyz");
+
     amark_buffer_destroy(b);
 }
 
@@ -354,6 +389,7 @@ NAOS_TEST(append_cstr_of_own_content)
 
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, "ha"));
+
     for (i = 0; i < 5; i++)
     {
         NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, amark_buffer_data(b)));
@@ -362,6 +398,7 @@ NAOS_TEST(append_cstr_of_own_content)
     NAOS_CHECK_UINT_EQ(64, amark_buffer_length(b));
     NAOS_CHECK_STR_EQ("hahahahahahahahahahahahahahahahahahahahahahahahahahahahahahahaha",
                       amark_buffer_data(b));
+
     amark_buffer_destroy(b);
 }
 
@@ -375,15 +412,18 @@ NAOS_TEST(reserve_keeps_the_content_and_avoids_later_allocations)
 
     SET_COUNTING();
     CHECK_CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "ab", 2));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(b, 100));
     AMARK_CHECK_BUFFER_EQ(b, "ab");
+
     calls = counting.calls;
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, 'c', 100));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(b, 0));
     NAOS_CHECK_UINT_EQ(calls, counting.calls);
     NAOS_CHECK_UINT_EQ(102, amark_buffer_length(b));
     NAOS_CHECK_INT_EQ(0, amark_buffer_data(b)[102]);
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -397,17 +437,23 @@ NAOS_TEST(truncate_shortens_and_terminates)
 
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "abc\0def", 7));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_truncate(b, 7));
     AMARK_CHECK_BUFFER_EQ(b, "abc\0def");
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_truncate(b, 5));
     AMARK_CHECK_BUFFER_EQ(b, "abc\0d");
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_truncate(b, 2));
     AMARK_CHECK_BUFFER_EQ(b, "ab");
     NAOS_CHECK_STR_EQ("ab", amark_buffer_data(b));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "Z", 1));
     AMARK_CHECK_BUFFER_EQ(b, "abZ");
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_truncate(b, 0));
     AMARK_CHECK_BUFFER_EQ(b, "");
+
     amark_buffer_destroy(b);
 }
 
@@ -416,8 +462,10 @@ NAOS_TEST(truncate_of_an_empty_buffer_to_zero)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_truncate(b, 0));
     AMARK_CHECK_BUFFER_EQ(b, "");
+
     amark_buffer_destroy(b);
 }
 
@@ -427,12 +475,15 @@ NAOS_TEST(truncate_to_a_longer_length_is_rejected)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_truncate(b, 1));
     AMARK_CHECK_BUFFER_EQ(b, "");
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "a\0c", 3));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_truncate(b, 4));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_truncate(b, SIZE_MAX));
     AMARK_CHECK_BUFFER_EQ(b, "a\0c");
+
     amark_buffer_destroy(b);
 }
 
@@ -444,15 +495,19 @@ NAOS_TEST(truncate_and_clear_keep_the_capacity)
 
     SET_COUNTING();
     CHECK_CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, 'a', 50));
     calls = counting.calls;
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_truncate(b, 10));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, 'b', 40));
     amark_buffer_clear(b);
     AMARK_CHECK_BUFFER_EQ(b, "");
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(b, 'c', 50));
     NAOS_CHECK_UINT_EQ(calls, counting.calls);
     NAOS_CHECK_UINT_EQ(50, amark_buffer_length(b));
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -463,14 +518,18 @@ NAOS_TEST(clear_empties_the_content)
     amark_buffer_t *b = NULL;
 
     CREATE(b);
+
     amark_buffer_clear(b);
     AMARK_CHECK_BUFFER_EQ(b, "");
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "x\0y", 3));
     amark_buffer_clear(b);
     AMARK_CHECK_BUFFER_EQ(b, "");
     NAOS_CHECK_STR_EQ("", amark_buffer_data(b));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "z", 1));
     AMARK_CHECK_BUFFER_EQ(b, "z");
+
     amark_buffer_destroy(b);
 }
 
@@ -487,6 +546,7 @@ NAOS_TEST(detach_returns_the_content_freed_with_amark_free)
     SET_COUNTING();
     CHECK_CREATE(b);
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "ab\0cd", 5));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_detach(b, &data, &length));
     NAOS_CHECK_NOT_NULL(data);
     NAOS_CHECK_UINT_EQ(5, length);
@@ -521,11 +581,13 @@ NAOS_TEST(detach_of_an_empty_buffer_allocates_an_empty_string)
     size_t length = 99;
 
     CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_detach(b, &data, &length));
     NAOS_REQUIRE_NOT_NULL(data);
     NAOS_CHECK_UINT_EQ(0, length);
     NAOS_CHECK_STR_EQ("", data);
     AMARK_CHECK_BUFFER_EQ(b, "");
+
     amark_free(data);
     amark_buffer_destroy(b);
 }
@@ -540,10 +602,12 @@ NAOS_TEST(detach_after_clear_keeps_the_owned_block)
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "abc", 3));
     amark_buffer_clear(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_detach(b, &data, &length));
     NAOS_REQUIRE_NOT_NULL(data);
     NAOS_CHECK_UINT_EQ(0, length);
     NAOS_CHECK_STR_EQ("", data);
+
     amark_free(data);
     AMARK_CHECK_BUFFER_EQ(b, "");
     amark_buffer_destroy(b);
@@ -558,10 +622,13 @@ NAOS_TEST(detach_rejects_null_output_arguments)
 
     CREATE(b);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "keep", 4));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_detach(b, NULL, &length));
     NAOS_CHECK_UINT_EQ(0, length);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_buffer_detach(b, &data, NULL));
     NAOS_CHECK_NULL(data);
+
     AMARK_CHECK_BUFFER_EQ(b, "keep");
     amark_buffer_destroy(b);
 }
@@ -577,9 +644,11 @@ NAOS_TEST(detach_out_of_memory_for_an_empty_buffer)
     SET_COUNTING();
     CHECK_CREATE(b);
     counting.fail_at = counting.calls + 1;
+
     err = amark_buffer_detach(b, &data, &length);
     amark_buffer_destroy(b);
     amark_allocator_set(NULL);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY, err);
     NAOS_CHECK_NULL(data);
     NAOS_CHECK_UINT_EQ(0, length);
@@ -595,14 +664,17 @@ NAOS_TEST(every_operation_uses_the_global_allocator)
 
     SET_COUNTING();
     CHECK_CREATE(b);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, "grow"));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(b, 1000));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(b, 0x3042));
     NAOS_CHECK_UINT_GE(counting.calls, 3);
     NAOS_CHECK_UINT_EQ(2, counting.live_blocks);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_detach(b, &data, &length));
     amark_free(data);
     NAOS_CHECK_UINT_EQ(1, counting.live_blocks);
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -688,6 +760,7 @@ NAOS_TEST(appending_byte_by_byte_allocates_logarithmically)
     SET_COUNTING();
     CHECK_CREATE(b);
     amark_test_allocator_reset_counters(&counting);
+
     for (i = 1; i <= GROWTH_TOTAL; i++)
     {
         if (amark_buffer_append_byte(b, (unsigned char)i) != AMARK_ERROR_NONE)
@@ -707,6 +780,7 @@ NAOS_TEST(appending_byte_by_byte_allocates_logarithmically)
               (unsigned long)calls);
     NAOS_CHECK_UINT_EQ(0, worst_at);
     NAOS_CHECK_UINT_LE(counting.calls, growth_bound(GROWTH_TOTAL));
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -724,6 +798,7 @@ NAOS_TEST(appending_mixed_small_pieces_allocates_logarithmically)
     SET_COUNTING();
     CHECK_CREATE(b);
     amark_test_allocator_reset_counters(&counting);
+
     while ((total < GROWTH_TOTAL) && (err == AMARK_ERROR_NONE))
     {
         switch (step % 5)
@@ -751,6 +826,7 @@ NAOS_TEST(appending_mixed_small_pieces_allocates_logarithmically)
         }
 
         step++;
+
         if ((worst_at == 0) && (counting.calls > growth_bound(total)))
         {
             worst_at = total;
@@ -763,6 +839,7 @@ NAOS_TEST(appending_mixed_small_pieces_allocates_logarithmically)
     NAOS_NOTE("first length over the bound: %lu (%lu calls)", (unsigned long)worst_at,
               (unsigned long)calls);
     NAOS_CHECK_UINT_EQ(0, worst_at);
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -777,6 +854,7 @@ NAOS_TEST(reserving_a_little_more_each_time_allocates_logarithmically)
     SET_COUNTING();
     CHECK_CREATE(b);
     amark_test_allocator_reset_counters(&counting);
+
     for (i = 1; i <= GROWTH_TOTAL; i++)
     {
         NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(b, i));
@@ -805,6 +883,7 @@ NAOS_TEST(reserving_a_little_more_each_time_allocates_logarithmically)
     /* The capacity of the first loop holds GROWTH_TOTAL bytes: one doubling is
      * enough for twice as many. */
     NAOS_CHECK_UINT_LE(counting.calls, 2);
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -948,6 +1027,7 @@ static void sweep_every_operation(const char *prefix, size_t prefix_length)
         c.prefix_length = prefix_length;
         c.op_failures = 0;
         c.op_successes = 0;
+
         NAOS_TRACE_PUSH("operation %s", c.name);
         AMARK_CHECK_OOM_SWEEP(grow_scenario, &c);
         NAOS_CHECK_UINT_EQ(1, c.op_failures);
@@ -1002,6 +1082,7 @@ static amark_error_t sequence_scenario(void *context)
             }
 
             memcpy(before, amark_buffer_data(b), length_before + 1);
+
             err = run_grow_op(b, op);
             if (err == AMARK_ERROR_OUT_OF_MEMORY)
             {
@@ -1080,6 +1161,7 @@ static amark_error_t detach_scenario(void *context)
     }
 
     amark_free(data);
+
     if (err == AMARK_ERROR_NONE)
     {
         /* A buffer with content hands its block over: no allocation to fail. */
@@ -1130,12 +1212,14 @@ NAOS_TEST(overflowing_capacity_of_an_empty_buffer_calls_no_allocator)
     CHECK_CREATE(b);
     data_before = amark_buffer_data(b);
     calls = counting.calls;
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OVERFLOW, amark_buffer_reserve(b, SIZE_MAX));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OVERFLOW, amark_buffer_append_repeat(b, 'x', SIZE_MAX));
     /* The size is checked before any byte of source is read. */
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OVERFLOW, amark_buffer_append(b, source, SIZE_MAX));
     NAOS_CHECK_UINT_EQ(calls, counting.calls);
     CHECK_UNCHANGED(b, data_before, "");
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -1153,6 +1237,7 @@ NAOS_TEST(overflowing_capacity_of_a_buffer_with_content_calls_no_allocator)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "a\0c", 3));
     data_before = amark_buffer_data(b);
     calls = counting.calls;
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OVERFLOW, amark_buffer_reserve(b, SIZE_MAX));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OVERFLOW, amark_buffer_reserve(b, SIZE_MAX - 2));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OVERFLOW, amark_buffer_reserve(b, SIZE_MAX - 3));
@@ -1164,6 +1249,7 @@ NAOS_TEST(overflowing_capacity_of_a_buffer_with_content_calls_no_allocator)
     /* The buffer is still usable. */
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(b, 'd'));
     AMARK_CHECK_BUFFER_EQ(b, "a\0cd");
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -1183,6 +1269,7 @@ NAOS_TEST(huge_reserve_that_fits_reports_the_allocation_failure)
     /* No capacity yet: the first allocation fails. */
     data_before = amark_buffer_data(b);
     counting.fail_at = counting.calls + 1;
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY, amark_buffer_reserve(b, SIZE_MAX - 1));
     NAOS_CHECK_UINT_EQ(1, counting.failures);
     NAOS_CHECK_UINT_EQ(counting.fail_at, counting.calls);
@@ -1193,10 +1280,12 @@ NAOS_TEST(huge_reserve_that_fits_reports_the_allocation_failure)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(b, "a\0c", 3));
     data_before = amark_buffer_data(b);
     counting.fail_at = counting.calls + 1;
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY, amark_buffer_reserve(b, SIZE_MAX - 4));
     counting.fail_at = counting.calls + 1;
     NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY,
                       amark_buffer_append_repeat(b, 'x', SIZE_MAX - 4));
+
     NAOS_CHECK_UINT_EQ(3, counting.failures);
     CHECK_UNCHANGED(b, data_before, "a\0c");
 
@@ -1204,9 +1293,11 @@ NAOS_TEST(huge_reserve_that_fits_reports_the_allocation_failure)
      * which it would not if a failed call had kept a larger capacity. */
     counting.fail_at = 0;
     calls = counting.calls;
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(b, 'd'));
     NAOS_CHECK_UINT_EQ(calls + 1, counting.calls);
     AMARK_CHECK_BUFFER_EQ(b, "a\0cd");
+
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
 }
@@ -1239,6 +1330,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
     SET_COUNTING();
     CHECK_CREATE(a);
     CHECK_CREATE(b);
+
     for (i = 0; i < 3000; i++)
     {
         NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(a, (unsigned char)i));
@@ -1249,6 +1341,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
     NAOS_CHECK_FALSE(contents_overlap(a, b));
     NAOS_CHECK_UINT_EQ(3000, amark_buffer_length(a));
     NAOS_CHECK_UINT_EQ(6000, amark_buffer_length(b));
+
     data = (const unsigned char *)amark_buffer_data(a);
     for (i = 0; (i < 3000) && (i < amark_buffer_length(a)); i++)
     {
@@ -1277,15 +1370,18 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
     counting.fail_at = 0;
     NAOS_CHECK_UINT_EQ(3000, amark_buffer_length(a));
     NAOS_CHECK_UINT_EQ(6000, amark_buffer_length(b));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, "end"));
     NAOS_CHECK_MEM_EQ(amark_buffer_data(b) + 6000, 4, "end", 4);
 
     /* Clearing, detaching and destroying a do not touch b. */
     amark_buffer_clear(a);
     NAOS_CHECK_UINT_EQ(6003, amark_buffer_length(b));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(a, "own", 3));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_detach(a, &detached, &detached_length));
     amark_buffer_destroy(a);
+
     NAOS_CHECK_UINT_EQ(3, counting.live_blocks); /* b, its content, the detached one */
     NAOS_CHECK_UINT_EQ(6003, amark_buffer_length(b));
     NAOS_CHECK_UINT_EQ(0xFF, (unsigned char)amark_buffer_data(b)[0]);
