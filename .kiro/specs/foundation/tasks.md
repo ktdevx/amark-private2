@@ -65,7 +65,7 @@
   - 記録するアロケータを設定したテストで、確保・0 で初期化する確保・再確保・解放が設定したアロケータを通ること、0 で初期化する確保の領域の全バイトが 0 であること、NULL の設定で既定に戻ること、不完全なアロケータが不正な引数になり設定が変わらないこと、桁あふれでコールバックが呼ばれないこと、0 の確保がコールバックを呼ばずに NULL を返すこと、サイズ 0 への再確保が解放だけを呼んで NULL を返すことを確かめられる
   - _Requirements: 10.4, 11.1, 11.2, 11.3, 11.5, 11.6, 11.7, 11.8, 11.9_
 
-- [ ] 2.3 テスト用アロケータと確保失敗の総当たりの補助を作る
+- [x] 2.3 テスト用アロケータと確保失敗の総当たりの補助を作る
   - 指定した回数目の確保（確保・0 で初期化する確保・再確保）を失敗させ、呼び出しの回数、注入した失敗、生きているブロックとバイト数、最大のバイト数を数えるテスト用アロケータを作る。コールバックは利用者のデータを受け取らないため、現在のテスト用アロケータへのポインタを補助ライブラリの静的な変数に持つ
   - 各ブロックに目印とサイズを記録し、見知らぬポインタの解放や二重解放をテストの失敗として報告する
   - 対象の処理を、確保の各位置で順に失敗させながら繰り返し、メモリ不足が返ることとリークがないことを確かめる補助と、呼び出し側の行で報告するマクロを作る
@@ -229,3 +229,4 @@
 - 1.4: 最上位の CMakeLists.txt の `include(AmarkTesting OPTIONAL)` と `if(EXISTS tests/CMakeLists.txt)` の囲みは暫定。1.5 で外す。`include(AmarkFuzz OPTIONAL)` と `if(EXISTS fuzz/CMakeLists.txt)` は 3.5 で外す。この目的に限り、1.5 と 3.5 は最上位の CMakeLists.txt を編集してよい
 - 1.4: ターゲットは `amark_objects`（OBJECT、`amark_target_defaults` を適用）、`amark`、`Amark::amark`、`amark_internal`（テストかファジングのときだけ、include/ と src/ を PUBLIC に持つ）。テストを作るときの実行時の出力先は `${PROJECT_BINARY_DIR}/bin`
 - 1.5: テストは `amark_add_test(<target> SOURCES … [INTERNAL] [LIBRARIES …] [LABELS …])` で登録し、各テストは CTest に `<target>.<suite>.<test>` として載る。`amark_test_support` は今は INTERFACE ライブラリ（tests/support と Naos::naos）。2.3 で test_allocator.c を加えるときに STATIC に変える
+- 2.3: 確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP(scenario, ctx)`（tests/support/test_allocator.h）。結果の構造体に設計にない `truncated` を加えた。総当たりの中で `NAOS_FAIL` が起きると既定のアロケータに戻らないので、テストの teardown で `amark_allocator_set(NULL)` を呼ぶ

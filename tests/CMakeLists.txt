@@ -13,13 +13,22 @@
 if(AMARK_BUILD_TESTS)
   # amark_test_support: the support code every test links (see amark_add_test).
   # It uses only the types of the public headers and calls no Amark function, so it
-  # goes with either amark or amark_internal. It links Naos, so fuzz targets must
-  # not link it.
-  #   support/test_check.h  comparison macros (AMARK_CHECK_BYTES_EQ)
-  add_library(amark_test_support INTERFACE)
-  target_include_directories(amark_test_support INTERFACE
-    "${CMAKE_CURRENT_SOURCE_DIR}/support")
-  target_link_libraries(amark_test_support INTERFACE Naos::naos)
+  # goes with either amark or amark_internal: its include directories are those of
+  # the public headers, not a link to either library. It links Naos, so fuzz
+  # targets must not link it.
+  #   support/test_check.h      comparison macros (AMARK_CHECK_BYTES_EQ)
+  #   support/test_allocator.h  the test allocator and AMARK_CHECK_OOM_SWEEP
+  add_library(amark_test_support STATIC support/test_allocator.c)
+  amark_target_defaults(amark_test_support)
+  target_include_directories(amark_test_support PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    "${PROJECT_SOURCE_DIR}/include")
+  target_link_libraries(amark_test_support PUBLIC Naos::naos)
+
+  # The test allocator and the sweep, built twice: with amark and with
+  # amark_internal, so that a duplicate symbol in either combination fails to link.
+  amark_add_test(test_allocator_test SOURCES support/test_allocator_test.c)
+  amark_add_test(test_allocator_internal_test SOURCES support/test_allocator_test.c INTERNAL)
 endif()
 
 add_subdirectory(base)
