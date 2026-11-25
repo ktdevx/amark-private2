@@ -8,7 +8,7 @@
   - Windows でチェックアウトしても、テストデータのディレクトリに置いた CR や NUL を含むファイルがバイト単位で変わらないことを確認できる
   - _Requirements: 8.1, 8.2, 8.5_
 
-- [ ] 1.2 版の唯一の定義と、それを読む CMake の仕組みを作る
+- [x] 1.2 版の唯一の定義と、それを読む CMake の仕組みを作る
   - 公開ヘッダに版のマクロ（メジャー、マイナー、パッチ、版の文字列、版の数値とその計算式）を定義する。初期の版は 0.1.0
   - CMake からヘッダを読み、版、動的ライブラリの互換性番号（1.0 未満は「0.マイナー」、以降はメジャー）、パッケージの互換性の方式を決める仕組みを作る
   - 版の 3 つの数の行がない、または書式に合わないときは、構成を理由つきで失敗させる
@@ -219,3 +219,8 @@
   - 各公開関数の NULL の引数と、共通基盤の全テストの結果を見直し、失敗の規約（状態を変えない、出力引数を NULL にする、解放関数の NULL）に例外がないことを確かめる
   - 利用できる環境のすべての構成で全テストが成功し、依存の一覧に C ランタイム以外が現れない
   - _Requirements: 1.1, 1.7, 10.4, 10.5, 10.6, 10.8_
+
+## Implementation Notes
+- 1.2: 版の読み取りは `cmake/AmarkVersion.cmake` の `amark_read_version(<header>)`。出力は `AMARK_VERSION{,_MAJOR,_MINOR,_PATCH}`、`AMARK_SOVERSION`、`AMARK_PACKAGE_COMPATIBILITY`（SameMinorVersion/SameMajorVersion）。後続（1.4、3.3）はこの名前を使う
+- 1.2: `version.h` の `amark_version_number`/`amark_version_string` の宣言、`export.h` の include、宣言の囲みは 1.4 で追加する
+- 1.2: 設計どおりの `(long)` キャストのため、`AMARK_VERSION_NUMBER` は `#if` では使えない（C の定数式としては使える）。設計の改訂の要否は人の判断に委ねる
