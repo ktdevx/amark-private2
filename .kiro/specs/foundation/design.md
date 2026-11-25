@@ -37,7 +37,8 @@
 ### Out of Boundary
 - `src/tree/`、`src/parse/`、`src/render/`、`src/syntax/` の中身と、それぞれの公開ヘッダ
 - spec.txt、準拠テスト、往復のプロパティテスト、検証用拡張（`tests/spec/`、`tests/extensions/` など）
-- 特定の構文だけが使う文字データ（case fold、HTML の文字参照）
+- 特定の構文だけが使う文字データ（case fold、HTML の文字参照）と、その生成手順への追加（`block-parser` が Downstream Extension Points の拡張点に追加する）
+- spec.txt の `export-ignore` と CI の `AMARK_REQUIRE_SPEC_TESTS=ON`（`inline-parser` が追加する）
 - 入れ子の深さの上限の値など、パーサ固有の制限（状態コード `AMARK_ERROR_LIMIT_EXCEEDED` だけを用意する）
 
 ### Allowed Dependencies
@@ -54,6 +55,20 @@
 - 文字の分類の定義の変更、Unicode の版の更新、準拠対象の CommonMark の版の変更 → `inline-parser`、`block-parser`
 - 公開ヘッダの配置、`amark.h` の構成、`AMARK_API` の規則の変更 → すべての後続の spec
 - インストールの配置、パッケージの選択の規則の変更 → 利用者とリリースのワークフロー
+- 下の Downstream Extension Points の拡張点（生成スクリプトの表の一覧と出力の形、`.gitattributes` の規則、`ci.yml` の構成の段、状態コードの末尾への追加）の形の変更 → その拡張点に追加する spec（`block-parser`、`inline-parser`、`markdown-renderer`）
+
+### Downstream Extension Points
+この spec が所有するファイルのうち、後続の spec が追加を行うことが予定されている箇所（2026-11-25 に確認）。ファイル全体の所有と、追加を受け入れる形（拡張点）はこの spec が持ち、追加した部分の実装・テスト・保守は追加する spec が持つ。これらの追加はこの spec のタスクに含めない。追加する spec は拡張点の形を変えず、形の変更が必要ならこの spec の改訂として依頼する。
+
+| 追加する spec | 対象のファイル | 追加の内容 | 受け入れる拡張点 |
+|---|---|---|---|
+| `block-parser` | `tools/gen_unicode_tables.py`、`include/amark/unicode.h`、`src/runtime/unicode.c` | `CaseFolding.txt`（状態 C と F）の読み取り、`src/runtime/case_fold_tables.inc`、`amark_unicode_case_fold()`、`--check` の対象への追加 | UnicodeTableGen の拡張（別の UCD のファイルを読む生成の関数と別の `.inc`）、`unicode.h` の末尾への関数の追加 |
+| `block-parser` | `tools/gen_entity_table.py`（新規）、`src/runtime/entity.c`、`src/runtime/entity_tables.inc`、`include/amark/entity.h` | WHATWG `entities.json` からの名前付き文字参照の表と生成手順 | UnicodeTableGen と同じ方式（保守者が手で実行、生成物をリポジトリに入れる、`--check`、ビルドでは実行しない）。`src/runtime/` のレイヤーの規則に従う |
+| `inline-parser` | `.gitattributes` | `tests/spec/data/` の spec.txt と NOTICE.txt の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
+| `inline-parser` | `.github/workflows/ci.yml` | 全ジョブの構成に `-DAMARK_REQUIRE_SPEC_TESTS=ON` を加える | CIWorkflow の構成の段（構成のオプションを追加できる） |
+| `markdown-renderer` | `include/amark/status.h`、`src/runtime/status.c` | `AMARK_ERROR_UNREPRESENTABLE` | 状態コードの末尾への追加（10.7）。2026-11-25 にこの spec に取り込み済み（値 6、要件 10.9、タスク 2.1） |
+
+- 上の追加で `src/runtime/` に入るファイルは、This Spec Owns の「`src/runtime/` のすべて」の例外として、追加する spec が所有する。ライセンスヘッダ、`amark_` 接頭辞、アロケータの経由、レイヤーの規則などの規約はこの spec のものに従う。
 
 ## Architecture
 
@@ -332,6 +347,7 @@ graph TB
 | 9.4, 9.5 | コンパイル時と実行時の版 | Version | `AMARK_VERSION_*`、`amark_version_number()` | — |
 | 9.6 | 版の唯一の定義 | VersionMod、Packaging | `amark_read_version()` | — |
 | 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | 状態コードと失敗の規約 | Status、Error conventions | `amark_status`、`amark_status_string()` | — |
+| 10.9 | 表現できないことの状態コード | Status | `AMARK_ERROR_UNREPRESENTABLE`、`amark_status_string()` | — |
 | 10.8 | グローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
 | 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8 | アロケータ | Allocator | `amark_allocator`、`amark_alloc()` など | — |
 | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8 | バッファ | Buffer | `amark_buffer_*` | — |
@@ -361,7 +377,7 @@ graph TB
 | RepoDocs | Repo | LICENSE、README、gitattributes | 6.5, 8.1, 8.2, 8.5 | — | — |
 | PublicHeaders / Export | Runtime | 配置、まとめのヘッダ、エクスポート | 2.4, 2.5, 9.1–9.3 | — | Service |
 | Version | Runtime | 版のマクロと関数 | 9.4, 9.5 | Export (P0) | Service |
-| Status | Runtime | 状態コード | 10.1–10.7 | Export (P0) | Service |
+| Status | Runtime | 状態コード | 10.1–10.7, 10.9 | Export (P0) | Service |
 | Allocator | Runtime | 差し替え可能なアロケータ | 11.1–11.8 | Status (P0) | Service |
 | Buffer | Runtime | 伸長できるバイトバッファ | 12.1–12.8 | Allocator (P0), Utf8 (P1) | Service, State |
 | Utf8 | Runtime | UTF-8 の処理 | 13.1–13.7 | Export (P0) | Service |
@@ -618,6 +634,7 @@ amark_add_fuzzer(<name>
 
 - 失敗の報告（5.4）：どのジョブが失敗してもワークフローは失敗になる（`fail-fast: false` で全ジョブを最後まで走らせる）。失敗時は `Testing/Temporary/LastTest.log` と、ファジングのクラッシュ入力を成果物として保存する。
 - アクションはメジャー版のタグで固定する（`actions/checkout`、`actions/upload-artifact`、`msys2/setup-msys2`）。
+- 拡張点：各ジョブの構成の段は、後続の spec が構成のオプションを追加できる形にする（例：`inline-parser` が全ジョブに `-DAMARK_REQUIRE_SPEC_TESTS=ON` を加える。Downstream Extension Points）。この spec はそのオプションを定義しない。
 
 #### ReleaseWorkflow
 
@@ -637,7 +654,7 @@ amark_add_fuzzer(<name>
 
 - `LICENSE`：MIT の全文、`Copyright (c) The Amark Authors`。
 - `README.md`：概要、対応環境（3 OS と 5 つのコンパイラ環境）、ビルド（構成・ビルド・テスト、主なオプション）、取り込み（4 つの方法の例と、種類の選択の規則）、ライセンスの節を持つ骨子。
-- `.gitattributes`：`* text=auto eol=lf`。`tests/**/data/**` と `fuzz/corpus/**` は `-text`（バイナリ扱い）。後続の spec がテストデータを置くときは、`data/` の下に置けば同じ扱いになる。配布しないテストデータには `export-ignore` を付ける（spec.txt は `inline-parser` が追加する）。
+- `.gitattributes`：`* text=auto eol=lf`。`tests/**/data/**` と `fuzz/corpus/**` は `-text`（バイナリ扱い）。後続の spec がテストデータを置くときは、`data/` の下に置けば同じ扱いになる。配布しないテストデータには `export-ignore` を付ける（spec.txt は `inline-parser` が追加する。Downstream Extension Points）。
 
 ### Test
 
@@ -760,13 +777,15 @@ typedef enum amark_status {
     AMARK_ERROR_INVALID_ARGUMENT = 2,  /* NULL の必須引数、範囲外の値、不完全なアロケータ */
     AMARK_ERROR_OVERFLOW = 3,          /* サイズの計算が size_t を超える */
     AMARK_ERROR_LIMIT_EXCEEDED = 4,    /* 文書化された上限（入れ子の深さなど）を超えた */
-    AMARK_ERROR_INVALID_STATE = 5      /* オブジェクトの状態がその操作を許さない */
+    AMARK_ERROR_INVALID_STATE = 5,     /* オブジェクトの状態がその操作を許さない */
+    AMARK_ERROR_UNREPRESENTABLE = 6    /* 対象を要求された形式で意味を変えずに表せない（例：Markdown の出力） */
 } amark_status;
 
 AMARK_API const char *amark_status_string(amark_status status);
-/* 例："out of memory"。未知の値には "unknown status"。静的な文字列で、NULL を返さない */
+/* 例："out of memory"、"unrepresentable"。未知の値には "unknown status"。静的な文字列で、NULL を返さない */
 ```
 - 値は固定し、変更しない。新しいコードは末尾に追加する（追加は Revalidation Trigger）。利用者は未知の非 0 の値を一般的な失敗として扱う。
+- `AMARK_ERROR_UNREPRESENTABLE`（10.9）は 2026-11-25 に `markdown-renderer` の依頼で追加した。0–5 の次の空き値 6 を使う。説明の文字列は `"unrepresentable"`。共通ランタイム自身はこのコードを返さない。どの操作がいつ返すか（`amark_markdown_render` など）と、理由の報告は、返す spec が定める。
 
 #### Allocator
 
@@ -905,7 +924,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - Trigger：保守者が手で実行する（`python3 tools/gen_unicode_tables.py --ucd-dir <dir> [--check]`。`--fetch` で unicode.org から固定の版の `UnicodeData.txt` を取得する）。
 - Input：`UnicodeData.txt`（範囲の項目 `<..., First>` / `<..., Last>` を展開する）。
 - Output：`src/runtime/unicode_tables.inc`（ライセンスヘッダ、Unicode の版、生成の手順を書いたコメント、`static const amark__unicode_range amark__unicode_zs[]`、`amark__unicode_punct[]`）。`--check` は生成結果と既存のファイルを比べ、違えば非 0 で終わる。
-- 拡張：表の定義は、スクリプト内の「名前とカテゴリの集合」の一覧で決まる。後続の spec は一覧に項目を足すか、別の UCD のファイル（`CaseFolding.txt` など）を読む生成の関数を足して、同じ出力ファイルか別の `.inc` に書き出す。
+- 拡張：表の定義は、スクリプト内の「名前とカテゴリの集合」の一覧で決まる。後続の spec は一覧に項目を足すか、別の UCD のファイル（`CaseFolding.txt` など）を読む生成の関数を足して、同じ出力ファイルか別の `.inc` に書き出す。`block-parser` が `CaseFolding.txt` と `case_fold_tables.inc` を、同じ方式の別のスクリプトで文字参照の表を追加する予定（Downstream Extension Points）。追加した生成の関数も `--check` と Unicode の版の照合の対象にする。
 - Unicode の版はスクリプトの定数 1 か所と `unicode.h` のマクロで持ち、スクリプトは両者が一致しなければ失敗する。
 
 ## Data Models
@@ -922,6 +941,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 ### Error Categories and Responses
 - **利用者の誤り**：NULL の必須引数、範囲外の切り詰め、不完全なアロケータ → `AMARK_ERROR_INVALID_ARGUMENT`。
 - **資源の不足**：確保の失敗 → `AMARK_ERROR_OUT_OF_MEMORY`、サイズの桁あふれ → `AMARK_ERROR_OVERFLOW`。
+- **表現できない対象**：→ `AMARK_ERROR_UNREPRESENTABLE`。共通ランタイムは定義と説明だけを持ち、返すのは後続の spec（`markdown-renderer`）。
 - **入力の不正**：不正な UTF-8 はエラーではなく U+FFFD として扱い、処理を続ける。
 
 ### Monitoring
@@ -934,7 +954,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、`SIZE_MAX` 付近の予約が `AMARK_ERROR_OVERFLOW` で内容が変わらないこと（12.5）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
 - **unicode**：各 Zs の文字と 4 つの制御文字（14.1）、P と S の代表（`$`、`+`、`^`、`€`、`¡`、`「`、絵文字の記号）と非該当（文字、数字、結合文字）（14.2）、ASCII 句読点の 32 文字すべてと隣接する値（14.3）、サロゲートと U+110000 以上（14.4）、`AMARK_UNICODE_VERSION_*` が 17.0.0 であること（14.5）。
-- **version / status**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため値を直接検査する）。
+- **version / status**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため 0–6 の値を直接検査する）、`AMARK_ERROR_UNREPRESENTABLE` が 6 で他のコードと異なり、説明が `"unrepresentable"` であること（10.9）。
 
 ### Integration Tests（CTest）
 - `package.*`：4 つの取り込み方法と、要求した種類がない場合（3.2–3.4, 3.7, 1.5, 4.11）。

@@ -114,6 +114,13 @@
 - 可視性の属性がコンパイラ固有 — `export.h` だけに閉じ込め、属性のないコンパイラでは空に展開する。
 - MSVC に C99 のモードがない — MSVC では C11 のモード（`/std:c11`）でコンパイルし、C99 の範囲の厳密さは GCC と Clang の `-std=c99 -Wpedantic` で担保する。
 
+## Revision Notes
+
+### 2026-11-25：後続の spec からの追加の依頼の反映
+- **Context**：後続の spec の設計で、この spec が所有するファイルへの追加が依頼・予定された。承認済みの要件・設計・タスクに追加する形で反映し、既存の受け入れ基準の意味と既存の状態コードの値は変えない。
+- **`AMARK_ERROR_UNREPRESENTABLE` の追加（`markdown-renderer` の依頼）**：`markdown-renderer` は、編集した木を意味を変えずに Markdown で表せないときに、黙って違う出力を返さず失敗として報告する。既存の 5 つのエラーのどれにも当てはまらない（引数の誤りでも状態の誤りでもなく、木の内容と出力の形式の組み合わせの問題）ため、新しいコードを追加した。この spec の規則（10.7：値を変えず、新しいコードは末尾に追加）に従い、現在の値 `AMARK_OK = 0` から `AMARK_ERROR_INVALID_STATE = 5` までの次の空き値である 6 を使った。依頼された値（6）と一致する。説明の文字列は既存の形式（小文字の英語の短い句）に合わせて `"unrepresentable"`。要件 10.9、design の Status、タスク 2.1 に反映した。状態コードの追加は既定の Revalidation Trigger（すべての後続の spec）だが、追加だけなので既存の利用者の振る舞いは変わらない（未知の非 0 の値は一般的な失敗として扱う規約）。検討した代替：`AMARK_ERROR_INVALID_ARGUMENT` を流用する案は、利用者が「引数を直す」のか「木を直す」のかを区別できないので採らなかった。
+- **後続の spec の拡張点の明示（`block-parser`、`inline-parser`）**：`block-parser` は `tools/gen_unicode_tables.py` への `CaseFolding.txt` の読み取りと `amark_unicode_case_fold`、文字参照の表と生成手順（`tools/gen_entity_table.py`、`entity_tables.inc`）を、`inline-parser` は `.gitattributes` への spec.txt の `export-ignore` と CI の `AMARK_REQUIRE_SPEC_TESTS=ON` を、この spec のファイルに追加する。これらは当初からこの spec の Non-Goals と Out of Boundary で「必要とする spec が、この spec の仕組みの上に追加する」としていたが、どのファイルのどこに誰が追加するかが書かれていなかった。design に Downstream Extension Points の表を足し、ファイル全体と拡張点の形はこの spec、追加した部分は追加する spec が所有することを明記し、拡張点の形の変更を Revalidation Trigger に加えた。これらの追加はこの spec のタスクにしない（追加する spec のタスクで実装する）。要件には Boundary Context の Adjacent expectations に予定として記した。
+
 ## References
 - [Naos v0.4.0](https://github.com/vabelorg/naos/tree/v0.4.0) — テストフレームワーク、CMake 関数、DLL の扱い
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — 文字の分類の定義

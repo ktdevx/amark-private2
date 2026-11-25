@@ -28,6 +28,10 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 - **Adjacent expectations**：
   - 後続の spec は、この spec が定めるエラー規約とメモリ管理の規約に従い、テストとファジングターゲットをこの spec の仕組みで追加する。
   - 文字の分類は、準拠対象とする CommonMark spec の版（0.31.2）の定義に従う。準拠対象の版を変えるときは、この spec の分類を見直す。
+  - 後続の spec は、この spec が持つファイルに次の追加を行うことが予定されている（2026-11-25 に確認）。追加の作業と追加した部分の所有は追加する spec にあり、この spec は追加を受け入れる拡張点（生成の手順、属性のファイル、CI の構成、状態コードの末尾）を保つ。
+    - `block-parser`：Unicode の生成手順への `CaseFolding.txt` の読み取りと case fold の関数、HTML の文字参照の表とその生成手順
+    - `inline-parser`：配布物から spec.txt を除く属性（`export-ignore`）と、CI の構成で準拠テストのデータを必須にする指定
+    - `markdown-renderer`：「表現できない」ことを表す状態コード（この spec の要件 10.9 として取り込み済み）
 
 ## Requirements
 
@@ -148,6 +152,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 6. When 解放の関数に NULL が渡される, the Amark Runtime shall 何もせずに戻る
 7. The Amark Runtime shall 既存の状態コードの値を将来の版で変えず、新しいコードは追加だけで増やす
 8. The Amark Runtime shall グローバルな可変状態を持たず、別々のオブジェクトを別々のスレッドから同時に使えるようにする
+9. The Amark Runtime shall 対象（構文木など）を要求された出力の形式で意味を変えずに表せないことを表す状態コードを、2 の状態コードと区別できるコードとして、既存のコードの値を変えずに末尾に追加して定義する
 
 ### Requirement 11: 差し替え可能なアロケータ
 **Objective:** As a Amark を組み込むアプリケーションの開発者, I want Amark が使うメモリをすべて自分のアロケータで管理できること, so that メモリの上限や配置をアプリケーション側で制御できる
