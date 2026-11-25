@@ -34,3 +34,9 @@ endif()
 
 add_subdirectory(base)
 add_subdirectory(testgen)
+
+# The package consumption tests (label "package"). They configure and build nested
+# projects, so AMARK_PACKAGE_TESTS can turn them off on their own.
+if(AMARK_BUILD_TESTS AND AMARK_PACKAGE_TESTS)
+  add_subdirectory(package)
+endif()
