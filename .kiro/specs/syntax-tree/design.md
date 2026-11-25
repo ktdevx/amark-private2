@@ -387,8 +387,9 @@ struct amark_node_type_desc {         /* typedef は node.h が前方宣言で�
 
 /* スロットの基底：種類ごとの構造体は、先頭のメンバー base にこの型を置く */
 typedef struct amark_slot {
-    size_t struct_size;               /* 種類ごとの構造体全体の大きさ */
-    uint32_t kind;
+    size_t struct_size;               /* この型を埋め込む、種類ごとの構造体全体の大きさ（sizeof(amark_slot_t) ではない。
+                                         例：sizeof(amark_html_node_slot_t)）。使う側は、この大きさに収まるフィールドだけを読む */
+    uint32_t kind;                    /* スロットの種類の番号（0 は不正） */
 } amark_slot_t;
 
 #define AMARK_SLOT_KIND_AMARK_FIRST   1u   /* 1–255：Amark の spec が使う */
