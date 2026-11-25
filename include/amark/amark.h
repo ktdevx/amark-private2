@@ -14,7 +14,10 @@
  *   4. Parser (block-parser, inline-parser): entity.h, scan.h, parser.h,
  *                                 block.h, inline.h, commonmark.h
  *   5. Markdown output (markdown-renderer): markdown.h
- * A header is added at its own position in this order, not appended at the end.
+ * Groups 2-5 are added by those later specs, each header at its own position in
+ * this order (not appended at the end); groups that do not exist yet are skipped.
+ * The test lint.public_headers checks that every public header is included here,
+ * in this order.
  * Every public header also compiles on its own; the order only keeps the content
  * of this file unique.
  */

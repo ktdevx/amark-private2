@@ -89,6 +89,12 @@ endif()
 add_subdirectory(base)
 add_subdirectory(testgen)
 
+# The checks of the public headers (amark_header_check, cxx_include_test,
+# lint.public_headers). They need the tests (Naos), not the fuzz targets.
+if(AMARK_BUILD_TESTS)
+  add_subdirectory(headers)
+endif()
+
 # The package consumption tests (label "package"). They configure and build nested
 # projects, so AMARK_PACKAGE_TESTS can turn them off on their own.
 if(AMARK_BUILD_TESTS AND AMARK_PACKAGE_TESTS)

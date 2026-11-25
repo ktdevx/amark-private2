@@ -184,7 +184,7 @@
   - _Requirements: 2.4, 4.10, 4.12, 9.3_
 
 - [ ] 4. 統合：公開ヘッダのまとめと CI/CD
-- [ ] 4.1 全体をまとめるヘッダと公開ヘッダの検査を作る
+- [x] 4.1 全体をまとめるヘッダと公開ヘッダの検査を作る
   - まとめのヘッダが、エクスポート、版、エラーコード、アロケータ、バッファ、UTF-8、文字の分類の公開ヘッダを設計の正規の include の順（PublicHeaders の群 1）にすべて include していることを確かめ、不足があれば直す。後続の spec が群 2–5 を正規の順の位置に追加することを、まとめのヘッダのコメントとして書く
   - 各公開ヘッダを単独で 2 回 include するだけの C のソースを構成時に生成してコンパイルする検査を作る
   - C++ のコンパイラがあるときは、まとめのヘッダを include して版、エラーコード、バッファの関数を呼ぶ C++ のテストを作る
@@ -234,3 +234,4 @@
 - 3.1: データ駆動のテストは `amark_add_generated_tests(<target> GENERATOR <script> DATA <files…> …)`。生成スクリプトは先頭で `cmake_minimum_required(VERSION 3.21)` を呼び、`include(AmarkTestGen)` の補助を使う。Makefiles では生成物（`.c`）を手で消したら `.stamp` も消す。スイート名の識別子への変換は AmarkTesting.cmake と AmarkTestGen.cmake の 2 か所にあるので、変えるときは両方を直す
 - 3.3: パッケージは `lib/cmake/Amark/`（AmarkConfig、AmarkConfigVersion、AmarkTargets）、`lib/pkgconfig/amark.pc`、`share/licenses/amark/LICENSE`。必須のコンポーネントが一致しないときの理由のメッセージは「the requested kind of Amark (components: …) is not installed in <prefix> … the installed kind is "static"」で、3.4 はこれを照合できる
 - 3.5: ファジングターゲットは `amark_add_fuzzer(<name> SOURCES … CORPUS <dir> [LIBRARIES …])`。再生のテスト名は末尾の `_fuzz` を除いた `fuzz.<name>.corpus`（ラベル fuzz）。空のコーパスは構成時のエラー。libFuzzer の実行はこのコンテナでは確かめられない（compiler-rt がない）ので、CI のファジングのジョブで確かめる
+- 4.1: 公開の名前の接頭辞と amark.h の include の順は `lint.public_headers`（cmake/scripts/check_public_headers.cmake、ラベル lint）で検査する。正規の順の一覧は design の PublicHeaders の表とこのスクリプトの 2 か所にあるので、後続の spec が公開ヘッダを加えるときは両方を直す
