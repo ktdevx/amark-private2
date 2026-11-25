@@ -156,7 +156,7 @@ graph TB
 │   ├── AmarkVersion.cmake         # version.h から版を読み、書式の誤りを検出する
 │   ├── AmarkCompilerOptions.cmake # amark_target_defaults()：C99、警告、可視性。サニタイザの適用
 │   ├── AmarkInstall.cmake         # install と export、パッケージ設定と pc の生成
-│   ├── AmarkConfig.cmake.in       # find_package(Amark) の入口。種類（静的/動的）の選択
+│   ├── AmarkConfig.cmake.in       # find_package(Amark) の入口。種類（静的/動的）の照合
 │   ├── amark.pc.in                # pkg-config のテンプレート
 │   ├── AmarkTesting.cmake         # Naos の取得、amark_add_test()、amark_add_generated_tests()
 │   ├── AmarkTestGen.cmake         # 生成スクリプトが include する補助（スクリプトモード専用）
@@ -228,7 +228,7 @@ graph TB
 │       ├── utf8/                  # 種のファイル
 │       └── buffer/
 └── .github/workflows/
-    ├── ci.yml                     # マトリクス、サニタイザ、ファジング、二重インストール
+    ├── ci.yml                     # マトリクス、サニタイザ、ファジング
     └── release.yml                # タグで成果物を作って公開する
 ```
 
@@ -260,37 +260,30 @@ sequenceDiagram
 - 実行ファイルと Amark の DLL は、どちらも `${PROJECT_BINARY_DIR}/bin`（マルチ構成では構成ごとのサブディレクトリ）に出力され、一覧の取得の時点で DLL が見つかる。
 - データファイルか生成スクリプトが変わると、構成し直さずに生成とテストの一覧が更新される。
 
-### 静的版と動的版の二重インストールと選択
+### インストールした種類の照合
 ```mermaid
 graph TB
-    BuildStatic[Configure static and build] --> InstallStatic[Install to prefix]
-    BuildShared[Configure shared and build] --> InstallShared[Install to same prefix]
-    InstallStatic --> Prefix[Prefix with both variants]
-    InstallShared --> Prefix
-    Prefix --> Config[AmarkConfig cmake]
+    Build[Configure one variant and build] --> Install[Install to prefix]
+    Install --> Config[AmarkConfig cmake]
     Config --> Comp{Component given}
-    Comp -->|static or shared| Load[Load matching targets file]
-    Comp -->|none| Var{Amark_SHARED_LIBS or BUILD_SHARED_LIBS defined}
-    Var -->|yes| Load
-    Var -->|no| Default[Static if installed else shared]
-    Default --> Load
-    Load --> Missing{Targets file exists}
-    Missing -->|no| NotFound[Amark_FOUND false with reason]
-    Missing -->|yes| Found[Amark target available]
+    Comp -->|none| Load[Load AmarkTargets cmake]
+    Comp -->|given| Match{Matches installed variant}
+    Match -->|yes| Load
+    Match -->|no| NotFound[Amark_FOUND false with reason]
+    Load --> Found[Amark target available]
 ```
+- 1 つの接頭辞に置くのは静的版か動的版のどちらか一方。両方を使う利用者は、接頭辞を分ける。
 
 ### リリース
 ```mermaid
 graph TB
     Tag[Push tag vX Y Z] --> Verify[Check tag against version h]
     Verify -->|mismatch| Fail[Fail without artifacts]
-    Verify --> Matrix[Linux macOS Windows jobs]
-    Matrix --> StaticJob[Build and test static]
-    Matrix --> SharedJob[Build and test shared]
-    StaticJob --> Stage[Install both into staging]
-    SharedJob --> Stage
-    Stage --> DualCheck[Consumer test with both components]
-    DualCheck --> Archive[Archive per platform]
+    Verify --> Matrix[Linux macOS Windows jobs for each variant]
+    Matrix --> BuildTest[Build and test]
+    BuildTest --> Stage[Install into own staging prefix]
+    Stage --> Check[Consumer test with staged prefix]
+    Check --> Archive[Archive per platform and variant]
     Archive --> Publish[Source archive checksums and GitHub release]
 ```
 - `Publish` は、すべての先行ジョブが成功したときだけ実行する（要件 6.4）。
@@ -311,14 +304,13 @@ graph TB
 | 2.4 | 公開 API だけのエクスポート | Export、CompilerOptions、SymbolCheck | `AMARK_API`、hidden | — |
 | 2.5 | Windows で定義なしに DLL を使える | Export、BuildCore、Packaging | `AMARK_SHARED`（INTERFACE） | — |
 | 2.6 | ABI の互換性番号 | VersionMod、BuildCore | `SOVERSION` | — |
-| 2.7 | 両方を並べてインストール | Packaging | 出力名、エクスポートファイル名 | 二重インストール |
 | 3.1 | インストールの内容 | Packaging | install 規則 | — |
-| 3.2 | `find_package(Amark)` | Packaging、PackageTests | `AmarkConfig.cmake` | 二重インストール |
+| 3.2 | `find_package(Amark)` | Packaging、PackageTests | `AmarkConfig.cmake` | 種類の照合 |
 | 3.3 | add_subdirectory と FetchContent | BuildCore、PackageTests | `AMARK_BUILD_TESTS`、`AMARK_INSTALL`、`AMARK_FUZZ` の既定 | — |
-| 3.4 | pkg-config | Packaging、PackageTests | `amark.pc`、`amark-<variant>.pc` | — |
+| 3.4 | pkg-config | Packaging、PackageTests | `amark.pc` | — |
 | 3.5 | 版の互換性の判定 | Packaging | `AmarkConfigVersion.cmake` | — |
-| 3.6 | 種類の選択と既定の規則 | Packaging、ReleaseWorkflow | `COMPONENTS`、`Amark_SHARED_LIBS` | 二重インストール |
-| 3.7 | 要求した種類がない | Packaging、PackageTests | `Amark_NOT_FOUND_MESSAGE` | 二重インストール |
+| 3.6 | 種類を指定しない利用 | Packaging、PackageTests | `AmarkConfig.cmake` | 種類の照合 |
+| 3.7 | 要求した種類と一致しない | Packaging、PackageTests | `COMPONENTS`、`Amark_NOT_FOUND_MESSAGE` | 種類の照合 |
 | 4.1 | Naos の固定と、テスト時だけの取得 | Testing | FetchContent | テストのビルド |
 | 4.2 | 個別の CTest のテスト | Testing | `naos_add_executable` | テストのビルド |
 | 4.3 | 公開・内部の両方のテスト | BuildCore、Testing | `amark_internal`、`INTERNAL` | — |
@@ -369,18 +361,18 @@ graph TB
 | BuildCore | Infra | プロジェクト、オプション、ライブラリのターゲット | 1.1, 1.3, 1.7, 2.1–2.3, 2.5, 2.6, 3.3, 4.3, 4.4, 7.7 | CompilerOptions (P0), VersionMod (P0) | Service |
 | CompilerOptions | Infra | C99、警告、可視性、サニタイザ | 1.2, 1.4–1.6, 2.4, 5.2 | — | Service |
 | VersionMod | Infra | 版の読み取りと派生値 | 2.6, 9.6 | Version (P0) | Service |
-| Packaging | Infra | install、export、パッケージ設定、pc | 2.3, 2.5, 2.7, 3.1–3.7, 6.5, 9.6 | BuildCore (P0) | Service |
+| Packaging | Infra | install、export、パッケージ設定、pc | 2.3, 2.5, 3.1–3.7, 6.5, 9.6 | BuildCore (P0) | Service |
 | Testing | Infra | Naos の統合とテストの登録 | 4.1–4.4, 4.7, 4.8, 7.7 | Naos (P0), BuildCore (P0) | Service |
 | TestGen | Infra | 生成スクリプトの補助 | 4.7, 4.8 | — | Service |
 | TestSupport | Test | テスト用アロケータ、比較のマクロ | 4.5, 4.6 | Naos (P0), allocator.h (P0) | Service |
 | HeaderChecks | Test | 公開ヘッダの単独コンパイル | 4.9, 9.2 | PublicHeaders (P0) | Batch |
 | SymbolCheck | Test | エクスポートの検査 | 2.4, 4.10, 4.12, 9.3 | nm 等 (P1) | Batch |
 | LicenseCheck | Test | ライセンスヘッダの検査 | 8.3, 8.4 | — | Batch |
-| PackageTests | Test | 4 つの取り込み方法の検査 | 1.5, 3.2–3.4, 3.7, 4.11, 4.12, 5.5 | Packaging (P0) | Batch |
+| PackageTests | Test | 4 つの取り込み方法の検査 | 1.5, 3.2–3.4, 3.6, 3.7, 4.11, 4.12, 5.5 | Packaging (P0) | Batch |
 | FuzzInfra | Infra | ファジングの仕組み | 5.3, 7.1–7.5, 7.7, 7.8 | BuildCore (P0) | Service |
 | FuzzTargets | Fuzz | ランタイムのファジング | 7.6 | Utf8, Buffer (P0) | Batch |
-| CIWorkflow | CI | マトリクス、サニタイザ、ファジング、二重インストール | 1.1, 5.1–5.5, 7.7 | BuildCore (P0) | Batch |
-| ReleaseWorkflow | CI | 成果物の作成と公開 | 6.1–6.5, 3.6 | Packaging (P0) | Batch |
+| CIWorkflow | CI | マトリクス、サニタイザ、ファジング | 1.1, 5.1–5.5, 7.7 | BuildCore (P0) | Batch |
+| ReleaseWorkflow | CI | 成果物の作成と公開 | 6.1–6.5 | Packaging (P0) | Batch |
 | RepoDocs | Repo | LICENSE、README、gitattributes | 6.5, 8.1, 8.2, 8.5 | — | — |
 | PublicHeaders / Export | Runtime | 配置、まとめのヘッダ、エクスポート、正規の include の順 | 2.4, 2.5, 9.1–9.3, 9.7 | — | Service |
 | Version | Runtime | 版のマクロと関数 | 9.4, 9.5 | Export (P0) | Service |
@@ -417,7 +409,7 @@ graph TB
 
 - ターゲット：
   - `amark_objects`（OBJECT）：`src/` の全ソース。`amark_target_defaults()` を適用。`POSITION_INDEPENDENT_CODE` は `BUILD_SHARED_LIBS` に従う。PRIVATE に `AMARK_BUILDING`、動的版のときは `AMARK_SHARED` も定義する。インクルードは `include/` と `src/`。
-  - `amark`（`BUILD_SHARED_LIBS` に従う）：`$<TARGET_OBJECTS:amark_objects>` から作る。PUBLIC のインクルードは `$<BUILD_INTERFACE:include>` と `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>`。動的版のときは INTERFACE に `AMARK_SHARED`、`VERSION` と `SOVERSION`、`C_VISIBILITY_PRESET hidden`。`DEBUG_POSTFIX d`。MSVC 形式（`CMAKE_STATIC_LIBRARY_SUFFIX` と `CMAKE_IMPORT_LIBRARY_SUFFIX` と接頭辞が同じ）のとき、静的版の `OUTPUT_NAME` を `amark_static` にする。
+  - `amark`（`BUILD_SHARED_LIBS` に従う）：`$<TARGET_OBJECTS:amark_objects>` から作る。PUBLIC のインクルードは `$<BUILD_INTERFACE:include>` と `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>`。動的版のときは INTERFACE に `AMARK_SHARED`、`VERSION` と `SOVERSION`、`C_VISIBILITY_PRESET hidden`。`DEBUG_POSTFIX d`。MSVC 形式（`CMAKE_STATIC_LIBRARY_SUFFIX` と `CMAKE_IMPORT_LIBRARY_SUFFIX` と接頭辞が同じ）のとき、静的版の `OUTPUT_NAME` を `amark_static` にする（誤って同じ接頭辞に入れても、静的版とインポートライブラリの `amark.lib` が上書きし合わない）。
   - `Amark::amark`：`amark` のエイリアス。
   - `amark_internal`（STATIC、`AMARK_BUILD_TESTS` か `AMARK_FUZZ` のときだけ）：同じオブジェクトから作る。PUBLIC のインクルードに `include/` と `src/`。`AMARK_SHARED` を伝えない（テスト側の宣言は dllimport にならず、静的にリンクされる）。
 - `AMARK_BUILD_TESTS` のとき、`amark` の `RUNTIME_OUTPUT_DIRECTORY` を `${PROJECT_BINARY_DIR}/bin` にする（テストと同じディレクトリ）。組み込み時は変更しない。
@@ -474,7 +466,7 @@ amark_target_defaults(<target>)
 | Field | Detail |
 |-------|--------|
 | Intent | install 規則、エクスポート、パッケージ設定、pkg-config のファイル |
-| Requirements | 2.3, 2.5, 2.7, 3.1–3.7, 6.5, 9.6 |
+| Requirements | 2.3, 2.5, 3.1–3.7, 6.5, 9.6 |
 
 **Responsibilities & Constraints**
 - `AMARK_INSTALL` のときだけ規則を作る。配置は `GNUInstallDirs` に従う。
@@ -483,24 +475,22 @@ amark_target_defaults(<target>)
 |---|---|
 | `include/amark/` | 公開ヘッダ（`include/amark/*.h` のすべて） |
 | `lib/`（DLL は `bin/`） | ライブラリ。MSVC の Debug と RelWithDebInfo の動的版では PDB も `bin/` に |
-| `lib/cmake/Amark/` | `AmarkConfig.cmake`、`AmarkConfigVersion.cmake`、`AmarkTargets-<variant>.cmake`、`AmarkTargets-<variant>-<config>.cmake` |
-| `lib/pkgconfig/` | `amark-<variant>.pc` と `amark.pc` |
+| `lib/cmake/Amark/` | `AmarkConfig.cmake`、`AmarkConfigVersion.cmake`、`AmarkTargets.cmake`、`AmarkTargets-<config>.cmake` |
+| `lib/pkgconfig/` | `amark.pc` |
 | `share/licenses/amark/LICENSE` | ライセンス |
 
-- `<variant>` は `static` か `shared`。エクスポートの名前空間は `Amark::`、エクスポートするターゲットは `amark`（取り込み側では `Amark::amark`）。
-- **`AmarkConfig.cmake` の選択の規則**（要件 3.6、3.7）：
-  1. `find_package(Amark COMPONENTS static)` または `shared` が指定されたら、その種類。両方の指定はエラー。
-  2. 指定がなく、`Amark_SHARED_LIBS` が定義されていればその真偽。
-  3. それもなく、`BUILD_SHARED_LIBS` が定義されていればその真偽。ただし、その種類がインストールされていなければ、もう一方を使う。
-  4. どれもなければ、静的版があれば静的版、なければ動的版。
-  5. 1 か 2 で選んだ種類のファイルがなければ、`Amark_FOUND` を FALSE にし、`Amark_NOT_FOUND_MESSAGE` に「要求された種類」と「インストールされている種類」を示す。
-- 読み込んだ種類を `Amark_SHARED_LIBS_USED`（真偽）として利用者に返す。
-- **pkg-config**：`amark-<variant>.pc` を種類ごとに生成する。`Libs: -L${libdir} -l<出力名>`、動的版は `Cflags: -I${includedir} -DAMARK_SHARED`。`amark.pc` は最後にインストールした種類と同じ内容を持つ（リリースでは動的版を後にインストールする）。特定の種類が必要な利用者は `amark-static` / `amark-shared` を使う。出力名は構成ごとに `file(GENERATE)` で埋める（Debug の `d` を反映する）。
+- エクスポートの名前空間は `Amark::`、エクスポートするターゲットは `amark`（取り込み側では `Amark::amark`）。
+- **1 つの接頭辞に 1 種類**：静的版と動的版を同じ接頭辞にインストールすることはサポートしない。設定と `amark.pc` は後からインストールした種類のものになる。同じ種類の Debug と Release は、`DEBUG_POSTFIX` と構成ごとのエクスポートファイルにより、CMake から同じ接頭辞で使える。`amark.pc` は最後にインストールした構成を指す。
+- **`AmarkConfig.cmake` の照合の規則**（要件 3.6、3.7）：インストールした種類（`static` か `shared`）を、構成時に埋め込む。
+  1. コンポーネントの指定がなければ、インストールされている種類を読み込む。`BUILD_SHARED_LIBS` は見ない。
+  2. コンポーネントは `static` と `shared` だけを認め、インストールされている種類と一致するものだけを `Amark_<component>_FOUND` で真にする。
+  3. 必須のコンポーネントが一致しなければ（両方の指定や未知の名前を含む）、`Amark_FOUND` を FALSE にし、`Amark_NOT_FOUND_MESSAGE` に「要求された種類」と「インストールされている種類」を示して、ターゲットを読み込まずに返る。`OPTIONAL_COMPONENTS` の不一致では失敗しない。
+- **pkg-config**：`amark.pc` を 1 つ生成する。`Libs: -L${libdir} -l<出力名>`、動的版は `Cflags: -I${includedir} -DAMARK_SHARED`。出力名は構成ごとに `file(GENERATE)` で埋める（`amark_static` と Debug の `d` を反映する）。
 - `Version` は `AMARK_VERSION` から埋める。
 
 **Contracts**: Service [x]
 ```cmake
-find_package(Amark 0.1 REQUIRED)                       # 規則 2–4 で選ぶ
+find_package(Amark 0.1 REQUIRED)                       # インストールされている種類を使う
 find_package(Amark 0.1 REQUIRED COMPONENTS shared)     # 動的版を要求
 target_link_libraries(app PRIVATE Amark::amark)
 ```
@@ -602,11 +592,12 @@ amark_add_fuzzer(<name>
 | Field | Detail |
 |-------|--------|
 | Intent | 4 つの取り込み方法で利用者のプロジェクトが構成・ビルド・実行できることを CTest で検査する |
-| Requirements | 1.5, 3.2–3.4, 3.7, 4.11, 4.12, 5.5 |
+| Requirements | 1.5, 3.2–3.4, 3.6, 3.7, 4.11, 4.12, 5.5 |
 
 **Responsibilities & Constraints**
 - CTest のテスト `package.find_package`、`package.find_package_wrong_variant`、`package.add_subdirectory`、`package.fetchcontent`、`package.pkg_config`（ラベル `package`）。各テストは `cmake -P run_package_test.cmake` を、`MODE`、ジェネレータ、C コンパイラ、構成（`$<CONFIG>`）、`BUILD_SHARED_LIBS`、Amark のソースとビルドのディレクトリ、作業ディレクトリを `-D` で渡して実行する。
-- `find_package` と `pkg_config`：作業ディレクトリの接頭辞へ `cmake --install` してから、利用者のプロジェクトを構成・ビルド・実行する。`PREFIX` が与えられたら install を省き、その接頭辞を使う（CI とリリースの二重インストールの検査で使う。`COMPONENT` も渡せる）。
+- `find_package` と `pkg_config`：作業ディレクトリの接頭辞へ `cmake --install` してから、利用者のプロジェクトを構成・ビルド・実行する。`PREFIX` が与えられたら install を省き、その接頭辞を使う（リリースでアーカイブの中身を検査するときに使う）。
+- `find_package` は、コンポーネントなしと、インストールした種類の指定の両方で構成できることを確かめる。
 - `find_package_wrong_variant`：インストールされていない種類を `COMPONENTS` で要求し、構成が「見つからない」で失敗し、メッセージに種類が含まれることを確かめる。
 - `add_subdirectory` と `fetchcontent`：ソースツリーを直接取り込む（FetchContent は `SOURCE_DIR` を使い、ネットワークを使わない）。`FETCHCONTENT_FULLY_DISCONNECTED=ON` で構成し、Naos の取得が起きないこと、`AMARK_BUILD_TESTS`・`AMARK_INSTALL`・`AMARK_FUZZ` が OFF であること、`amark` の `COMPILE_OPTIONS` と `INTERFACE_COMPILE_OPTIONS` に `-Werror` や `/WX` がないことを利用者の CMakeLists が確かめる。
 - 利用者の `main.c` は、`AMARK_VERSION_STRING` と `amark_version_string()` の一致、バッファへの追加と内容の照合を行い、成功なら 0 を返す。Windows の動的版では `$<TARGET_RUNTIME_DLLS>` を実行ファイルの隣にコピーする（pkg-config の場合は、実行時に接頭辞の `bin/` を `PATH` に加える）。
@@ -632,7 +623,7 @@ amark_add_fuzzer(<name>
 
 | Field | Detail |
 |-------|--------|
-| Intent | すべての push とプルリクエストで、全環境・サニタイザ・ファジング・二重インストールを検査する |
+| Intent | すべての push とプルリクエストで、全環境・サニタイザ・ファジングを検査する |
 | Requirements | 1.1, 5.1–5.5 |
 
 **Responsibilities & Constraints**
@@ -644,7 +635,6 @@ amark_add_fuzzer(<name>
 | `build` | ubuntu（GCC、Clang、Ninja）、macos（AppleClang、Ninja）、windows（MSVC、Visual Studio のジェネレータ）、windows（MSYS2 UCRT64 の GCC、Ninja、pkgconf） | 各環境 × `BUILD_SHARED_LIBS` ∈ {OFF, ON}、ubuntu の GCC だけ Release も | 構成、ビルド、`ctest --output-on-failure`（package を含む全ラベル） |
 | `sanitizers` | ubuntu（Clang と GCC） | — | `-DAMARK_SANITIZE="address;undefined"`、Debug、全テスト。`ASAN_OPTIONS=detect_leaks=1` |
 | `fuzz` | ubuntu（Clang） | — | `-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF -DAMARK_SANITIZE="address;undefined"`、`cmake --build build --target amark_fuzz_smoke`（テストを無効にして、ファジングだけの構成が Naos なしに通ることも確かめる。7.7） |
-| `package-dual` | ubuntu（GCC）、windows（MSVC） | — | 静的版と動的版を同じ接頭辞にインストールし、`run_package_test.cmake` を `PREFIX` と `COMPONENT` ∈ {static, shared, なし} で実行 |
 
 - 失敗の報告（5.4）：どのジョブが失敗してもワークフローは失敗になる（`fail-fast: false` で全ジョブを最後まで走らせる）。失敗時は `Testing/Temporary/LastTest.log` と、ファジングのクラッシュ入力を成果物として保存する。
 - アクションはメジャー版のタグで固定する（`actions/checkout`、`actions/upload-artifact`、`msys2/setup-msys2`）。
@@ -655,19 +645,19 @@ amark_add_fuzzer(<name>
 | Field | Detail |
 |-------|--------|
 | Intent | `v<major>.<minor>.<patch>` のタグから成果物を作り、GitHub リリースに公開する |
-| Requirements | 3.6, 6.1–6.5 |
+| Requirements | 6.1–6.5 |
 
 **Responsibilities & Constraints**
 - トリガ：`push: tags: ['v[0-9]+.[0-9]+.[0-9]+']`。`permissions: contents: write` は公開のジョブだけ。
 - `verify`：`cmake -DTAG=<tag> -P cmake/scripts/check_version_tag.cmake`。不一致なら 2 つの版を示して失敗する。
-- `package`（`verify` に依存）：ubuntu（GCC、x86_64）、macos（`CMAKE_OSX_ARCHITECTURES="arm64;x86_64"`）、windows（MSVC x64）。各環境で、静的版と動的版をそれぞれ Release で構成・ビルド・テストし、静的版、動的版の順に同じ接頭辞へインストールする。二重インストールの検査（`run_package_test.cmake` の `PREFIX` と `COMPONENT`）を通してから、`amark-<version>-<platform>.tar.gz`（Windows は `.zip`）にまとめる。`<platform>` は `linux-x86_64`、`macos-universal`、`windows-x64-msvc`。
+- `package`（`verify` に依存）：ubuntu（GCC、x86_64）、macos（`CMAKE_OSX_ARCHITECTURES="arm64;x86_64"`）、windows（MSVC x64）× `BUILD_SHARED_LIBS` ∈ {OFF, ON}。それぞれ Release で構成・ビルド・テストし、専用の接頭辞へインストールする。`run_package_test.cmake`（`PREFIX`）で検査してから、`amark-<version>-<platform>-<variant>.tar.gz`（Windows は `.zip`）にまとめる。`<platform>` は `linux-x86_64`、`macos-universal`、`windows-x64-msvc`、`<variant>` は `static`、`shared`（計 6 個）。
 - `publish`（すべての `package` に依存）：`git archive --prefix=amark-<version>/` でソースのアーカイブを作り、全成果物の `SHA256SUMS` を作り、`gh release create <tag>` で添付する。どれかの先行ジョブが失敗すれば実行されない。
 - 成果物の中身は install 規則だけで決まる（テストもテストデータも含まない）。ソースのアーカイブでは、`.gitattributes` の `export-ignore` が付いたテストデータを除く。
 
 #### RepoDocs
 
 - `LICENSE`：MIT の全文、`Copyright (c) The Amark Authors`。
-- `README.md`：概要、対応環境（3 OS と 5 つのコンパイラ環境）、ビルド（構成・ビルド・テスト、主なオプション）、取り込み（4 つの方法の例と、種類の選択の規則）、ライセンスの節を持つ骨子。
+- `README.md`：概要、対応環境（3 OS と 5 つのコンパイラ環境）、ビルド（構成・ビルド・テスト、主なオプション）、取り込み（4 つの方法の例、種類の指定、静的版と動的版の接頭辞を分けること）、ライセンスの節を持つ骨子。
 - `.gitattributes`：`* text=auto eol=lf`。`tests/**/data/**` と `fuzz/corpus/**` は `-text`（バイナリ扱い）。後続の spec がテストデータを置くときは、`data/` の下に置けば同じ扱いになる。配布しないテストデータには `export-ignore` を付ける（spec.txt は `inline-parser`、`spec_blocks.txt` は `block-parser` が追加する。Downstream Extension Points）。
 
 ### Test
@@ -1008,7 +998,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - **version / error**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため 0–6 の値を直接検査する）、`AMARK_ERROR_UNREPRESENTABLE` が 6 で他のコードと異なり、説明が `"unrepresentable"` であること（10.9）。
 
 ### Integration Tests（CTest）
-- `package.*`：4 つの取り込み方法と、要求した種類がない場合（3.2–3.4, 3.7, 1.5, 4.11）。
+- `package.*`：4 つの取り込み方法と、種類の指定がない場合、要求した種類と一致しない場合（3.2–3.4, 3.6, 3.7, 1.5, 4.11）。
 - `abi.exported_symbols`：動的版のエクスポートが `amark_` だけ（2.4, 4.10）。
 - `amark_header_check` と `cxx_include_test`：公開ヘッダの単独コンパイルと C++ からのリンク（4.9, 9.2）。
 - `lint.license_headers`：ライセンスヘッダの欠落の検出（8.3, 8.4）。
@@ -1020,7 +1010,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - `buffer_fuzz`：入力をバッファの操作列として解釈し、失敗を注入するアロケータを入力ごとに `amark_allocator_set` で設定して実行し（終わりにすべて解放して既定に戻す）、毎回不変条件（NUL 終端、長さ）を確かめる。
 
 ### CI（環境の検証）
-- 5 つの環境 × 静的/動的で全テスト（1.1, 5.1）、サニタイザ（5.2）、ファジングの短時間実行（5.3）、二重インストールでの種類の選択（2.7, 3.6）。
+- 5 つの環境 × 静的/動的で全テスト（1.1, 5.1）、サニタイザ（5.2）、ファジングの短時間実行（5.3）。
 
 ## Security Considerations
 - 信頼できない入力（Markdown の文書）を扱うライブラリの土台として、共通ランタイムの関数はすべて境界を検査し、サイズの計算の桁あふれを検出する。サニタイザとファジングを CI で常に実行する。

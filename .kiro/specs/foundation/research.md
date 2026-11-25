@@ -28,12 +28,12 @@
 - **Implications**：P と S のカテゴリの表、Zs の表を Unicode のデータから生成する。case fold は `block-parser` が同じ生成手順で追加する（この spec では作らない）。
 
 ### 静的版と動的版の作り分け
-- **Context**：brief が design に委ねた判断。要件 2.7、3.6。
+- **Context**：brief が design に委ねた判断。要件 2.1–2.3、3.6、3.7。
 - **Findings**：
   - CMake の慣習は「1 つのターゲットが `BUILD_SHARED_LIBS` に従う」。両方を 1 回の構成で作る方式は、ターゲット名が 2 つになり `Amark::amark` の意味が曖昧になる。
   - 両方を同じ接頭辞にインストールする場合、エクスポートファイルを種類ごとに分け（`AmarkTargets-static.cmake` / `AmarkTargets-shared.cmake`）、`AmarkConfig.cmake` が `COMPONENTS` や変数で選ぶ方式が広く使われている（Alex Reinking, "Building a Dual Shared and Static Library with CMake"）。
   - MSVC では静的ライブラリ `amark.lib` と DLL のインポートライブラリ `amark.lib` の名前が衝突する。MinGW では `libamark.a` と `libamark.dll.a` で衝突しない。
-- **Implications**：1 回の構成では `BUILD_SHARED_LIBS` に従う 1 つの `amark` を作る。両方が必要なら 2 回構成して同じ接頭辞にインストールする。MSVC 形式（静的ライブラリとインポートライブラリの接尾辞が同じ）のときだけ、静的版の出力名を `amark_static` にする。
+- **Implications**：1 回の構成では `BUILD_SHARED_LIBS` に従う 1 つの `amark` を作る。両方が必要なら 2 回構成し、別の接頭辞にインストールする（2026-11-25 の「静的版と動的版の同居の廃止」）。MSVC 形式（静的ライブラリとインポートライブラリの接尾辞が同じ）のときだけ、静的版の出力名を `amark_static` にする。
 
 ### エクスポートマクロ
 - **Findings**：CMake の `GenerateExportHeader` はビルド時にヘッダを生成するため、ヘッダがソースツリーだけで完結しない（pkg-config や他のビルドシステムから使いにくい）。Naos は手書きのヘッダと `NAOS_SHARED` の定義で対応している。
@@ -60,7 +60,7 @@
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
 |--------|-------------|-----------|---------------------|-------|
-| 1 つの `amark` が `BUILD_SHARED_LIBS` に従う（採用） | 構成ごとに 1 種類。両方は 2 回の構成で作り、同じ接頭辞に並べる | CMake の慣習どおり。`Amark::amark` の意味が常に 1 つ。add_subdirectory の利用者の期待どおり | 両方の配布には 2 回のビルドが要る（リリースのワークフローで吸収） | 後から「1 回で両方」を足しても、利用者側の契約は変わらない |
+| 1 つの `amark` が `BUILD_SHARED_LIBS` に従う（採用） | 構成ごとに 1 種類。両方は 2 回の構成で作り、別の接頭辞に置く | CMake の慣習どおり。`Amark::amark` の意味が常に 1 つ。add_subdirectory の利用者の期待どおり | 両方の配布には 2 回のビルドが要る（リリースのワークフローで吸収） | 後から「1 回で両方」を足しても、利用者側の契約は変わらない |
 | 静的・動的を同時に作る（`amark_static` と `amark_shared`） | 1 回の構成で 2 つのターゲット | ビルドが 1 回 | `Amark::amark` がどちらを指すかの規則が増える。オブジェクトの PIC の扱いが複雑 | 却下 |
 | OBJECT ライブラリ ＋ 内部テスト用の静的ライブラリ（採用） | ソースを 1 回だけコンパイルし、`amark` と `amark_internal` の両方に使う | 動的版でも内部関数を単体テストできる | 動的版の構成では `amark_internal` のオブジェクトに dllexport が付く（実害なし） | 要件 4.3 |
 
@@ -165,12 +165,19 @@
 - 利用者の決定により、`amark_allocator_t` とコールバックから `user_data` を除いた。要件 11.1、design の Allocator・TestSupport、タスク 2.2、2.3 を変えた。`amark_test_allocator_t` の `base` を除き、`amark_test_allocator_get` を `amark_test_allocator_activate` に変えた。
 - 後続の spec の影響：なし（どの spec もアロケータのコールバックを定義しない）。ノード、スロット、書き出しの関数の `user_data` は別のもので、変えない。
 
+### 2026-11-25：静的版と動的版の同居の廃止
+- **Context**：静的版と動的版を同じ接頭辞に並べる要件（2.7）のために、種類の選択の規則、種類ごとのエクスポートファイルと pc、二重インストールの検査が必要だった。Windows（MSVC）では vcpkg の triplet や Conan の `shared` のように種類ごとに置き場所を分けるのが普通で、同居は稀である。既定の選択も、CMake（静的版）とリリース物の `amark.pc`（動的版）で食い違っていた。
+- **Selected Approach**：利用者の決定により、1 つの接頭辞には 1 種類だけを置く。リリースのアーカイブは種類ごとに分ける。`COMPONENTS static` / `shared` は、インストールされている種類との照合だけに使う。要件 2.7 を削除し、3.6、3.7、6.1、design の Packaging・PackageTests・CIWorkflow・ReleaseWorkflow、タスク 3.3、3.4、4.2、4.3 を変えた。
+- **残したもの**：MSVC 形式の静的版の出力名 `amark_static`（誤って同じ接頭辞に入れたときの `amark.lib` の上書きを防ぐ）と `DEBUG_POSTFIX d`（Debug と Release の同居は一般的）。
+- **Trade-offs**：MSYS2 や Linux のディストリビューションのように両方を 1 つのパッケージに入れる場合、ライブラリは衝突しないが、CMake の設定と `amark.pc` は後勝ちになる。必要になれば、`find_package(Amark)` と `Amark::amark` の契約を保って同居への対応を足せる。
+- 後続の spec の影響：なし。
+
 ## References
 - [Naos v0.4.0](https://github.com/vabelorg/naos/tree/v0.4.0) — テストフレームワーク、CMake 関数、DLL の扱い
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — 文字の分類の定義
 - [Unicode 17.0.0 UCD](https://www.unicode.org/Public/17.0.0/ucd/) — `UnicodeData.txt`（一般カテゴリ）
 - [Unicode Standard Chapter 3, U+FFFD Substitution of Maximal Subparts](https://www.unicode.org/versions/latest/core-spec/chapter-3/) — 不正な UTF-8 の置き換え
-- [Building a Dual Shared and Static Library with CMake](https://alexreinking.com/blog/building-a-dual-shared-and-static-library-with-cmake.html) — 静的版・動的版を並べるパッケージ設定
+- [Building a Dual Shared and Static Library with CMake](https://alexreinking.com/blog/building-a-dual-shared-and-static-library-with-cmake.html) — 静的版・動的版を並べるパッケージ設定（採用しない）
 - [libFuzzer](https://llvm.org/docs/LibFuzzer.html) — ファジングの入口と実行の方法
 
 ### 2026-11-25：エラーコードの定義を X マクロにする

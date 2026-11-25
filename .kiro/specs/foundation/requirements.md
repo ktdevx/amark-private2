@@ -59,7 +59,6 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 4. Where Amark が動的ライブラリとしてビルドされる, the Amark Build shall 公開 API として宣言された `amark_` 接頭辞の関数だけをエクスポートし、内部の関数と変数をエクスポートしない
 5. Where Amark が Windows で動的ライブラリとして使われる, the Amark Build shall 利用者が `Amark::amark` をリンクするだけで、手作業のマクロ定義なしに DLL の関数を呼べるようにする
 6. Where Amark が動的ライブラリとしてビルドされる, the Amark Build shall 1.0 未満ではメジャー版とマイナー版から、1.0 以降ではメジャー版から ABI の互換性番号を決めて動的ライブラリに付ける
-7. When 開発者が静的版と動的版を同じインストール先に順にインストールする, the Amark Build shall 両方のファイルを衝突させずに並べて置く
 
 ### Requirement 3: インストールとパッケージの利用
 **Objective:** As a Amark を組み込むアプリケーションの開発者, I want 自分のビルド方法に合った方法で Amark を取り込めること, so that 追加の設定なしに Amark を使い始められる
@@ -70,8 +69,8 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 3. When 利用者のプロジェクトが Amark を `add_subdirectory` または FetchContent で取り込む, the Amark Build shall `Amark::amark` を提供し、Amark のテスト・ファジング・インストール規則を既定で無効にし、Naos を取得しない
 4. When 利用者が pkg-config でインストール済みの Amark を問い合わせる, the Amark Package shall インストールされた種類（静的/動的）のリンクに必要なコンパイルとリンクのフラグを返す
 5. When 利用者が `find_package` で版を指定する, the Amark Package shall 1.0 未満では同じメジャー版とマイナー版の版だけを、1.0 以降では同じメジャー版の版だけを互換と判定する
-6. Where 静的版と動的版の両方がインストールされている, the Amark Package shall 利用者がどちらを使うかを選べるようにし、指定がないときは文書化された規則に従って一方を選ぶ
-7. If 利用者が要求した種類（静的/動的）がインストールされていない, the Amark Package shall パッケージが見つからないものとして扱い、理由を示す
+6. When 利用者が種類（静的/動的）を指定せずに `find_package(Amark)` を呼ぶ, the Amark Package shall インストールされている種類を提供する
+7. If 利用者が要求した種類（静的/動的）が、インストールされている種類と一致しない, the Amark Package shall パッケージが見つからないものとして扱い、理由を示す
 
 ### Requirement 4: テスト基盤
 **Objective:** As a Amark の開発者, I want Naos でテストを書き、CTest で個別に実行でき、メモリの扱いまで検査できる共通の仕組み, so that すべての spec が同じ方法で品質を確かめられる
@@ -104,7 +103,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 **Objective:** As a Amark の保守者, I want 版のタグを付けるだけで配布用の成果物ができること, so that 手作業の誤りなくリリースできる
 
 #### Acceptance Criteria
-1. When `v<メジャー>.<マイナー>.<パッチ>` の形式のタグが push される, the Amark Release shall Linux、macOS、Windows のそれぞれについて、静的版と動的版の両方を含むインストール済みの一式をアーカイブにまとめる
+1. When `v<メジャー>.<マイナー>.<パッチ>` の形式のタグが push される, the Amark Release shall Linux、macOS、Windows のそれぞれについて、静的版と動的版のインストール済みの一式を、種類ごとに別のアーカイブにまとめる
 2. When `v<メジャー>.<マイナー>.<パッチ>` の形式のタグが push される, the Amark Release shall ソースのアーカイブと、すべての成果物のチェックサムを作り、成果物と一緒にそのタグの GitHub リリースに添付する
 3. If タグの版がソースに定義された Amark の版と一致しない, the Amark Release shall 成果物を作らずに失敗し、2 つの版を示す
 4. If リリースのためのビルドかテストが失敗する, the Amark Release shall リリースを公開しない
