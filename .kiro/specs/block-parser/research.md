@@ -147,7 +147,7 @@
   1. `amark_parser_new` が NULL を受けたら内部で CommonMark の構文セットを作る（parse のレイヤーが syntax のレイヤーを参照してしまう）
   2. 静的な `const` の CommonMark の構文セット（凍結した構造を静的に初期化する必要があり、tree のレイヤーが syntax のレイヤーを知ることになる）
   3. `src/syntax/commonmark.c` の便宜の関数（`amark_parse_commonmark`、`amark_parser_new_commonmark`）が構文セットを作り、所有権をパーサに渡し、パーサが文書に渡す
-- **Selected Approach**：3。パーサは `AMARK_PARSE_TAKE_SYNTAX_SET` の印で構文セットの所有権を受け取り、終了時に文書へ渡す。
+- **Selected Approach**：3。パーサは `AMARK_PARSE_TAKE_SYNTAX_SET` の印で構文セットの所有権を受け取り、文書へ渡す（2026-11-25 の改訂で、渡す時点を終了時からパーサの生成の最後に移した。Revision Notes を参照）。
 - **Rationale**：レイヤーの方向（syntax → parse → tree）を守れる。グローバルな可変状態がない。
 - **Trade-offs**：便宜の関数は呼び出しごとに構文セットを作って凍結する（拡張は十数個で、費用は小さい）。多数の文書をパースする利用者は、構文セットを 1 つ作って共有する。**上流の変更が必要**：`amark_document_take_syntax_set`。
 
@@ -185,6 +185,7 @@
   - `tools/gen_entity_table.py`、`src/runtime/entity_tables.inc`、`src/runtime/entity.c`、`include/amark/entity.h` を追加する。
   - `.gitattributes` に、CommonMark spec の例を写したテストデータの `export-ignore` を足す。
 - **スロットの種類の番号の範囲**：`block-parser` 0x0100–0x01FF、`inline-parser` 0x0200–0x02FF、`html-renderer` 0x0300–0x03FF（`html-renderer` の design と一致）、`markdown-renderer` 0x0400–0x04FF。`syntax-tree` の `extension.h` の注記に範囲の表を加えることを推奨する。
+- 上記の `syntax-tree` への変更は、2026-11-25 に `syntax-tree` の spec に反映された（Revision Notes を参照）。
 
 ## Risks & Mitigations
 - 公開のブロック構文 API が大きくなる — 組み込みの構文が使う操作だけに絞り、GFM 相当の 3 つの検証用の構文で不足と過剰を確かめる。
@@ -192,6 +193,21 @@
 - 構築関数が `html-renderer` の公開関数に依存する — roadmap の順で `html-renderer` が先に実装されるので許される。テストは構築関数の拡張の順を確かめる。
 - 後処理がインラインの入力を持つノードを解放すると、内部の表に古いポインタが残る — 後処理の契約として、`amark_parse_discard_inline_input` / `amark_parse_move_inline_input` を呼ぶことを要求し、テストで確かめる。
 - CommonMark spec の例の期待値を手で書く量が多い — 期待値はブロックの構造だけのダンプ（インラインは単純な委譲先のテキスト）にし、生成の補助で形式を検査する。
+
+## Revision Notes
+
+### 2026-11-25：`inline-parser` からの上流の変更の依頼と、`syntax-tree` の更新の反映
+- **Context**：`inline-parser` の設計で、この spec の API とテストの補助に足りない点が見つかり、`inline-parser` の design の Integration & Upstream Changes に 4 つの変更の依頼が書かれた。`inline-parser` は回避策をとらず（`inline-parser` の 13.5）、この spec を更新する約束（Boundary Context の Adjacent expectations）に従って反映する。あわせて、この spec が依頼した `syntax-tree` の変更（`amark_document_take_syntax_set`、`amark_node_import_children`、スロットの種類の範囲の表）が `syntax-tree` の spec に反映されたので、この spec の記述をそれに揃えた。承認済みの要件・設計・タスクに追加する形で行い、既存の受け入れ基準の意味は変えない。
+- **宛先の括弧の入れ子の上限（12.6。依頼 1）**：CommonMark 0.31.2 は、宛先の括弧の入れ子に実装が上限を設けることを許し、少なくとも 3 段を求める。上限がないと、走査の深さの数が入力とともに増え、リンク参照定義（この spec）とインラインのリンク（`inline-parser`）で振る舞いの根拠が文書化されない。cmark と同じ 32 を `scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH` として公開し、超えたら宛先としない。走査は同じ関数なので両方で同じ値になる。`inline-parser` の 11.3（許された制限の文書化）もこの値を参照する。検討した代替：上限をオプションにする案は、spec の例を満たす値が 1 つで足り、ブロックとインラインで値が食い違う危険を生むので採らなかった。
+- **エンジンの役割の範囲の分け方（9.7。依頼 2）**：この spec は 0xFF00–0xFFFF を「エンジン」の範囲としていたが、インラインのエンジン（`inline-parser` の `UNMATCHED`、`FALLBACK_BREAK`）も同じ種類の役割を必要とする。値が衝突すると `markdown-renderer` が表記を区別できないので、ブロックのエンジン 0xFF00–0xFF0F、インラインのエンジン 0xFF10–0xFF1F に分け、0xFF20–0xFFFF を予約した。あわせて、組み込みの構文の役割（ブロック 0x0001–0x00FF、インライン 0x0100–0x01FF）も同じ注記に書き、1 か所で全体の割り当てが分かるようにした。既存のブロックのエンジンの役割の値（0xFF01–0xFF05）は変えない。
+- **検証用の構文の公開（13.5、13.6。依頼 3）**：`inline-parser` の GFM 相当の検証（`inline-parser` の 13.1–13.3）は、この spec の表・脚注の定義・タスクリストの検証用の構文をそのまま使う。同じものを `inline-parser` のテストに複製すると、ブロックのフックの検証と HTML の検証が別々の実装を見ることになるので、`tests/parse/gfm_block_ext.{h,c}` を INTERFACE ライブラリ `amark_test_parse_gfm`（`amark_test_tree`、`amark_test_html_gfm` と同じ方式）として公開した。脚注の参照の解決のため、拡張の状態の表を返す `amark_test_gfm_footnote_definitions(ctx)` を足した。表のセルの中の `\|` は、GFM では行をセルに分ける前に `|` に戻され、コードスパンの中でも `|` になる。インラインのエンジンはエスケープを文字としてしか知らないので、ブロック側でセルの区間から `\` を除いて `MARKER` のトークンとして記録する形にした（区間の隙間をトークンが覆うので被覆は保たれる）。検討した代替：インラインの検証用拡張で `\|` を特別に扱う案は、コードスパンの中で効かないため採らなかった。
+- **文書を返す検査の補助（14.5。依頼 4）**：`inline-parser` の例の照合（`amark_test_check_example`）は、被覆・不変条件・逐次の一致の検査の上に HTML の比較を重ねる。マクロだけの形では文書を受け取れないので、`amark_test_parse_check` を検査の後に一括の文書を返す関数とし、期待のダンプとの照合は `AMARK_CHECK_PARSE` のマクロに残した。構文セットを指定しないときに補助が作るテスト用の構文セットは、`AMARK_PARSE_TAKE_SYNTAX_SET` で返す文書に所有させ、寿命の問題を作らない。
+- **`syntax-tree` の更新との整合**：
+  - `amark_document_take_syntax_set` は、静的な構文セット・文書が使っていない構文セット・2 回目の受け渡しを `AMARK_ERROR_INVALID_ARGUMENT` で拒否し、確保をしない。これまでの設計は終了の最後に受け渡していたが、静的な構文セットが渡された誤りがパースの全体の後まで分からず、失敗の後の所有権の扱いも 2 通りになる。受け渡しをパーサの生成の最後（他の確保と拡張の状態の初期化の後）に移し、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のもの」を 1 か所で決めた。パーサは所有の印を持たなくなり、パーサの解放は文書の解放だけで構文セットも解放する。外から見える契約（便宜の関数の文書が構文セットを保持する、生成の失敗で所有権が残る）は変わらない。
+  - `amark_node_import_children` は根を取り込み元の親にでき、型の対応付け・包含の検査・確保をつなぎ込みの前に終え、記録（親に `CHILDREN`、各複製に `RELOCATED`）を定めている。断片のパースはこれをそのまま使い、独自の検査や巻き戻しを持たないことを design に明記した。子のない断片は何もせず成功する。
+  - スロットの種類の範囲の表は `syntax-tree` の `extension.h` に定数（`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` / `_LAST`）として置かれたので、この spec のスロットの種類はその節の下に追記する。
+  - `syntax-tree` のタスク（3.4、5.5）がこれらの操作を実装するので、この spec のタスク 1.2、1.3 は実装の作業から、パーサと断片のパースが頼る契約を公開 API で確かめる作業に変えた（タスクの番号と依存は保つ）。
+- **Implications**：Revalidation Triggers に、宛先の括弧の入れ子の上限、エンジンの役割の範囲の分け方、`amark_test_parse_gfm` と `amark_test_parse_check` の契約を加えた。依頼 1–4 はこの spec のタスク（1.1、1.4、3.3、6.2、7.10、9.1–9.3、10.2）で実装する。この spec は `inline-parser` より先に実装されるので、`inline-parser` のタスク 1.2、1.3 は実装済みのものを確かめる作業になる。
 
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — ブロック構造、タブ、不正な文字、リンク参照定義、付録の parsing strategy
