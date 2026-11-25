@@ -40,10 +40,10 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 ## Requirements
 
 ### Requirement 1: 文書とメモリの所有
-**Objective:** As a Amark を組み込むアプリケーションの開発者, I want 構文木のすべてのメモリが文書単位で管理され、指定したアロケータで確保されること, so that ノードの寿命を個別に追わずに安全に使え、メモリ不足でも壊れない
+**Objective:** As a Amark を組み込むアプリケーションの開発者, I want 構文木のすべてのメモリが文書単位で管理され、グローバルのアロケータで確保されること, so that ノードの寿命を個別に追わずに安全に使え、メモリ不足でも壊れない
 
 #### Acceptance Criteria
-1. When 利用者が構文セットとアロケータを指定して文書を作る, the Amark Syntax Tree shall 文書ノードだけを持つ木を作り、その文書のすべての確保を指定したアロケータで行う
+1. When 利用者が構文セットを指定して文書を作る, the Amark Syntax Tree shall 文書ノードだけを持つ木を作り、その文書のすべての確保を `foundation` のグローバルのアロケータで行う
 2. When 利用者が構文セットを指定せずに文書を作る, the Amark Syntax Tree shall 組み込みのノード型だけを持つ構文セットを使う
 3. When 利用者が文書を解放する, the Amark Syntax Tree shall その文書に属するすべてのノード（木から切り離したノードを含む）、構文トークン、ソースを解放する
 4. When 利用者が元のソースのバイト列を文書に登録する, the Amark Syntax Tree shall バイト列をそのまま複製して文書の寿命の間保持し、識別子を返す

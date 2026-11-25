@@ -39,7 +39,7 @@
 
 ### Allowed Dependencies
 - `foundation` の公開 API：`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`。内部 API：`runtime/alloc_internal.h`（`amark__size_add`、`amark__size_mul`）、`runtime/buffer_internal.h`（`amark__buffer_init`、`amark__buffer_destroy`）。`src/render/` だけが内部 API を使う
-- `syntax-tree` の公開 API：`node.h`、`document.h`、`extension.h`（`amark_syntax_set_find_node_type`、`amark_syntax_set_slot_count`、`amark_syntax_set_slot_at`、`amark_node_source_span`、`amark_document_position`、`amark_document_source_data`、`amark_document_allocator`、属性とリテラルの取得関数）。`src/tree/` の内部ヘッダは使わない
+- `syntax-tree` の公開 API：`node.h`、`document.h`、`extension.h`（`amark_syntax_set_find_node_type`、`amark_syntax_set_slot_count`、`amark_syntax_set_slot_at`、`amark_node_source_span`、`amark_document_position`、`amark_document_source_data`、属性とリテラルの取得関数）。`src/tree/` の内部ヘッダは使わない
 - テスト時：Naos、`amark_add_test()`、`amark_add_generated_tests()`、`AmarkTestGen.cmake`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`、`amark_test_allocator_t`）、`amark_test_tree`（`amark_test_tree_build`）、`amark_add_fuzzer()`
 - レイヤーの規則：`src/render/` は `src/syntax/` と `src/parse/` を参照しない。`src/syntax/html_*.c` は公開ヘッダだけを include する（`src/render/` の内部ヘッダを使わない）。公開ヘッダは他の公開ヘッダだけを include する
 
@@ -102,7 +102,7 @@ graph TB
 **Architecture Integration**：
 - Domain boundaries：エンジン（汎用）と組み込みの出力（個別のノード型）をレイヤーで分ける。エンジンの中は「書き出し」「スロットの解決」「たどりと文脈」に分ける。
 - Existing patterns preserved：`foundation` のエラーコード・出力引数・アロケータ・`struct_size`、`syntax-tree` のスロットの見出しと構文セットの順、`amark.core` が組み込みのノード型をまとめる形。
-- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、不透明型、グローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ、組み込みも公開 API だけを使う。
+- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ、組み込みも公開 API だけを使う。
 
 ### 組み込みの HTML 出力の登録の規則
 1. 組み込みの 19 のノード型の HTML の処理は、この spec が `src/syntax/html_blocks.c`（ブロックの 10 型）と `src/syntax/html_inlines.c`（インラインの 9 型）に実装し、`src/syntax/html_core.c` の構文拡張 `amark.core.html` のスロットとしてだけ登録する。処理の関数は公開しない（スロットを通してだけ使う）。
@@ -254,9 +254,9 @@ graph TB
 | 9.3, 9.4 | 上書き、含まれない場合 | HtmlDispatch | 連鎖の規則 | 処理の選び方 |
 | 10.1–10.6 | GFM 相当の表現力 | GfmHtmlExt, GfmHtmlTests | 公開のスロットと文脈 | — |
 | 11.1 | 規約 | 全コンポーネント | 不透明型、`struct_size` | — |
-| 11.2 | 文書のアロケータ | HtmlEngine, HtmlOutput | `amark_document_allocator` | — |
+| 11.2 | グローバルのアロケータ | HtmlEngine, HtmlOutput | `amark_malloc` など | — |
 | 11.3, 11.4 | 深い木、線形の時間 | HtmlEngine, HtmlDispatch | 反復のたどり、連鎖の表 | — |
-| 11.5 | スレッド | 全コンポーネント | グローバルな可変状態なし | — |
+| 11.5 | スレッド | 全コンポーネント | アロケータの設定のほかにグローバルな可変状態なし | — |
 | 11.6 | UTF-8 | HtmlEscape, CoreHtml | バイトを変えないエスケープ | — |
 
 ## Components and Interfaces
@@ -334,7 +334,7 @@ AMARK_API bool amark_html_url_is_safe(const char *data, size_t length);   /* 危
 **Responsibilities & Constraints**
 - 出力先：
   - バッファ：開始時の長さを記録し、直接追加する。失敗で終わったら `amark_buffer_truncate` で戻す。
-  - 書き出しの関数：埋め込みの中継のバッファ（文書のアロケータ）にためて、8 KiB を超えたら渡し、終わりに残りを渡す。書き出しの関数の失敗は最初の失敗として記録する。
+  - 書き出しの関数：埋め込みの中継のバッファにためて、8 KiB を超えたら渡し、終わりに残りを渡す。書き出しの関数の失敗は最初の失敗として記録する。
 - 書き出し（すべての書き出しは分類を持つ）：
 
 | 関数 | 分類 | 内容 |
@@ -386,7 +386,7 @@ AMARK_API amark_error_t amark_html_filter_forward(amark_html_context_t *ctx, ama
 - `AMARK_SLOT_HTML_NODE` のスロットを `amark_syntax_set_slot_at` で構文セットの順に列挙し、各スロットを検査する：`struct_size` が v1 の最小（`user_data` の末尾）以上、`node_type` と `render` が NULL でない、`amark_syntax_set_find_node_type` で型が見つかる。違反は `AMARK_ERROR_INVALID_ARGUMENT`。
 - 連鎖の表：型の識別子で引く配列（大きさは見つかった最大の識別子 ＋ 1）。各要素は、その型のスロットを構文セットの順に並べた一覧（通常の処理の連鎖）と、`render_plain` を持つものだけの一覧（テキストだけのモードの連鎖）を指す。スロットのない型は空。
 - `AMARK_SLOT_HTML_HOOKS` のスロットを構文セットの順に列挙し、検査する：`struct_size` が v1 の最小以上、`state_size` が `AMARK_HTML_MAX_STATE_SIZE`（64 KiB）以下、1 つの構文拡張に 2 つ以上ない。違反は `AMARK_ERROR_INVALID_ARGUMENT`。
-- 確保は文書のアロケータ。構築と解放は 1 回の出力の中で完結する。計算量はスロットの数 × 名前の検索（`syntax-tree` の名前の索引）に比例する。
+- 確保はグローバルのアロケータ。構築と解放は 1 回の出力の中で完結する。計算量はスロットの数 × 名前の検索（`syntax-tree` の名前の索引）に比例する。
 - 拡張が HTML のスロットだけを持っても、他の種類のスロットを持っても、同じ規則で扱う（6.8）。
 
 **Contracts**: Service [x]
@@ -427,15 +427,15 @@ typedef struct amark_html_hooks_slot {
 | Requirements | 1.1, 1.4–1.7, 4.6, 4.7, 6.3–6.5, 7.3–7.9, 8.1–8.5, 8.8, 11.2–11.5 |
 
 **Responsibilities & Constraints**
-- 入口：`node` と出力先を検査する（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`options` が NULL なら既定（フラグ 0）。`struct_size` が v1 の最小未満か、未知のフラグのビットがあれば `AMARK_ERROR_INVALID_ARGUMENT` で何も出力しない。文脈は呼び出し側のスタックに置き、確保は文書のアロケータ（`amark_document_allocator`）だけで行う。
+- 入口：`node` と出力先を検査する（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`options` が NULL なら既定（フラグ 0）。`struct_size` が v1 の最小未満か、未知のフラグのビットがあれば `AMARK_ERROR_INVALID_ARGUMENT` で何も出力しない。文脈は呼び出し側のスタックに置き、確保はグローバルのアロケータ（`amark_malloc` など）だけで行う。
 - 手順：連鎖の表とフックの一覧の構築 → 状態の確保（すべて 0 で埋める）→ `begin` を構文セットの順 → 部分木の出力 → `end` を逆の順 → `finish` を逆の順（成否にかかわらず、状態の確保に成功していれば全スロット）→ 解放 → 中継のバッファの残りを渡す。失敗した時点で以降の `begin` / たどり / `end` を飛ばし、`finish` と解放は行う。
 - たどり：親・最初の子・次の兄弟のリンクで反復する（`amark_iter_t` は使わない）。根の部分木の外へ出ない。各ノードで入るとき（子を持てる型も葉も）と出るときに処理を呼ぶ。子の省略が求められたら、子へ降りずに出るときへ進む。
-- 深さごとの文脈：動的な配列（文書のアロケータ、倍々に伸ばす）に `{tight_children}` を持つ。`amark_html_tight` は親の要素の値、部分木の根では false。入れ子の出力は配列の新しい基点から始め、外側の値を見ない。
+- 深さごとの文脈：動的な配列（倍々に伸ばす）に `{tight_children}` を持つ。`amark_html_tight` は親の要素の値、部分木の根では false。入れ子の出力は配列の新しい基点から始め、外側の値を見ない。
 - 呼び出しの文脈：処理を呼ぶ前に `{node, entering, chain, position, plain, extension}` を保存して設定し、戻ったら元に戻す。`amark_html_render_next` は現在の `node` と `entering` に一致するときだけ、`position - 1` の処理を呼ぶ（0 なら何もしない）。`amark_html_current_extension` は現在の処理を持つ構文拡張。フックの中ではそのフックの構文拡張。
 - テキストだけのモード：入るときの処理の中で `amark_html_enter_plain` が呼ばれたら、処理が戻った後、そのノードを owner として子孫をテキストだけのモードで出力する。子孫では、入るときにテキストだけのモードの連鎖の最後を呼び（なければ何もしない）、出るときは何も呼ばない。owner を出るときに通常のモードに戻り、owner の出るときの処理を通常どおり呼ぶ。すでにテキストだけのモードなら何もしない。
 - 入れ子の出力：`amark_html_render_subtree` は、同じ文書の任意のノード（切り離したものを含む）の部分木を、同じ出力先・オプション・フィルタ・状態で、通常のモード・新しい深さの文脈から出力する。フックは呼ばない。入れ子が `AMARK_HTML_MAX_NESTING`（32）を超えたら `AMARK_ERROR_LIMIT_EXCEEDED`。
 - 誤用：処理の外での `amark_html_render_next` / `amark_html_skip_children` / `amark_html_enter_plain` / `amark_html_set_tight_children`、フィルタの中での `amark_html_render_subtree` → `AMARK_ERROR_INVALID_STATE`（void の関数は何もしない）。現在のノードでない `node` の `render_next`、別の文書のノードの `render_subtree` → `AMARK_ERROR_INVALID_ARGUMENT`。出るときの `skip_children` と `enter_plain`、`set_tight_children` は何もしない。
-- 木を変更しない（const のノードだけを扱う）。グローバルな可変状態を持たない。同じ文書を複数のスレッドで同時に出力することは保証しない（`syntax-tree` の規則に従う）。異なる文書は独立。
+- 木を変更しない（const のノードだけを扱う）。グローバルな可変状態を足さない。同じ文書を複数のスレッドで同時に出力することは保証しない（`syntax-tree` の規則に従う）。異なる文書は独立。
 
 **Contracts**: Service [x] / State [x]
 ```c
@@ -479,8 +479,8 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 - Invariants：出力は同じ木・構文セット・オプションに対して決定的（構文セットの順と木の順だけで決まる）。
 
 ##### State Management
-- State model：`{document, allocator, root, flags, dispatch（連鎖の表、フックの一覧と状態）, output（HtmlOutput の状態）, depth の配列, plain_owner, call（現在の呼び出しの文脈）, nesting, error}`。1 回の出力の呼び出しの中だけに存在する。
-- Concurrency strategy：文脈は呼び出しごとに独立。共有するのは凍結した構文セットと `const` の静的データ（`amark.core.html` の表、エスケープの表）だけ。
+- State model：`{document, root, flags, dispatch（連鎖の表、フックの一覧と状態）, output（HtmlOutput の状態）, depth の配列, plain_owner, call（現在の呼び出しの文脈）, nesting, error}`。1 回の出力の呼び出しの中だけに存在する。
+- Concurrency strategy：文脈は呼び出しごとに独立。共有するのは凍結した構文セットと `const` の静的データ（`amark.core.html` の表、エスケープの表）と、グローバルのアロケータの設定だけ。
 
 **Implementation Notes**
 - Integration：`html_render.c` が `amark__html_dispatch_build` と HtmlOutput の初期化・終了を呼ぶ。数の書式（`start`、行と列）は `snprintf` を使わず、内部の 10 進の変換で書く（ロケールに依存しない）。
@@ -640,7 +640,6 @@ typedef struct amark__html_call {
 
 struct amark_html_context {
     const amark_document_t *document;
-    const amark_allocator_t *allocator;
     const amark_node_t *root;
     uint32_t flags;
     amark__html_handler_t *handlers, *plain_handlers;
@@ -691,13 +690,13 @@ struct amark_html_context {
 - **gfm_html**：`amark_test_html_gfm` の部品で、表（揃えと本体なしの表）、取り消し線、タイトとルーズのタスクリスト、脚注（同じ参照の 2 回目、参照されない定義、定義の中の複数の段落）、タグフィルタの 2 方式（`<script>`、`</style>`、`<SCRIPT >`、対象外の `<scripts>`、テキストの `&lt;script&gt;` が変わらないこと）の出力を cmark-gfm と同じ形の期待値で照合する（10.1–10.6）。
 
 ### Integration / Robustness Tests
-- **oom_test**：`AMARK_CHECK_OOM_SWEEP` で、組み込みの全型を含む木の出力（バッファと書き出しの関数）、フックの状態を持つ拡張、入れ子の出力について、メモリ不足が返りリークがなく、バッファが元の長さであること（1.5、11.2）。テスト用アロケータで文書を作り、出力の確保が文書のアロケータを通ることを確かめる（11.2）。
+- **oom_test**：`AMARK_CHECK_OOM_SWEEP` で、組み込みの全型を含む木の出力（バッファと書き出しの関数）、フックの状態を持つ拡張、入れ子の出力について、メモリ不足が返りリークがなく、バッファが元の長さであること（1.5、11.2）。テスト用アロケータを設定し、出力の確保がすべてそれを通ることを確かめる（11.2）。
 - **scale_test**：深さ 10 万の引用の鎖と強調の鎖を出力し、期待する長さとタグの数になること（11.3）。ノードの数を 10 倍にしたときの出力の時間がおおむね 10 倍以内であること、HTML のスロットを 1000 持つ構文セットで出力できること（11.4）。
-- **スレッド**：2 つのスレッドで別々の文書を同じ構文セットで出力するテストは、C99 にスレッドの API がないため書かない。グローバルな可変状態がないことを、静的なデータがすべて `const` であることのレビューと、エクスポートの検査で確かめる（11.5）。
+- **スレッド**：2 つのスレッドで別々の文書を同じ構文セットで出力するテストは、C99 にスレッドの API がないため書かない。アロケータの設定のほかにグローバルな可変状態がないことを、この spec の静的なデータがすべて `const` であることのレビューと、エクスポートの検査で確かめる（11.5）。
 - 公開ヘッダの単独コンパイルと C++ からの利用、エクスポートの検査、ライセンスヘッダの検査（`foundation` の仕組み。11.1）。
 
 ### Fuzzing
-- `html_render_fuzz`：入力の先頭のバイトをオプション、残りを木の組み立ての操作列（組み込みの型の生成と挿入、リテラルと属性の設定、切り離し）として解釈し、確保の失敗を注入するアロケータでバッファと書き出しの関数の両方へ出力する。異常終了・リークがなく、成功した出力が正しい UTF-8 で、安全モードでは生の HTML のリテラルと危険な URL が出力に現れないことを確かめる（3.1、3.2、11.6）。
+- `html_render_fuzz`：入力の先頭のバイトをオプション、残りを木の組み立ての操作列（組み込みの型の生成と挿入、リテラルと属性の設定、切り離し）として解釈し、確保の失敗を注入するアロケータを `amark_allocator_set` で設定して（終わりに既定へ戻す）バッファと書き出しの関数の両方へ出力する。異常終了・リークがなく、成功した出力が正しい UTF-8 で、安全モードでは生の HTML のリテラルと危険な URL が出力に現れないことを確かめる（3.1、3.2、11.6）。
 
 ## Security Considerations
 - 既定は安全モード。生の HTML は `write_raw` の 1 か所で置き換え、危険な URL は `write_url` の 1 か所で判定するため、拡張も同じ規則に乗る。拡張が `amark_html_write`（MARKUP）に利用者の文字列を渡すことは拡張の責任であり、API の文書で `write_escaped` / `write_url` / `write_raw` を使うよう示す。

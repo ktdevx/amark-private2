@@ -148,7 +148,7 @@
   2. 静的な `const` の CommonMark の構文セット（凍結した構造を静的に初期化する必要があり、tree のレイヤーが syntax のレイヤーを知ることになる）
   3. `src/syntax/commonmark.c` の便宜の関数（`amark_parse_commonmark`、`amark_parser_new_commonmark`）が構文セットを作り、所有権をパーサに渡し、パーサが文書に渡す
 - **Selected Approach**：3。所有権を受け取るパーサの生成の入口が構文セットの所有権を受け取り、文書へ渡す（2026-11-25 の改訂で、渡す時点を終了時からパーサの生成の最後に移した。横断レビュー r1 で、印のフラグ `AMARK_PARSE_TAKE_SYNTAX_SET` をやめ、非 `const` の構文セットを受け取る別の入口 `amark_parser_new_take_syntax_set` にした。Revision Notes を参照）。
-- **Rationale**：レイヤーの方向（syntax → parse → tree）を守れる。グローバルな可変状態がない。
+- **Rationale**：レイヤーの方向（syntax → parse → tree）を守れる。グローバルな可変状態を増やさない。
 - **Trade-offs**：便宜の関数は呼び出しごとに構文セットを作って凍結する（拡張は十数個で、費用は小さい）。多数の文書をパースする利用者は、構文セットを 1 つ作って共有する。**上流の変更が必要**：`amark_document_take_syntax_set`。
 
 ### Decision: ラベルの表は AVL 木

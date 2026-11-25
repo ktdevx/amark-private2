@@ -53,7 +53,7 @@
 ### `syntax-tree` の API で足りるか
 - **Context**：上流に不足があれば、回避せずに報告するため。
 - **Findings**：
-  - ノード型の名前から識別子：`amark_syntax_set_find_node_type`。記述子：`amark_node_desc`。スロットの列挙：`amark_syntax_set_slot_count` / `amark_syntax_set_slot_at`（拡張の記述子も返る）。属性とリテラルの取得：`amark_node_*` の取得関数。親と兄弟：`amark_node_parent` など（const を受け取る）。ソース上の範囲：`amark_node_source_span`、`amark_document_source_data`、`amark_document_position`。アロケータ：`amark_document_allocator`。すべて揃っている。
+  - ノード型の名前から識別子：`amark_syntax_set_find_node_type`。記述子：`amark_node_desc`。スロットの列挙：`amark_syntax_set_slot_count` / `amark_syntax_set_slot_at`（拡張の記述子も返る）。属性とリテラルの取得：`amark_node_*` の取得関数。親と兄弟：`amark_node_parent` など（const を受け取る）。ソース上の範囲：`amark_node_source_span`、`amark_document_source_data`、`amark_document_position`。確保：`amark_malloc` など（グローバルのアロケータ）。すべて揃っている。
   - `amark_iter_new` は非 const の根を取るため、const の木を出力するエンジンは使わず、親と兄弟のリンクで自分でたどる（反復、確保なし）。
   - スロットの種類の番号の割り当ては、`extension.h` に各 spec が追記する規約だけで、spec ごとの番号の範囲の表がない。`block-parser` と並行して設計しているため、衝突を避ける規約が上流にあるとよい（必須ではない。この spec は 0x0300–0x03FF を使う）。
   - `amark_syntax_set_core()`（文書の既定の構文セット）は HTML の出力のスロットを持たない（レイヤーの規則で `src/tree/` は `src/render/` を知らないため、正しい）。既定の構文セットで手で組み立てた木は、組み込みの HTML 出力の構文拡張を加えた構文セットを使わないと出力されない。

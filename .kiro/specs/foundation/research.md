@@ -85,6 +85,17 @@
 - **Rationale**：標準ライブラリと同じ形で、利用者が既存のアロケータをそのままつなげる。バッファの所有権の移転（detach）でサイズを持ち回る必要がない。
 - **Trade-offs**：サイズを必要とするアリーナ型のアロケータは自前でサイズを記録する必要がある。将来、`struct_size` で判定できる任意のフィールドとしてサイズつきの解放を足す余地を残す。
 
+### Decision: アロケータはグローバルに 1 つとし、オブジェクトごとには持たない
+- **Context**：要件 10.8、11。当初はオブジェクトの作成時にアロケータを渡し、値でコピーする方式だった。
+- **Alternatives Considered**：
+  1. オブジェクトごと（作成関数の引数で渡す）
+  2. グローバルに 1 つ（起動時に設定する）
+  3. グローバルとオブジェクトごとの併用
+- **Selected Approach**：2。`amark_allocator_set` で設定し、`amark_malloc` などはアロケータの引数を取らない。
+- **Rationale**：想定する差し替えの目的（別の malloc の実装、計測）はグローバルで足りる。文書ごとのメモリの制限や、同じプロセスの複数の利用者による別々の設定が必要になる見込みは低い。作成関数の引数とオブジェクト内のコピーがなくなり、`detach` の後の解放も `amark_free(data)` で済む。
+- **Trade-offs**：共有版を共用する複数の利用者は設定を共有する。文書ごとのメモリの制限はできない。設定は未解放のメモリがなく他のスレッドが使っていないときだけ変えられる（検査しない）。後からオブジェクトごとの指定が必要になると、作成関数の追加が要る。
+- **検査と既定の取得の関数を置かない**：検査は `amark_allocator_set` が行い、既定へは NULL で戻せるため、`amark_allocator_check` と `amark_allocator_default` は廃止した。
+
 ### Decision: バッファは公開の不透明型、内部向けには構造体を公開する内部ヘッダを持つ
 - **Context**：要件 12。レンダラの出力スロットを拡張が使うため、公開が必要。内部では構造体に埋め込みたい。
 - **Selected Approach**：`amark_buffer_t` は公開では不透明型（作成・解放の関数経由）。`src/runtime/buffer_internal.h` が構造体の定義と、埋め込み用の初期化・破棄の関数（`amark__buffer_init` / `amark__buffer_destroy`）を持つ。
@@ -126,6 +137,10 @@
 - **#1 ファジング用の補助ライブラリの規則**：後続の spec のファジングターゲットが `tests/` で定義するテスト用の補助ライブラリ（`amark_test_gfm` など）をリンクするが、`tests/` は `AMARK_BUILD_TESTS` のときだけ加えられ、`fuzz/` は `AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに加えられていた。そのため `-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF` で構成が失敗し、補助ライブラリが Naos をリンクしていればファジングだけの構成でも Naos が必要になっていた。決定：ファジングターゲットがリンクする補助ライブラリは Naos に依存してはならず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義する。`tests/` と `fuzz/` はどちらもその条件で、この順に加える。Naos に依存するターゲットは `if(AMARK_BUILD_TESTS)` の中に置き、`amark_add_test()` などは OFF のとき何もしない。`amark_add_fuzzer()` は `LIBRARIES` の各要素がターゲットとして定義されていなければ、また `Naos::naos` に直接依存していれば、名前を示して構成を失敗させる（通常のテストの構成でも検出できるようにするため）。CI の `fuzz` ジョブは `-DAMARK_BUILD_TESTS=OFF` で構成し、ファジングだけの構成を常に検査する。この spec の `buffer_fuzz` は失敗を注入するアロケータを自分のソースに持ち、Naos をリンクする `amark_test_support` を使わない。要件 7.7、7.8、design の BuildCore・Testing・TestSupport・FuzzInfra・CIWorkflow、タスク 1.4、1.5、3.5、3.6、4.2 に反映した。検討した代替：`AMARK_FUZZ` のときに `fuzz/` で補助ライブラリを定義し直す案は、同じライブラリの定義が 2 か所に分かれるので採らなかった。`AMARK_FUZZ` を `AMARK_BUILD_TESTS` の前提にする案は、Naos のないファジング専用の構成ができなくなるので採らなかった。
 - **#5 `block-parser` の拡張点の追加**：`block-parser` が最上位の `CMakeLists.txt` にオプション `AMARK_BUILD_BENCH`（既定 `OFF`）と `add_subdirectory(bench)` を、`.gitattributes` に `tests/syntax/data/spec_blocks.txt` の `export-ignore` を追加する予定であることが、Downstream Extension Points の表から漏れていた。表に 2 行を加え、最上位の `CMakeLists.txt` のオプションとサブディレクトリの組み立てを拡張点として Revalidation Trigger に加えた。`bench/` の中身（`inline-parser` などからの追加を受け入れる `bench/CMakeLists.txt` を含む）は `block-parser` が所有する。要件の Adjacent expectations と Out of Boundary にも記した。これらの追加はこの spec のタスクにしない。
 - **#7 `amark.h` の正規の include の順**：各 spec が「`extension.h` の後に」などと個別に位置を指定していたため、並行して追加すると順が一意に決まらなかった。`amark.h` はこの spec が所有するので、全 spec の公開ヘッダを並べる唯一の順（共通ランタイム → 構文木 → `render.h`・`html.h` → `entity.h`・`scan.h`・`parser.h`・`block.h`・`inline.h`・`commonmark.h` → `markdown.h`）を design の PublicHeaders に定め、後続の spec はこの順の自分の位置に追加することにした。構文木の群の中の順は `syntax-tree` の設計の依存の順（`node.h` → `document.h` → `token.h` → `iterator.h` → `dump.h` → `extension.h`）に合わせた。要件 9.7、タスク 1.4、4.1 に反映した。各ヘッダは単独でコンパイルできる（4.9）ので、この順は正しさではなく内容の一意性のためのもの。
+
+### 2026-11-25：グローバルのアロケータへの変更
+- 利用者の決定により、オブジェクトごとのアロケータをグローバルのアロケータに変えた。要件 10.8、11、12.8、design の Allocator・Buffer・TestSupport、タスク 2.1–2.3、2.7、3.6 を変え、要件 11.9 を追加した。
+- 後続の spec の影響：作成関数などのアロケータの引数、`amark_document_allocator`、オブジェクト内のアロケータの保持を廃止した（`syntax-tree`、`block-parser`、`inline-parser`、`html-renderer`、`markdown-renderer`）。
 
 ## References
 - [Naos v0.4.0](https://github.com/vabelorg/naos/tree/v0.4.0) — テストフレームワーク、CMake 関数、DLL の扱い

@@ -55,7 +55,7 @@
 - **Sources Consulted**：`.kiro/specs/foundation/design.md`
 - **Findings**：
   - エラーコード（`AMARK_ERROR_NONE`、`OUT_OF_MEMORY`、`INVALID_ARGUMENT`、`OVERFLOW`、`LIMIT_EXCEEDED`、`INVALID_STATE`）、出力引数は最後で `out_` で始める、失敗時は強い保証、解放の関数は NULL を受け付ける、公開の構造体は先頭に `struct_size`。
-  - `amark_allocator_t` はオブジェクトに値でコピーして持つ（`amark__allocator_resolve`）。`amark_buffer_t` は内部で埋め込める（`buffer_internal.h` の `amark__buffer_init` / `amark__buffer_destroy`）。
+  - 確保はグローバルのアロケータ（`amark_malloc` など）で行い、オブジェクトはアロケータを持たない。`amark_buffer_t` は内部で埋め込める（`buffer_internal.h` の `amark__buffer_init` / `amark__buffer_destroy`）。
   - `amark_utf8_validate` で UTF-8 を検査できる。
   - テストは `amark_add_test(... [INTERNAL] [LIBRARIES ...])`、確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP`、比較は `AMARK_CHECK_BYTES_EQ` / `AMARK_CHECK_BUFFER_EQ`。ファジングは `amark_add_fuzzer`。
   - `amark_test_support` は Amark の関数を呼ばない約束（`amark` と `amark_internal` の両方と組み合わせるため）。
@@ -80,7 +80,7 @@
   1. cmark と同じく、文書ノードが根であり所有者でもある
   2. 不透明型の `amark_document_t` が所有者で、根は型 document のノード
 - **Selected Approach**：2。`amark_document_root()` が根のノードを返す。
-- **Rationale**：ソースの一覧やアロケータをノードの型のデータに混ぜずに済む。切り離したノードの所有者が明確になる。
+- **Rationale**：ソースの一覧や構文セットをノードの型のデータに混ぜずに済む。切り離したノードの所有者が明確になる。
 - **Trade-offs**：オブジェクトが 1 つ増える。
 - **Follow-up**：`html-renderer` と `markdown-renderer` の入口はノードを受け取る形にすれば、部分木の出力にも使える。
 

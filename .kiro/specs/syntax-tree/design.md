@@ -38,7 +38,7 @@
 - CommonMark の構文セットの構築関数、パーサの入口
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark__allocator_resolve`、`amark__size_add`、`amark__size_mul`）、`runtime/buffer_internal.h`（`amark__buffer_init`、`amark__buffer_destroy`）
+- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark__size_add`、`amark__size_mul`）、`runtime/buffer_internal.h`（`amark__buffer_init`、`amark__buffer_destroy`）
 - テスト時：Naos、`amark_add_test()`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`）、`amark_add_fuzzer()`
 - C99 の標準ライブラリ（`<stddef.h>`、`<stdint.h>`、`<stdbool.h>`、`<string.h>`、`<limits.h>`）
 - レイヤーの規則：`src/tree/` は `src/parse/`、`src/render/`、`src/syntax/` を参照しない。公開ヘッダは他の公開ヘッダだけを include する
@@ -106,11 +106,11 @@ graph TB
     Renderers --> Tree
 ```
 
-**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit` → `node` → `document` → `token` → `node_edit` → `literal` / `node_attr` → `node_copy` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit.c` と `node.c` は文書の状態（追跡の有無、アロケータ、構文セット）を `tree_internal.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree_internal.h` の構造体だけを使う。違反はレビューでエラーとする。
+**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit` → `node` → `document` → `token` → `node_edit` → `literal` / `node_attr` → `node_copy` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit.c` と `node.c` は文書の状態（追跡の有無、構文セット）を `tree_internal.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree_internal.h` の構造体だけを使う。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Domain boundaries：公開ヘッダは機能ごとに 1 つ。実装は 1 ファイル 1 責務。
-- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、`AMARK_BEGIN_DECLS`、不透明型、`struct_size`、アロケータの経由、エラーコード、グローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ。
+- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、`AMARK_BEGIN_DECLS`、不透明型、`struct_size`、アロケータの経由、エラーコード、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ。
 
 ### Technology Stack
 
@@ -302,7 +302,7 @@ graph TB
   typedef uint32_t amark_node_type_t;
   typedef uint32_t amark_source_id_t;
   ```
-- `document.h` は `node.h` と `allocator.h`、`token.h` は `document.h`、`iterator.h` は `node.h`、`dump.h` は `node.h` と `buffer.h`、`extension.h` は `node.h`、`allocator.h`、`dump.h` を include する。各ヘッダは `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS` で宣言を囲み、ガードは `AMARK_<NAME>_H`。
+- `document.h` は `node.h`、`token.h` は `document.h`、`iterator.h` は `node.h`、`dump.h` は `node.h` と `buffer.h`、`extension.h` は `node.h`、`dump.h` を include する。各ヘッダは `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS` で宣言を囲み、ガードは `AMARK_<NAME>_H`。
 - `amark_node_source_span` と `amark_source_span_t` は `node.h`、`amark_token_check_t` は `document.h` に置く。
 
 ### Registry
@@ -419,8 +419,8 @@ typedef struct amark_extension {
     void *user_data;
 } amark_extension_t;
 
-AMARK_API amark_error_t amark_syntax_set_new(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
-AMARK_API amark_error_t amark_syntax_set_clone(const amark_syntax_set_t *set, const amark_allocator_t *allocator,
+AMARK_API amark_error_t amark_syntax_set_new(amark_syntax_set_t **out_set);
+AMARK_API amark_error_t amark_syntax_set_clone(const amark_syntax_set_t *set,
                                                amark_syntax_set_t **out_set);   /* 凍結していない複製 */
 AMARK_API void amark_syntax_set_free(amark_syntax_set_t *set);
 AMARK_API const amark_syntax_set_t *amark_syntax_set_core(void);
@@ -454,7 +454,7 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 - Invariants：組み込みの型の識別子は 1–19 で固定。拡張の型の識別子は 256 以上。spec ごとの範囲は重ならず、すべて `AMARK_SLOT_KIND_AMARK_FIRST`–`AMARK_SLOT_KIND_AMARK_LAST` に含まれる（テストで確かめる）。
 
 ##### State Management
-- State model：`{allocator, frozen, is_static, extensions[], 凍結後: dynamic_types[], name_index[], slot_index[]}`。状態は「編集可能」→（freeze）→「凍結」の一方向。
+- State model：`{frozen, is_static, extensions[], 凍結後: dynamic_types[], name_index[], slot_index[]}`。状態は「編集可能」→（freeze）→「凍結」の一方向。
 - Concurrency strategy：凍結後は読み取りだけ。静的な core の構文セットは `const` のデータ。
 
 **Implementation Notes**
@@ -494,7 +494,7 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 | 18 | link | INLINE | INLINE | INLINE | NONE | destination、title（""） |
 | 19 | image | INLINE | INLINE | INLINE | NONE | destination、title（""） |
 
-- 文字列の属性を持つ型は、`destroy` / `copy` / `equal` / `dump` の関数表で、文書のアロケータで確保した文字列を管理する。`equal` は list の start を type が ordered のときだけ比べる。
+- 文字列の属性を持つ型は、`destroy` / `copy` / `equal` / `dump` の関数表で、`amark_malloc` などで確保した文字列を管理する。`equal` は list の start を type が ordered のときだけ比べる。
 - `document` 型のノードは文書の生成時に 1 つだけ作る。`amark_node_new` で document を指定すると `AMARK_ERROR_INVALID_ARGUMENT`。
 
 **Contracts**: Service [x]
@@ -523,8 +523,8 @@ enum {
 | Requirements | 1.1–1.5, 1.9–1.11, 3.5, 7.8 |
 
 **Responsibilities & Constraints**
-- 生成：アロケータを `amark__allocator_resolve` で検査して値で保持し、凍結済みの構文セット（NULL なら `amark_syntax_set_core()`）を参照し、document 型の根のノードを作る。凍結していない構文セットは `AMARK_ERROR_INVALID_STATE`。編集の追跡は無効で始まる。
-- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `destroy` を呼ぶ）。次にソースを解放する。文書が構文セットを所有していれば、その後で `amark_syntax_set_free` で解放し（構文セット自身のアロケータで解放される）、最後に文書の構造体を解放する。ノードの `destroy` は記述子と構文セットを参照してよい（解放の順序で保証する）。
+- 生成：凍結済みの構文セット（NULL なら `amark_syntax_set_core()`）を参照し、document 型の根のノードを作る。凍結していない構文セットは `AMARK_ERROR_INVALID_STATE`。編集の追跡は無効で始まる。
+- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `destroy` を呼ぶ）。次にソースを解放する。文書が構文セットを所有していれば、その後で `amark_syntax_set_free` で解放し、最後に文書の構造体を解放する。ノードの `destroy` は記述子と構文セットを参照してよい（解放の順序で保証する）。
 - 構文セットの所有（`amark_document_take_syntax_set`、1.10、1.11）：
   - 受け付ける条件：`set` が、文書が使っている構文セットそのもの（`set == amark_document_syntax_set(document)`）で、静的な構文セット（`is_static`）でなく、文書がまだ構文セットを所有していない。どれかに反すれば `AMARK_ERROR_INVALID_ARGUMENT`（NULL の引数も同じ）で、文書は変わらず、所有権は呼び出し側に残る。文書が使うのは凍結済みの構文セットだけなので、受け取る構文セットは常に凍結済み（凍結の規則はそのまま）。
   - 成功の後：構文セットは文書のものになる。呼び出し側は `amark_syntax_set_free` を呼んではならない。凍結済みなので内容は変わらない。
@@ -537,12 +537,11 @@ enum {
 **Contracts**: Service [x] / State [x]
 ```c
 /* include/amark/document.h */
-AMARK_API amark_error_t amark_document_new(const amark_syntax_set_t *syntax, const amark_allocator_t *allocator,
+AMARK_API amark_error_t amark_document_new(const amark_syntax_set_t *syntax,
                                            amark_document_t **out_document);
 AMARK_API void amark_document_free(amark_document_t *document);
 AMARK_API amark_node_t *amark_document_root(const amark_document_t *document);
 AMARK_API const amark_syntax_set_t *amark_document_syntax_set(const amark_document_t *document);
-AMARK_API const amark_allocator_t *amark_document_allocator(const amark_document_t *document);
 
 AMARK_API amark_error_t amark_document_add_source(amark_document_t *document, const char *data, size_t length,
                                                   amark_source_id_t *out_source);
@@ -565,8 +564,8 @@ AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *documen
 - `data` が NULL で `length` が 0 なら空のソースとして扱う。`data` が NULL で `length` が 0 でなければ `AMARK_ERROR_INVALID_ARGUMENT`。
 
 ##### State Management
-- State model：`{allocator, syntax, owned_syntax（所有していれば syntax と同じ、なければ NULL）, root, all_nodes の環, sources[{bytes: 埋め込みの amark_buffer_t, line_starts[], pending_cr}], tracking, 内部のカウンタ}`。`owned_syntax` は NULL →（take）→ 非 NULL の一方向で、解放まで変わらない。
-- Concurrency strategy：文書は 1 つのスレッドから使う。異なる文書は独立（共有するのは凍結した構文セットと `const` の静的データだけ）。
+- State model：`{syntax, owned_syntax（所有していれば syntax と同じ、なければ NULL）, root, all_nodes の環, sources[{bytes: 埋め込みの amark_buffer_t, line_starts[], pending_cr}], tracking, 内部のカウンタ}`。`owned_syntax` は NULL →（take）→ 非 NULL の一方向で、解放まで変わらない。
+- Concurrency strategy：文書は 1 つのスレッドから使う。異なる文書は独立（共有するのは凍結した構文セット、`const` の静的データ、グローバルのアロケータの設定だけ）。
 
 #### NodeCore
 
@@ -908,7 +907,7 @@ typedef enum amark_event {
     AMARK_EVENT_NONE = 0, AMARK_EVENT_DONE = 1, AMARK_EVENT_ENTER = 2, AMARK_EVENT_EXIT = 3
 } amark_event_t;
 
-AMARK_API amark_error_t amark_iter_new(amark_node_t *root, amark_iter_t **out_iter);   /* 根の文書のアロケータで確保 */
+AMARK_API amark_error_t amark_iter_new(amark_node_t *root, amark_iter_t **out_iter);
 AMARK_API void amark_iter_free(amark_iter_t *iter);
 AMARK_API amark_event_t amark_iter_next(amark_iter_t *iter);
 AMARK_API amark_node_t *amark_iter_node(const amark_iter_t *iter);
@@ -1081,7 +1080,6 @@ typedef struct amark__source {
 } amark__source_t;
 
 struct amark_document {
-    amark_allocator_t allocator;
     const amark_syntax_set_t *syntax;
     amark_syntax_set_t *owned_syntax;         /* take_syntax_set で受け取った構文セット。なければ NULL */
     amark_node_t *root;
@@ -1115,7 +1113,7 @@ struct amark_document {
 ## Testing Strategy
 
 ### Unit Tests（Naos、`tests/tree/`）
-- **document**：既定の構文セットが core であること（1.2）、凍結していない構文セットの拒否（8.7）、ソースの複製と追加でオフセットが保たれること（1.4, 1.5）、チャンクの境目の CRLF を含む行と列（3.5）、追跡が無効で始まること（7.8）、2 つの文書の交互の操作が干渉しないこと（1.9）、構文セットの所有の受け渡し（テスト用アロケータで作った構文セットが文書の解放で解放されブロック数が 0 になること、`destroy` が構文セットを参照する拡張の型でサニタイザが解放の順序の誤りを検出しないこと。1.10）、静的な構文セット・文書が使っていない構文セット・2 回目の拒否で所有権が呼び出し側に残ること（1.11）。
+- **document**：既定の構文セットが core であること（1.2）、凍結していない構文セットの拒否（8.7）、ソースの複製と追加でオフセットが保たれること（1.4, 1.5）、チャンクの境目の CRLF を含む行と列（3.5）、追跡が無効で始まること（7.8）、2 つの文書の交互の操作が干渉しないこと（1.9）、構文セットの所有の受け渡し（テスト用アロケータを設定して作った構文セットが文書の解放で解放されブロック数が 0 になること、`destroy` が構文セットを参照する拡張の型でサニタイザが解放の順序の誤りを検出しないこと。1.10）、静的な構文セット・文書が使っていない構文セット・2 回目の拒否で所有権が呼び出し側に残ること（1.11）。
 - **builtin_types**：19 の型の識別子・名前・ブロック/インライン・葉かどうか・既定の属性（2.1, 2.4, 4.1）、core の構文セットから記述子を引けること（2.5）。
 - **syntax_set**：追加・挿入・削除・置換の順序（8.4）、core の削除の拒否（8.3）、名前の重複と不正な記述子の拒否（8.5）、型の名前の重複の凍結での検出と識別子の決定性（8.6）、凍結後の変更の拒否（8.7）、スロットの種類ごとの順の列挙（8.8）、利用者の範囲の種類（8.9）、名前・記述子・識別子の相互の検索（8.10）、複製が凍結されていないこと（8.11）、spec ごとの範囲が重ならず Amark の範囲に含まれること（8.13）。
 - **extension_type**：表のような検証用の型（データに所有する文字列、`can_contain` の上書き、`validate_literal`、`dump`）で、生成・解放・複製・比較・ダンプで関数表が呼ばれること（8.1, 8.12, 9.6）、`amark_node_mark_edited`（7.9）。
@@ -1135,7 +1133,7 @@ struct amark_document {
 - 公開ヘッダの単独コンパイルと C++ からの利用、エクスポートの検査（`foundation` の仕組み。10.1, 10.2）。
 
 ### Fuzzing
-- `tree_edit_fuzz`：入力のバイトを操作列（生成、挿入、移動、置換、切り離し、解放、リテラルの設定、一括設定、トークンの追加と移動、複製、取り込み、子をまとめた取り込み、追跡の切り替え）として解釈し、確保の失敗を注入するアロケータで実行する。各操作の後に `amark__tree_check` が成功し、最後にダンプと複製の比較が一致することを確かめる。
+- `tree_edit_fuzz`：入力のバイトを操作列（生成、挿入、移動、置換、切り離し、解放、リテラルの設定、一括設定、トークンの追加と移動、複製、取り込み、子をまとめた取り込み、追跡の切り替え）として解釈し、確保の失敗を注入するアロケータを `amark_allocator_set` で設定して実行する（終わりに既定へ戻す）。各操作の後に `amark__tree_check` が成功し、最後にダンプと複製の比較が一致することを確かめる。
 
 ## Performance & Scalability
 - 挿入・切り離し・兄弟と親への移動は定数時間（子を持つノードの挿入だけ、循環の検査で挿入先の深さに比例）。

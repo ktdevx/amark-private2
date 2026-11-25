@@ -38,7 +38,7 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
 **Objective:** As a Amark を組み込むアプリケーションの開発者, I want 構文セットとオプションを指定して、文字列全体または逐次の入力から構文木を得られること, so that 用途（一括の変換、ストリームの処理）に合わせてパースできる
 
 #### Acceptance Criteria
-1. When 利用者が構文セット、オプション、アロケータを指定して文字列全体をパースする, the Amark Block Parser shall その構文セットに従って構文木を持つ文書を作って返し、すべての確保を指定したアロケータで行う
+1. When 利用者が構文セットとオプションを指定して文字列全体をパースする, the Amark Block Parser shall その構文セットに従って構文木を持つ文書を作って返し、すべての確保を `foundation` のグローバルのアロケータで行う
 2. When 利用者が構文セットを用意せずに CommonMark でパースする手段を使う, the Amark Block Parser shall CommonMark の構文セットを内部で作って使い、返した文書が利用者の操作なしにその構文セットを保持し続けるようにする
 3. When 利用者が入力を任意の位置で区切って順に与え、最後に終了を指示する, the Amark Block Parser shall 区切りの位置（改行コードや UTF-8 の文字の途中を含む）によらず、同じ入力を一括でパースしたときと同じ木と同じ構文トークンを持つ文書を返す
 4. If 利用者が凍結していない構文セットを指定する, then the Amark Block Parser shall 状態の誤りを返し、パーサを作らない

@@ -40,7 +40,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 - **テスト**：[Naos](https://github.com/vabelorg/naos)。v0.x は破壊的変更がありうるため、FetchContent で特定のタグ（現時点では v0.4.0）に固定する。CTest に統合する。
 - **ライセンス**：MIT、Copyright (c) The Amark Authors。CommonMark の spec.txt（CC-BY-SA 4.0）はテストデータとしてだけ使い、ライブラリ本体には含めない。
 - **CI/CD**：GitHub Actions。Linux（GCC、Clang）、macOS（Clang）、Windows（MSVC、MinGW）でビルドとテストを行う。サニタイザ（ASan/UBSan）ジョブを持つ。タグを付けたときにリリース成果物を作る。
-- **API 規約**：シンボル接頭辞は `amark_` / `AMARK_`、公開ヘッダは `include/amark/` に置く。メモリ確保は差し替え可能なアロケータを経由させる。入力は UTF-8 とする。
+- **API 規約**：シンボル接頭辞は `amark_` / `AMARK_`、公開ヘッダは `include/amark/` に置く。メモリ確保は差し替え可能なグローバルのアロケータを経由させる。入力は UTF-8 とする。
 
 ## Boundary Strategy
 - **Why this split**：

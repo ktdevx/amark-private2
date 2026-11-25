@@ -51,7 +51,7 @@
 
 ### Revalidation Triggers
 - エラーコードの追加・意味の変更、出力引数の規約の変更 → すべての後続の spec
-- `amark_allocator_t` のフィールドの追加、`amark_buffer_t` の API の変更 → `syntax-tree`、`html-renderer`、`markdown-renderer`
+- `amark_allocator_t` のフィールドの追加、グローバルの設定の規則（`amark_allocator_set`）の変更、`amark_buffer_t` の API の変更 → `syntax-tree`、`html-renderer`、`markdown-renderer`
 - `amark_add_test()` / `amark_add_generated_tests()` / `amark_add_fuzzer()` の引数の変更、テスト生成の補助の契約の変更、ファジングターゲットがリンクするテスト用の補助ライブラリの規則（FuzzInfra の「ファジング用の補助ライブラリの規則」）の変更 → テストやファジングターゲットを持つすべての spec
 - 文字の分類の定義の変更、Unicode の版の更新、準拠対象の CommonMark の版の変更 → `inline-parser`、`block-parser`
 - 公開ヘッダの配置、`amark.h` の構成と正規の include の順（PublicHeaders）、`AMARK_API` の規則の変更 → すべての後続の spec
@@ -171,7 +171,7 @@ graph TB
 │   ├── export.h                   # AMARK_API、AMARK_BEGIN_DECLS / AMARK_END_DECLS
 │   ├── version.h                  # 版のマクロ（版の唯一の定義）と実行時の版の関数
 │   ├── error.h                    # amark_error_t と amark_error_string()
-│   ├── allocator.h                # amark_allocator_t と確保の関数
+│   ├── allocator.h                # amark_allocator_t、グローバルの設定、確保の関数
 │   ├── buffer.h                   # amark_buffer_t（不透明型）
 │   ├── utf8.h                     # UTF-8 の復号・検証・符号化
 │   └── unicode.h                  # 文字の分類、Unicode の版のマクロ
@@ -180,8 +180,8 @@ graph TB
 │   └── runtime/
 │       ├── version.c
 │       ├── error.c
-│       ├── allocator.c            # 既定のアロケータ、解決、確保の関数
-│       ├── alloc_internal.h       # amark__allocator_resolve()、桁あふれの検査つきの算術
+│       ├── allocator.c            # 既定のアロケータ、グローバルの設定、確保の関数
+│       ├── alloc_internal.h       # 桁あふれの検査つきの算術
 │       ├── buffer.c
 │       ├── buffer_internal.h      # struct amark_buffer の定義、埋め込み用の初期化と破棄
 │       ├── utf8.c
@@ -355,8 +355,8 @@ graph TB
 | 9.7 | `amark.h` の正規の include の順 | PublicHeaders | `amark.h` | — |
 | 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | エラーコードと失敗の規約 | Error、Error conventions | `amark_error_t`、`amark_error_string()` | — |
 | 10.9 | 表現できないことのエラーコード | Error | `AMARK_ERROR_UNREPRESENTABLE`、`amark_error_string()` | — |
-| 10.8 | グローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
-| 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8 | アロケータ | Allocator | `amark_allocator_t`、`amark_malloc()` など | — |
+| 10.8 | アロケータの設定のほかにグローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
+| 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9 | グローバルのアロケータ | Allocator | `amark_allocator_set()`、`amark_malloc()` など | — |
 | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8 | バッファ | Buffer | `amark_buffer_*` | — |
 | 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7 | UTF-8 | Utf8 | `amark_utf8_*` | — |
 | 14.1, 14.2, 14.3, 14.4, 14.5, 14.6 | 文字の分類 | Unicode | `amark_unicode_*`、`amark_ascii_is_punctuation()` | — |
@@ -385,7 +385,7 @@ graph TB
 | PublicHeaders / Export | Runtime | 配置、まとめのヘッダ、エクスポート、正規の include の順 | 2.4, 2.5, 9.1–9.3, 9.7 | — | Service |
 | Version | Runtime | 版のマクロと関数 | 9.4, 9.5 | Export (P0) | Service |
 | Error | Runtime | エラーコード | 10.1–10.7, 10.9 | Export (P0) | Service |
-| Allocator | Runtime | 差し替え可能なアロケータ | 11.1–11.8 | Error (P0) | Service |
+| Allocator | Runtime | 差し替え可能なグローバルのアロケータ | 11.1–11.9 | Error (P0) | Service |
 | Buffer | Runtime | 伸長できるバイトバッファ | 12.1–12.8 | Allocator (P0), Utf8 (P1) | Service, State |
 | Utf8 | Runtime | UTF-8 の処理 | 13.1–13.7 | Export (P0) | Service |
 | Unicode | Runtime | 文字の分類 | 14.1–14.6 | Export (P0) | Service |
@@ -699,8 +699,12 @@ void amark_test_allocator_init(amark_test_allocator_t *t);
 const amark_allocator_t *amark_test_allocator_get(amark_test_allocator_t *t);
 void amark_test_allocator_reset_counters(amark_test_allocator_t *t);
 
-/* 対象の処理：渡されたアロケータだけを使い、成功でも失敗でも、作ったものをすべて解放してから戻る */
-typedef amark_error_t (*amark_test_oom_scenario_t)(const amark_allocator_t *allocator, void *context);
+/* 対象の処理：成功でも失敗でも、作ったものをすべて解放してから戻る。
+   context のオブジェクトなど、処理の外で確保したメモリを解放・再確保しない */
+typedef amark_error_t (*amark_test_oom_scenario_t)(void *context);
+
+/* テストの側の amark_allocator_set を渡す */
+typedef amark_error_t (*amark_test_set_allocator_t)(const amark_allocator_t *allocator);
 
 typedef struct amark_test_oom_result {
     size_t iterations;             /* 失敗を注入した回数 */
@@ -709,15 +713,18 @@ typedef struct amark_test_oom_result {
     amark_error_t final_error;     /* 失敗を注入しない最後の実行の結果 */
 } amark_test_oom_result_t;
 
-amark_test_oom_result_t amark_test_oom_sweep(amark_test_oom_scenario_t scenario, void *context, size_t max_iterations);
+amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allocator,
+                                           amark_test_oom_scenario_t scenario, void *context,
+                                           size_t max_iterations);
 
 /* 呼び出し側の行で報告するマクロ：final_error が AMARK_ERROR_NONE、wrong_error_at と leak_at が 0 */
-#define AMARK_CHECK_OOM_SWEEP(scenario, context) /* ... */
+#define AMARK_CHECK_OOM_SWEEP(scenario, context) /* amark_allocator_set を渡して amark_test_oom_sweep を呼ぶ */
 #define AMARK_CHECK_BYTES_EQ(data, size, expected_literal) /* NAOS_CHECK_MEM_EQ を使う */
 #define AMARK_CHECK_BUFFER_EQ(buffer, expected_literal)    /* amark_buffer_data/length と比較 */
 ```
-- `amark_test_oom_sweep`：`fail_at = 1, 2, ...` と増やしながら実行し、失敗が注入されなかった回で終える。各回で、戻り値が `AMARK_ERROR_OUT_OF_MEMORY` であることと `live_blocks == 0` を確かめる。`max_iterations` を超えたら打ち切って結果に示す。
-- `AMARK_CHECK_BUFFER_EQ` は `buffer.h` の関数を呼ぶため、ヘッダ `test_check.h` のマクロとして呼び出し側で展開される（`amark_test_support` 自体は Amark の関数に依存しない）。
+- テスト用アロケータは、テストが `amark_allocator_set(amark_test_allocator_get(&t))` で設定し、終わりに `amark_allocator_set(NULL)` で既定に戻す。設定したまま中断しても無効なポインタが残らないよう `t` は静的な記憶域に置き、使うテストは始めに必ず設定し直す。設定が前のテストから残らないよう、設定中は中断するアサートを使わず、戻した後で結果を検査する。テスト用アロケータを設定している間は、同じプロセスで複数のスレッドから Amark を使わない。
+- `amark_test_oom_sweep`：各回の前に `set_allocator` でテスト用アロケータを設定し、戻る前に `set_allocator(NULL)` で既定に戻す（入れ子では使わない）。`fail_at = 1, 2, ...` と増やしながら実行し、失敗が注入されなかった回で終える。各回で、戻り値が `AMARK_ERROR_OUT_OF_MEMORY` であることと `live_blocks == 0` を確かめる。`max_iterations` を超えたら打ち切って結果に示す。
+- `AMARK_CHECK_BUFFER_EQ` は `buffer.h` の関数を呼ぶため、ヘッダ `test_check.h` のマクロとして呼び出し側で展開される。`AMARK_CHECK_OOM_SWEEP` も同じく `amark_allocator_set` の参照を呼び出し側に置く（`amark_test_support` 自体は Amark の関数に依存しない）。
 
 ### Runtime
 
@@ -728,7 +735,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_oom_scenario_t scenario,
 - 失敗したとき：操作の対象のオブジェクトは呼び出し前の有効な状態のまま（強い保証）。オブジェクトのポインタを返す出力引数には NULL を入れる。それ以外の出力引数は関数ごとに文書化する。
 - 必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT` を返す。解放の関数は NULL を受け付けて何もしない。
 - 失敗し得ない関数（問い合わせ、分類、復号）は値を直接返す。確保の関数（`amark_malloc` など）は `malloc` に倣い、失敗を NULL で示す。
-- グローバルな可変状態を持たない。静的なデータはすべて `const`。同じオブジェクトを複数のスレッドから同時に使う場合の同期は利用者の責任。
+- グローバルな可変状態は、アロケータの設定（`allocator.c` の静的な変数 1 つ）だけとする。ほかの静的なデータはすべて `const`。同じオブジェクトを複数のスレッドから同時に使う場合の同期は利用者の責任。
 - 公開の構造体は、先頭に `size_t struct_size` を置く。ライブラリは `struct_size` が知っている最小のサイズ以上であることを確かめ、自分の知らない末尾のフィールドを読まない。
 - ソースの先頭にはライセンスヘッダを置く（LicenseCheck の書式）。
 
@@ -816,8 +823,8 @@ AMARK_API const char *amark_error_string(amark_error_t error);
 
 | Field | Detail |
 |-------|--------|
-| Intent | すべての確保を利用者が差し替えられるようにする |
-| Requirements | 11.1–11.8 |
+| Intent | すべての確保を、利用者が差し替えられるグローバルのアロケータで行う |
+| Requirements | 11.1–11.9 |
 
 **Contracts**: Service [x]
 ```c
@@ -829,23 +836,24 @@ typedef struct amark_allocator {
     void (*free_fn)(void *user_data, void *ptr);
 } amark_allocator_t;
 
-AMARK_API const amark_allocator_t *amark_allocator_default(void); /* malloc/realloc/free に基づく */
-AMARK_API amark_error_t amark_allocator_check(const amark_allocator_t *allocator);
+/* グローバルのアロケータを設定する（値でコピー）。NULL なら既定（malloc/realloc/free）に戻す */
+AMARK_API amark_error_t amark_allocator_set(const amark_allocator_t *allocator);
 
-AMARK_API void *amark_malloc(const amark_allocator_t *allocator, size_t size);
-AMARK_API void *amark_malloc_array(const amark_allocator_t *allocator, size_t count, size_t size);
-AMARK_API void *amark_realloc(const amark_allocator_t *allocator, void *ptr, size_t new_size);
-AMARK_API void amark_free(const amark_allocator_t *allocator, void *ptr);
+AMARK_API void *amark_malloc(size_t size);
+AMARK_API void *amark_malloc_array(size_t count, size_t size);
+AMARK_API void *amark_realloc(void *ptr, size_t new_size);
+AMARK_API void amark_free(void *ptr);
 ```
-- `allocator` が NULL なら既定のアロケータ。
-- `amark_allocator_check`：NULL なら `AMARK_ERROR_NONE`。`struct_size` が v1 の最小のサイズ（`free_fn` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
-- コールバックへの保証：`size` と `new_size` は 0 にならない（0 は 1 として扱う）。`realloc_fn` と `free_fn` に NULL は渡らない（`amark_realloc(a, NULL, n)` は `malloc_fn` を、`amark_free(a, NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。
+- 設定しなければ既定のアロケータ（`malloc` / `realloc` / `free`）を使う。
+- `amark_allocator_set`：NULL なら既定に戻して `AMARK_ERROR_NONE`。`struct_size` が v1 の最小のサイズ（`free_fn` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT` で、現在の設定を変えない。
+- 設定を変えてよい条件（11.9）：Amark が確保した未解放のメモリがなく、他のスレッドが Amark の関数を呼んでいないこと。通常はアプリケーションの起動時に 1 回だけ設定する。破ったときの振る舞いは規定しない（検出もしない）。ロックやアトミックは使わない。
+- 設定は Amark の実体ごとに 1 つ。静的版を複数のモジュールにリンクしたときは、それぞれが独立した設定を持ち、あるモジュールで確保したメモリを別のモジュールの Amark で解放しない。
+- コールバックへの保証：`size` と `new_size` は 0 にならない（0 は 1 として扱う）。`realloc_fn` と `free_fn` に NULL は渡らない（`amark_realloc(NULL, n)` は `malloc_fn` を、`amark_free(NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。
 - `amark_malloc_array`：`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す。
-- オブジェクトは作成時に受け取ったアロケータを検査し、内部に値でコピーして保持する（`user_data` の寿命は利用者の責任）。`realloc_fn` が失敗したとき、元のブロックは有効なまま。
+- 構造体の値はコピーするが、`user_data` の指すものは、設定を変えるまで有効でなければならない（利用者の責任）。複数のスレッドで Amark を使うとき、コールバックはスレッド安全であること。コールバックから Amark の関数を呼ばない。オブジェクトはアロケータを保持しない。`realloc_fn` が失敗したとき、元のブロックは有効なまま。
 
 **内部の契約**（`src/runtime/alloc_internal.h`）
 ```c
-amark_error_t amark__allocator_resolve(const amark_allocator_t *in, amark_allocator_t *out); /* 検査して既定を補い、v1 の形にコピー */
 bool amark__size_add(size_t a, size_t b, size_t *out);   /* 桁あふれなら false */
 bool amark__size_mul(size_t a, size_t b, size_t *out);
 ```
@@ -864,7 +872,7 @@ bool amark__size_mul(size_t a, size_t b, size_t *out);
 ```c
 typedef struct amark_buffer amark_buffer_t;   /* 不透明型 */
 
-AMARK_API amark_error_t amark_buffer_new(const amark_allocator_t *allocator, amark_buffer_t **out_buffer);
+AMARK_API amark_error_t amark_buffer_new(amark_buffer_t **out_buffer);
 AMARK_API void amark_buffer_free(amark_buffer_t *buffer);
 
 AMARK_API const char *amark_buffer_data(const amark_buffer_t *buffer);  /* NULL にならない。常に NUL 終端 */
@@ -880,17 +888,17 @@ AMARK_API amark_error_t amark_buffer_truncate(amark_buffer_t *buffer, size_t len
 AMARK_API void amark_buffer_clear(amark_buffer_t *buffer);
 AMARK_API amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_t *out_length);
 ```
-- State model：`{data, length, capacity, allocator}`。不変条件は `length < capacity`（容量 0 のときは `data` が静的な空文字列を指す）と `data[length] == '\0'`。
+- State model：`{data, length, capacity}`。不変条件は `length < capacity`（容量 0 のときは `data` が静的な空文字列を指す）と `data[length] == '\0'`。
 - 伸長：必要な容量の 2 倍か必要量の大きい方へ伸ばす（再確保の回数は対数的）。計算の桁あふれは `AMARK_ERROR_OVERFLOW`、確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。どちらも内容を変えない。
 - `append(buffer, NULL, 0)` は成功。`data` が NULL で `size` が 0 でなければ `AMARK_ERROR_INVALID_ARGUMENT`。`data` がバッファ自身の内容を指していても正しく動く。
 - `append_codepoint`：`amark_utf8_encode` と同じ規則（範囲外とサロゲートは U+FFFD）。
 - `truncate`：`length` が現在の長さを超えたら `AMARK_ERROR_INVALID_ARGUMENT`。容量は減らさない。`clear` は長さを 0 にする。
-- `detach`：内容（NUL 終端）と長さを返し、所有権を呼び出し側に移す。取り出したメモリは `amark_free(<作成時のアロケータ>, data)` で解放する。容量 0 のときは 1 バイトを確保して返す（確保に失敗したら `AMARK_ERROR_OUT_OF_MEMORY`、出力引数は NULL と 0）。成功後、バッファは空の状態で使い続けられる。
+- `detach`：内容（NUL 終端）と長さを返し、所有権を呼び出し側に移す。取り出したメモリは `amark_free(data)` で解放する。容量 0 のときは 1 バイトを確保して返す（確保に失敗したら `AMARK_ERROR_OUT_OF_MEMORY`、出力引数は NULL と 0）。成功後、バッファは空の状態で使い続けられる。
 
 **内部の契約**（`src/runtime/buffer_internal.h`）
 ```c
-struct amark_buffer { char *data; size_t length; size_t capacity; amark_allocator_t allocator; };
-void amark__buffer_init(amark_buffer_t *buffer, const amark_allocator_t *resolved_allocator); /* 確保しない */
+struct amark_buffer { char *data; size_t length; size_t capacity; };
+void amark__buffer_init(amark_buffer_t *buffer); /* 確保しない */
 void amark__buffer_destroy(amark_buffer_t *buffer);
 ```
 - 内部のモジュールは、構造体に `amark_buffer_t` を値で埋め込み、公開の追加の関数をそのまま使える。
@@ -953,7 +961,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - Unicode の版はスクリプトの定数 1 か所と `unicode.h` のマクロで持ち、スクリプトは両者が一致しなければ失敗する。
 
 ## Data Models
-- 永続的なデータはない。共通ランタイムの状態は `amark_buffer_t`（State model は Buffer を参照）と、オブジェクトにコピーされる `amark_allocator_t` だけ。
+- 永続的なデータはない。共通ランタイムの状態は `amark_buffer_t`（State model は Buffer を参照）と、グローバルのアロケータの設定（`amark_allocator_t` 1 つ）だけ。
 - Unicode の範囲の表：`typedef struct { uint32_t first; uint32_t last; } amark__unicode_range_t;` の昇順で重ならない配列。隣り合う範囲は生成時に結合する。
 
 ## Error Handling
@@ -975,7 +983,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 ## Testing Strategy
 
 ### Unit Tests（Naos、`tests/runtime/`）
-- **allocator**：NULL で既定のアロケータになること、`struct_size` 不足とコールバックの欠落の拒否（11.5）、`amark_malloc_array` の桁あふれでコールバックが呼ばれないこと（11.7）、0 のサイズが 1 になりコールバックに 0 が渡らないこと。
+- **allocator**：未設定と NULL の設定で既定のアロケータになること（11.1, 11.2）、設定した後の確保・再確保・解放がすべて設定したアロケータを通ること（11.3）、`struct_size` 不足とコールバックの欠落の拒否と、拒否の後に設定が変わらないこと（11.5）、`amark_malloc_array` の桁あふれでコールバックが呼ばれないこと（11.7）、0 のサイズが 1 になりコールバックに 0 が渡らないこと。
 - **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、`SIZE_MAX` 付近の予約が `AMARK_ERROR_OVERFLOW` で内容が変わらないこと（12.5）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
 - **unicode**：各 Zs の文字と 4 つの制御文字（14.1）、P と S の代表（`$`、`+`、`^`、`€`、`¡`、`「`、絵文字の記号）と非該当（文字、数字、結合文字）（14.2）、ASCII 句読点の 32 文字すべてと隣接する値（14.3）、サロゲートと U+110000 以上（14.4）、`AMARK_UNICODE_VERSION_*` が 17.0.0 であること（14.5）。
@@ -991,7 +999,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 
 ### Fuzzing
 - `utf8_fuzz`：任意の入力で、`decode` の連続が入力全体を重なりなく覆うこと、各区切りで `decode_before` が同じ区切りと値を返すこと、`validate` の結果と `decode` が U+FFFD を返した位置の一致、正しい部分の `encode` で元のバイト列に戻ること。
-- `buffer_fuzz`：入力をバッファの操作列として解釈し、内部の失敗を注入するアロケータで実行して、毎回不変条件（NUL 終端、長さ）を確かめる。
+- `buffer_fuzz`：入力をバッファの操作列として解釈し、失敗を注入するアロケータを入力ごとに `amark_allocator_set` で設定して実行し（終わりにすべて解放して既定に戻す）、毎回不変条件（NUL 終端、長さ）を確かめる。
 
 ### CI（環境の検証）
 - 5 つの環境 × 静的/動的で全テスト（1.1, 5.1）、サニタイザ（5.2）、ファジングの短時間実行（5.3）、二重インストールでの種類の選択（2.7, 3.6）。

@@ -170,7 +170,7 @@ Amark では、パーサが元の表記をすべて構文トークンとして�
 1. The Amark Markdown Renderer shall 出力の時間を、木のノードの数、構文トークンの数、出力の大きさにほぼ比例させる
 2. When 深さ 10 万の木を出力する, the Amark Markdown Renderer shall 呼び出しのスタックを深さに比例して使わずに出力するか、表現できないことを報告する
 3. If 確保のどれかが失敗する, then the Amark Markdown Renderer shall メモリ不足を返し、リークせず、出力先を要件 1.5 のとおりに戻す
-4. The Amark Markdown Renderer shall グローバルな可変状態を持たず、異なる文書を別々のスレッドで同時に出力できるようにする
+4. The Amark Markdown Renderer shall `foundation` のアロケータの設定のほかにグローバルな可変状態を持たず、異なる文書を別々のスレッドで同時に出力できるようにする
 
 ### Requirement 13: API の規約
 **Objective:** As a Amark を組み込むアプリケーションの開発者, I want Markdown レンダラの API が他の Amark の API と同じ規約に従うこと, so that 学ぶことが少なく、ABI が安定する
@@ -178,5 +178,5 @@ Amark では、パーサが元の表記をすべて構文トークンとして�
 #### Acceptance Criteria
 1. The Amark Markdown Renderer shall 公開の型・関数・定数を `amark_` / `AMARK_` の接頭辞で、`include/amark/` の公開ヘッダに置き、公開ヘッダは他の公開ヘッダだけに依存する
 2. The Amark Markdown Renderer shall 公開の構造体に大きさのフィールドを持たせ、知らない末尾のフィールドを読まない
-3. The Amark Markdown Renderer shall すべての確保を文書のアロケータで行う
+3. The Amark Markdown Renderer shall すべての確保を `foundation` のグローバルのアロケータで行う
 4. The Amark Markdown Renderer shall エスケープのユーティリティを、出力の処理の外でも、文書や構文セットなしに使えるようにする

@@ -160,7 +160,7 @@ Amark では、CommonMark の構文も方言の構文も、同じ構文拡張の
 
 #### Acceptance Criteria
 1. The Amark HTML Renderer shall `foundation` のエラーコード、出力引数、NULL の扱い、アロケータの規約に従い、出力の文脈を不透明型とし、公開する構造体には大きさを表すフィールドを持たせる
-2. The Amark HTML Renderer shall 出力に使う確保を、出力する木の文書のアロケータで行う
+2. The Amark HTML Renderer shall 出力に使う確保を、すべて `foundation` のグローバルのアロケータで行う
 3. The Amark HTML Renderer shall 深さ 10 万の木でも、呼び出しのスタックを深さに比例して使わずに出力する
 4. The Amark HTML Renderer shall 出力の時間を、部分木のノードの数、出力の大きさ、構文セットのスロットの数の和に比例する範囲に収める
 5. The Amark HTML Renderer shall 異なる文書を別々のスレッドで同時に出力できるようにし、凍結した構文セットを共有できるようにする

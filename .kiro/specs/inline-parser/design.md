@@ -124,7 +124,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（`src/parse/inline_*`）と構文（`src/syntax/`）。構文の知識をエンジンに置かない。エンジンが知る組み込みのノード型は、テキストのまとめに使う `text` と、改行の受け皿の `softbreak` だけ（`syntax-tree` の組み込みの型で、構文ではない）。
-- Existing patterns preserved：エラーコードと出力引数、`struct_size`（スロットは `amark_slot_header_t`）、アロケータの経由（文書のアロケータ）、グローバルな可変状態なし、`amark__` の内部関数、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
+- Existing patterns preserved：エラーコードと出力引数、`struct_size`（スロットは `amark_slot_header_t`）、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、`amark__` の内部関数、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
 - Steering compliance：構文ごとに 1 ファイル、組み込みも公開 API だけ、parse → tree の一方向、spec.txt はテストデータだけ。
 
 ### Technology Stack
@@ -464,7 +464,7 @@ AMARK_API amark_error_t amark_inline_special_chars(const amark_syntax_set_t *set
 ```c
 /* src/parse/inline_internal.h */
 amark_error_t amark__inline_tables_build(amark_parse_context_t *ctx, amark__inline_tables_t *out_tables);
-void amark__inline_tables_free(amark__inline_tables_t *tables, const amark_allocator_t *allocator);
+void amark__inline_tables_free(amark__inline_tables_t *tables);
 ```
 
 #### InlineContext
@@ -585,8 +585,8 @@ typedef struct amark_inline_run_match {
 
 /* runs（ソース上の順）の上で process emphasis を行い、一致の順に照合を返す。capacity は
    runs の長さの合計の半分（切り捨て）以上（足りなければ AMARK_ERROR_INVALID_ARGUMENT）。
-   作業の配列は allocator で確保して返る前に解放する。時間は O(count + 照合の数) */
-AMARK_API amark_error_t amark_inline_match_delimiters(const amark_allocator_t *allocator, const amark_inline_run_t *runs,
+   作業の配列は amark_malloc_array で確保して返る前に解放する。時間は O(count + 照合の数) */
+AMARK_API amark_error_t amark_inline_match_delimiters(const amark_inline_run_t *runs,
                                                       size_t count, amark_inline_run_match_t *out_matches,
                                                       size_t capacity, size_t *out_count);
 
@@ -600,7 +600,7 @@ amark_error_t amark__inline_push_run(amark_inline_context_t *ctx, const amark__i
                                      bool *out_pushed, size_t *out_end);
 amark_error_t amark__inline_process_emphasis(amark_inline_context_t *ctx, size_t bottom);
 /* 照合の唯一の実装。steps が NULL でなければ区切り文字の比較の回数を足す（INTERNAL のカウンタ） */
-amark_error_t amark__inline_match_runs(const amark_allocator_t *allocator, const amark_inline_run_t *runs, size_t count,
+amark_error_t amark__inline_match_runs(const amark_inline_run_t *runs, size_t count,
                                        amark_inline_run_match_t *out_matches, size_t capacity, size_t *out_count,
                                        size_t *steps);
 ```
@@ -890,7 +890,7 @@ amark_error_t amark__cm_link_match(amark_inline_context_t *ctx, const amark_brac
 **Contracts**: Service [x]
 ```c
 /* tests/support/inline_check.h */
-typedef amark_error_t (*amark_test_set_factory_t)(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
+typedef amark_error_t (*amark_test_set_factory_t)(amark_syntax_set_t **out_set);
 /* factory は凍結した構文セットを返す（amark_syntax_set_new_commonmark、amark_test_gfm_set_new） */
 typedef enum amark_test_expect { AMARK_TEST_EXPECT_DUMP = 1, AMARK_TEST_EXPECT_HTML = 2 } amark_test_expect_t;
 
@@ -941,7 +941,7 @@ typedef void (*amark_test_example_check_fn_t)(amark_test_set_factory_t factory, 
 #define AMARK_TEST_GFM_ROLE_FOOTNOTE_REF_LABEL   0x0E61u  /* 脚注の参照のラベル（TEXT） */
 ```
   - 拡張オートリンクの link は、ブラケットや括弧のトークン（`LINK_OPEN`、`LINK_CLOSE`、`LINK_PAREN_*`、`LINK_REF_*`）を持たない。link が持つトークンは `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK` の印だけで、元のバイトは子の text のトークンが覆う。`markdown-renderer` の検証用部品は、この印で拡張オートリンクを見分ける（無編集なら元のバイトのまま出せる）。
-- `tests/extensions/gfm_set.{h,c}`：`amark_test_gfm_set_new(allocator, &set)` は、`amark_syntax_set_new` → `amark_syntax_set_add_commonmark` → `amark_test_parse_gfm` の `test.block.table`、`test.block.footnote_def`、`test.block.tasklist` → `test.inline.*` → `amark_test_html_gfm` の各部品（表、取り消し線、タスク項目、脚注、タグフィルタのフィルタ方式）→ 凍結、の順で作る。部品は `gfm_set.c` の中の 1 つの配列（取得関数の並び）に置き、後の spec が 1 か所に足せる形にする。`markdown-renderer` のタスク 4.2 が HTML の部品の後に `amark_test_md_gfm` の部品を足し、`amark_test_gfm` に依存を足す（その編集は `markdown-renderer` が行う。この spec の HTML の照合の結果は変わらない）。
+- `tests/extensions/gfm_set.{h,c}`：`amark_test_gfm_set_new(&set)` は、`amark_syntax_set_new` → `amark_syntax_set_add_commonmark` → `amark_test_parse_gfm` の `test.block.table`、`test.block.footnote_def`、`test.block.tasklist` → `test.inline.*` → `amark_test_html_gfm` の各部品（表、取り消し線、タスク項目、脚注、タグフィルタのフィルタ方式）→ 凍結、の順で作る。部品は `gfm_set.c` の中の 1 つの配列（取得関数の並び）に置き、後の spec が 1 か所に足せる形にする。`markdown-renderer` のタスク 4.2 が HTML の部品の後に `amark_test_md_gfm` の部品を足し、`amark_test_gfm` に依存を足す（その編集は `markdown-renderer` が行う。この spec の HTML の照合の結果は変わらない）。
 - INTERFACE ライブラリ `amark_test_gfm`（`gfm_inline_ext.c`、`gfm_set.c`。`block-parser` が提供する `amark_test_parse_gfm` と、`amark_test_html_gfm` に依存）。配布物とインストールには含めない（13.4）。
   - Naos に依存しない（ファジングのターゲットがリンクする。11.6）：ソースは Naos のヘッダを include せず、依存にも Naos を使うターゲットを含めない。依存する上流の検証用ライブラリも Naos に依存しないことを前提にする（`foundation` の規則。各 spec が守る）。Naos を使う検査（`amark_test_check_example` などの照合、`gfm_compose_test.c` の検査）は `amark_test_gfm` に入れず、Naos を使う `amark_test_inline` とテストの実行ファイルの側に置く。GFM 相当に固有の Naos を使う検査の補助が要るときは、`amark_test_gfm` に足さず、別の INTERFACE ライブラリ（`amark_test_gfm_check`。ファジングはリンクしない）に分ける。
   - `foundation` の規則どおり、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON のときに定義される。Naos を使うテスト（生成テスト、組み合わせのテスト）の登録は `AMARK_BUILD_TESTS` が ON のときだけ。
