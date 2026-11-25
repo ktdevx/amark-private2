@@ -159,6 +159,11 @@
 ### 2026-11-25：spec 間のレビュー（2 回目、cross-spec review r2）の反映
 - `tests/support/gen_examples.cmake` の所有の記述を直した：ファイルと基本の契約は `block-parser` が所有し、`inline-parser` は `EXPECT=html`・`FACTORY=`・`CHECK=` の追加だけを所有する（design の Allowed Dependencies と File Structure Plan の該当箇所）。この spec は引き続きこのファイルを編集しない。承認の状態は変えない。
 
+### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
+- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
+- **変更**：`src/syntax/md_core_internal.h` を `src/syntax/md_core.h` に改名した（File Structure Plan、フックの記述）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — エスケープ、文字参照、ブロックの構造、flanking と照合の規則
 - [cmark](https://github.com/commonmark/cmark) — `inlines.c`（照合）、`commonmark.c`（正規化した書き戻し）

@@ -46,9 +46,9 @@
 ### Allowed Dependencies
 - `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`base/allocator_internal.h`、`base/buffer_internal.h`）。`src/parse/inline_*.c` だけが内部 API を使う
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`dump.h`、`extension.h`）
-- `block-parser` の公開 API（`parser.h`、`scan.h`、`entity.h`、`commonmark.h`）。`scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`、`amark_scan_html_open_tag` / `_closing_tag`、そのバイト列の版 `amark_scan_html_open_tag_bytes` / `_closing_tag_bytes` を含む（名前と引数は `block-parser` の design に従う）。`src/parse/inline_*.c` は `parse_internal.h` を使わない（公開 API だけを使い、委譲先として呼ばれる）。例外は既定の委譲先を返す `inline_plain.c`（`block-parser` のファイル）が `inline_internal.h` の 1 つの宣言を使うこと
+- `block-parser` の公開 API（`parser.h`、`scan.h`、`entity.h`、`commonmark.h`）。`scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`、`amark_scan_html_open_tag` / `_closing_tag`、そのバイト列の版 `amark_scan_html_open_tag_bytes` / `_closing_tag_bytes` を含む（名前と引数は `block-parser` の design に従う）。`src/parse/inline_*.c` は `parse.h` を使わない（公開 API だけを使い、委譲先として呼ばれる）。例外は既定の委譲先を返す `inline_plain.c`（`block-parser` のファイル）が `inline_internal.h` の 1 つの宣言を使うこと
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`block-parser` の `tests/support/gen_examples.cmake`（拡張して使う）、`amark_test_support`、`amark_test_tree`、`amark_test_parse`（`amark_test_parse_check`。`block-parser` が関数の形で実装）、`amark_test_html_gfm`、`amark_test_parse_gfm`（`block-parser` が実装）、`amark_add_fuzzer`
-- レイヤーの規則：`src/parse/inline_*.c` は `src/syntax/` と `src/render/` を参照しない。`src/syntax/` のインラインの拡張は、`include/amark/` の公開ヘッダと、同じ層（`src/syntax/`）の中だけで共有する内部ヘッダ `src/syntax/link_common_internal.h` だけを include する。同じ層の `*_internal.h` は steering（structure.md）が許す例外で、`src/tree/`・`src/parse/`・`src/render/` の内部ヘッダへの依存とは扱いが違う（後者は禁止）。`link_common_internal.h` を include するのは `link_common.c`、`link.c`、`image.c` だけ
+- レイヤーの規則：`src/parse/inline_*.c` は `src/syntax/` と `src/render/` を参照しない。`src/syntax/` のインラインの拡張は、`include/amark/` の公開ヘッダと、同じ層（`src/syntax/`）の中だけで共有する内部ヘッダ `src/syntax/link_common.h` だけを include する。同じ層の内部ヘッダは steering（structure.md）が許す例外で、`src/tree/`・`src/parse/`・`src/render/` の内部ヘッダへの依存とは扱いが違う（後者は禁止）。`link_common.h` を include するのは `link_common.c`、`link.c`、`image.c` だけ
 - ファジング：`fuzz/inline_parse_fuzz.c` がリンクするテスト支援ライブラリ（`amark_test_gfm` と、その依存の `amark_test_parse_gfm`、`amark_test_html_gfm`、後で `markdown-renderer` が足す `amark_test_md_gfm`）は、`foundation` の規則に従い Naos に依存しない。Naos を使う検査の補助（`amark_test_inline`、`amark_test_parse` など）はファジングのターゲットにリンクしない
 
 ### Revalidation Triggers
@@ -120,7 +120,7 @@ graph TB
     Parse --> RT
 ```
 
-**Dependency direction（`src/parse/` の中）**：`inline_special` → `inline_dispatch` → `inline_context` → `inline_delims` → `inline_brackets` → `inline_text` → `inline_engine` → `inline_plain`（`block-parser` のファイル）。左のファイルは右のファイルの関数を呼ばない。`inline_*` は `block-parser` の他のファイルの内部関数を呼ばない。`src/syntax/` のインラインのファイルは公開ヘッダと、同じ層の内部ヘッダ `link_common_internal.h`（`link_common.c`、`link.c`、`image.c` だけ）だけを include する。違反はレビューでエラーとする。
+**Dependency direction（`src/parse/` の中）**：`inline_special` → `inline_dispatch` → `inline_context` → `inline_delims` → `inline_brackets` → `inline_text` → `inline_engine` → `inline_plain`（`block-parser` のファイル）。左のファイルは右のファイルの関数を呼ばない。`inline_*` は `block-parser` の他のファイルの内部関数を呼ばない。`src/syntax/` のインラインのファイルは公開ヘッダと、同じ層の内部ヘッダ `link_common.h`（`link_common.c`、`link.c`、`image.c` だけ）だけを include する。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（`src/parse/inline_*`）と構文（`src/syntax/`）。構文の知識をエンジンに置かない。エンジンが知る組み込みのノード型は、テキストのまとめに使う `text` と、改行の受け皿の `softbreak` だけ（`syntax-tree` の組み込みの型で、構文ではない）。
@@ -160,7 +160,7 @@ src/syntax/
 ├── char_ref.c                   # commonmark.char_ref（実体参照と数値文字参照）
 ├── code_span.c                  # commonmark.code_span（葉ごとのバッククォートの並びの索引）
 ├── emphasis.c                   # commonmark.emphasis（区切り文字の種類 * と _）
-├── link_common_internal.h       # リンクと画像が共有する、後ろの部分の解析・参照の解決・トークンの記録の宣言
+├── link_common.h                # リンクと画像が共有する、後ろの部分の解析・参照の解決・トークンの記録の宣言
 ├── link_common.c                # その実装
 ├── link.c                       # commonmark.link（[ の開き、ブラケットの後処理、link の性質、] の宣言）
 ├── image.c                      # commonmark.image（![ の開き、ブラケットの後処理）
@@ -854,7 +854,7 @@ AMARK_API bool amark_scan_html_closing_tag_bytes(const char *data, size_t length
 
 **Contracts**: Service [x]
 ```c
-/* src/syntax/link_common_internal.h（link.c と image.c だけが include する） */
+/* src/syntax/link_common.h（link.c と image.c だけが include する） */
 amark_error_t amark_cm_link_match(amark_inline_context_t *ctx, const amark_bracket_info_t *info,
                                   const char *node_type, amark_bracket_result_t *out_result);
 ```

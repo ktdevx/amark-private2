@@ -43,7 +43,7 @@
 
 ### Allowed Dependencies
 - `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`base/allocator_internal.h`、`base/buffer_internal.h`）
-- `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h`）。`src/parse/` は `tree/tree_internal.h` を使わない
+- `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h`）。`src/parse/` は `tree/tree.h` を使わない
 - `html-renderer` の公開 API `amark_html_core_extension()`（`html.h`）：`src/syntax/commonmark.c` の構築関数だけが使う（roadmap の順で `html-renderer` は先に実装される）。`markdown-renderer` の公開 API `amark_markdown_core_extension()`（`markdown.h`）も同じ場所だけが使い、その 1 行は `markdown-renderer` のタスク 3.7 が足す（この spec の実装の時点では使わない）
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`amark_test_support`、`amark_test_tree`、`amark_test_html_gfm`（`html-renderer` の検証用のノード型の記述子。GfmHookTests だけ）、`amark_add_fuzzer`
 - C99 の標準ライブラリ
@@ -166,7 +166,7 @@ include/amark/
 ├── commonmark.h      # 組み込み拡張の取得、CommonMark の構文セット、便宜の関数、役割の番号、優先度
 └── entity.h          # 文字参照の解読
 src/parse/
-├── parse_internal.h  # struct amark_parser / amark_parse_context / amark_block_context と内部関数
+├── parse.h           # struct amark_parser / amark_parse_context / amark_block_context と内部関数
 ├── text_input.c      # amark_text_input_t：区間の追加、論理的な位置とソースのオフセットの対応
 ├── label.c           # amark_label_normalize と amark_label_map_t（AVL 木）
 ├── scan_link.c       # リンクのラベル・宛先・タイトルの走査
@@ -529,7 +529,7 @@ AMARK_API const amark_inline_delegate_t *amark_inline_delegate_plain(void);
 
 **Contracts**: Service [x] / State [x]
 ```c
-/* src/parse/parse_internal.h */
+/* src/parse/parse.h */
 typedef struct amark_line { size_t start; size_t content_end; size_t ending_length; } amark_line_t;
 bool amark_line_reader_next(amark_line_reader_t *reader, const char *data, size_t length, bool final,
                             amark_line_t *out_line);
@@ -556,7 +556,7 @@ bool amark_line_reader_next(amark_line_reader_t *reader, const char *data, size_
 
 **Contracts**: Service [x]
 ```c
-/* src/parse/parse_internal.h */
+/* src/parse/parse.h */
 amark_error_t amark_engine_process_line(amark_parser_t *parser, const amark_line_t *line);
 amark_error_t amark_engine_finish(amark_parser_t *parser);
 ```
@@ -1184,7 +1184,7 @@ graph TB
 
 ### Logical Data Model（内部）
 ```c
-/* src/parse/parse_internal.h */
+/* src/parse/parse.h */
 typedef struct amark_open_block {
     amark_node_t *node;
     const amark_block_syntax_t *handler;

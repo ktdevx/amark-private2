@@ -27,9 +27,9 @@
 - `src/tree/`：ノード、構文トークン、編集、拡張のレジストリ
 - `src/parse/`：ブロックとインラインのエンジン
 - `src/render/`：HTML と Markdown のエンジン
-- `src/syntax/`：CommonMark の組み込み構文（1 つの構文につき 1 ファイル。例：`atx_heading.c`、`emphasis.c`）と、コア出力拡張（`html_*.c`、`md_*.c`）。同じ層の中だけで共有する内部ヘッダ（`*_internal.h`）は使ってよい。
+- `src/syntax/`：CommonMark の組み込み構文（1 つの構文につき 1 ファイル。例：`atx_heading.c`、`emphasis.c`）と、コア出力拡張（`html_*.c`、`md_*.c`）。`src/syntax/` の中だけで共有する内部ヘッダは使ってよい。
 
-内部でだけ使うヘッダは、`src/` の中に置く。ファイル名には `_internal.h` などの接尾辞を付けて、公開ヘッダと区別する。
+内部でだけ使うヘッダは、`src/` の中に置く。公開ヘッダとは、置き場所（`include/amark/` と `src/`）と include の書き方（`<amark/...>` と `"<層>/..."`）で区別する。そのため、内部ヘッダのファイル名には原則として接尾辞を付けない（`tree/tree.h`、`parse/parse.h`）。同じ名前の公開ヘッダがある内部ヘッダだけ、`_internal.h` の接尾辞を付けて区別する（公開の `buffer.h` に対する `base/buffer_internal.h`）。後から同じ名前の公開ヘッダを追加するときは、内部ヘッダの名前に接尾辞を付けて改める。
 
 ### テスト
 **Location**：`tests/`
@@ -64,7 +64,7 @@
 /* 2. 公開ヘッダ */
 #include <amark/node.h>
 /* 3. 他の内部ヘッダ（src/ からの相対パス） */
-#include "base/buffer.h"
+#include "base/buffer_internal.h"
 /* 4. 標準ライブラリ */
 #include <string.h>
 ```
@@ -75,7 +75,7 @@
 ## Code Organization Principles
 
 - **下位のレイヤーは上位のレイヤーを参照しない**。例えば、tree は parse や render を知らない。
-- **組み込みの構文も公開 API だけを使う**。`src/syntax/` から `src/tree/`・`src/parse/`・`src/render/` の内部ヘッダに依存するのは禁止する（`src/syntax/` 内の `*_internal.h` は可）。必要なら API を公開する。
+- **組み込みの構文も公開 API だけを使う**。`src/syntax/` から `src/tree/`・`src/parse/`・`src/render/` の内部ヘッダに依存するのは禁止する（`src/syntax/` の中の内部ヘッダは可）。必要なら API を公開する。
 - **すべてのソースファイルの先頭にライセンスヘッダを付ける**。
 
   ```c

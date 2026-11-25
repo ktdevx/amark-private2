@@ -146,6 +146,11 @@
 ### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
 - Revalidation Triggers の `amark_test_html_gfm` の依存の行で、影響先を `block-parser` のファジングターゲット（`amark_test_html_gfm` をリンクしない）から、`inline-parser`（`inline_parse`）と `markdown-renderer`（`md_roundtrip`、`md_edit`）のファジングターゲットに直し、中間のライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_gfm`（`inline-parser`）を明記した。承認の状態は変えない。
 
+### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
+- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
+- **変更**：`src/syntax/html_core_internal.h` を `src/syntax/html_core.h` に改名した（File Structure Plan、該当のコンポーネント）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - cmark 0.31.1 `src/html.c`、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re` — 出力とエスケープと危険な URL の規則
 - CommonMark Spec 0.31.2 — 準拠の対象

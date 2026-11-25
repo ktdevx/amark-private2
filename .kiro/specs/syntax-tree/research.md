@@ -205,6 +205,11 @@
 ### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
 - **`amark_test_tree` の定義の条件**：`tree_builder.h` は Naos のマクロ `AMARK_CHECK_TREE_DUMP` を宣言するので `amark_test_tree` は Naos に依存する。`foundation` の規則 7.7 では `tests/` は `AMARK_FUZZ` だけが ON の構成でも入るため、`amark_test_tree` の定義と `add_subdirectory(tree)` を `if(AMARK_BUILD_TESTS)` の中に置くと明記した（design の Modified Files、TreeBuilder、タスクの該当箇所）。ファジングターゲットはこのライブラリをリンクしない。承認は維持する。
 
+### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
+- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
+- **変更**：`src/tree/tree_internal.h` を `src/tree/tree.h` に、`src/tree/syntax_set_internal.h` を `src/tree/syntax_set.h` に改名した（File Structure Plan、Dependency direction、Components、TreeInvariants、Logical Data Model）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則

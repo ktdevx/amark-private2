@@ -156,7 +156,7 @@ src/render/
 ├── markdown_dispatch.c      # MdDispatch：スロットの検査、型ごとの連鎖の表、フックの一覧と状態
 └── markdown_render.c        # MdEngine：入口、オプションの検査、反復のたどり、呼び出しの文脈、render_next、報告、フックの寿命
 src/syntax/
-├── md_core_internal.h       # 19 のスロットとフックの extern 宣言、core の状態の構造体、ブロックの共通の判定（md_*.c だけが使う）
+├── md_core.h                # 19 のスロットとフックの extern 宣言、core の状態の構造体、ブロックの共通の判定（md_*.c だけが使う）
 ├── md_core.c                # amark.core.markdown の表と取得関数、フック（構文の有無、エスケープの集合、符号化、定義と参照の検査、行頭の保護、照合）
 ├── md_blocks.c              # document、block_quote、list、item、code_block、html_block、paragraph、heading、thematic_break、link_definition と amark_markdown_write_item_prefix
 └── md_inlines.c             # text、softbreak、linebreak、code、html_inline、emph、strong、link、image と amark_markdown_commonmark_flanks
@@ -744,7 +744,7 @@ AMARK_API amark_error_t amark_markdown_fail(amark_markdown_context_t *ctx, uint3
 
 **Responsibilities & Constraints**
 - `amark.core.markdown`：名前 `"amark.core.markdown"`、ノード型 0、ノードのスロット 19 とフックのスロット 1、静的な `const` の記憶域。公開 API（`markdown.h`、`node.h`、`token.h`、`parser.h`、`scan.h`、`inline.h`、`commonmark.h`）だけを使う。
-- **フック**（状態は `md_core_internal.h` の構造体）：
+- **フック**（状態は `md_core.h` の構造体）：
   - `begin`：(1) 構文の有無を `amark_syntax_set_find_extension` で `commonmark.*` の名前から求める。(2) `amark_inline_special_chars` の和を `amark_markdown_add_escape_chars` で足す。(3) `commonmark.backslash_escape` と `commonmark.char_ref` の有無から `amark_markdown_set_encodings`。(4) `AMARK_SLOT_INLINE_NODE_TRAITS` から LINK の性質の型を集める。(5) 文書の根に編集の記録があるときだけ、文書の link_definition を前順に集めて `amark_label_normalize` と `amark_label_map_t`（先勝ち）で表を作り、参照の形のリンクと画像（下の「リンクの書式の分類」で参照の形のもの）のラベルが、同じ宛先とタイトルの定義に解決されなければ `amark_markdown_mark_dirty`。link_definition に編集があれば、`AMARK_ROLE_INLINE_UNMATCHED` の `[` を持つ text に汚れの印を付ける。
   - **リンクの書式の分類**（`begin` と link / image の処理が同じ規則を使う）：自分のトークンの役割で決める。組み込みのリンクと画像は必ず `LINK_OPEN` と `LINK_CLOSE` を持つ。`LINK_OPEN` を持ち `LINK_PAREN_OPEN` を持てばインラインの形、`LINK_OPEN` を持ち `LINK_PAREN_*` を持たなければ参照の形（`LINK_REF_LABEL` があれば完全、`LINK_REF_OPEN` だけなら省略、`LINK_OPEN` と `LINK_CLOSE` だけなら短縮）。`AUTOLINK_*` を持てばオートリンク。`LINK_OPEN`・`LINK_PAREN_*`・`LINK_REF_*`・`AUTOLINK_*` をどれも持たないトークンつきのリンクは拡張の定めた形（例：`inline-parser` の `test.inline.autolink` の拡張オートリンク。長さ 0 の `TEXT` に `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK` を持つ）とし、参照の検査の対象にせず汚れの印を付けない。トークンを持たない新しいリンクはこの分類の外（作り直す）。
   - `protect`：`BLOCK_GUARD` の行の先頭について、`#`・`>`・`-`・`+`・`=`・`~` なら `[0, 1)`、1–9 桁の数字に `.` か `)` が続けばその区切りを保護する。先頭が `MARKUP` で、`amark_scan_html_block_start`（上流）が段落を中断する HTML ブロックの開始と判定すれば `[0, 1)` を保護する（マークアップなので表現できない）。

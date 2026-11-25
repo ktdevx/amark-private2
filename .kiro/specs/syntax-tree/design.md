@@ -106,7 +106,7 @@ graph TB
     Renderers --> Tree
 ```
 
-**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit` → `node` → `document` → `token` → `node_edit` → `literal` / `node_attr` → `node_copy` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit.c` と `node.c` は文書の状態（追跡の有無、構文セット）を `tree_internal.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree_internal.h` の構造体だけを使う。違反はレビューでエラーとする。
+**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit` → `node` → `document` → `token` → `node_edit` → `literal` / `node_attr` → `node_copy` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit.c` と `node.c` は文書の状態（追跡の有無、構文セット）を `tree.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree.h` の構造体だけを使う。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Domain boundaries：公開ヘッダは機能ごとに 1 つ。実装は 1 ファイル 1 責務。
@@ -133,8 +133,8 @@ include/amark/
 ├── dump.h            # S 式のダンプとダンプの書き手
 └── extension.h       # ノード型の記述子、構文拡張の記述子、スロットの見出し、構文セット
 src/tree/
-├── tree_internal.h   # struct amark_document / amark_node / amark_token_record / amark_source と、モジュール間の内部関数
-├── syntax_set_internal.h  # struct amark_syntax_set、識別子から記述子を引く内部関数、組み込みの記述子の表の宣言
+├── tree.h            # struct amark_document / amark_node / amark_token_record / amark_source と、モジュール間の内部関数
+├── syntax_set.h      # struct amark_syntax_set、識別子から記述子を引く内部関数、組み込みの記述子の表の宣言
 ├── builtin_types.c   # 組み込みの 19 の型の記述子（関数表を含む）と amark.core 拡張
 ├── syntax_set.c      # 構文セットの生成・変更・複製・凍結・検索・スロットの索引、静的な core の構文セット
 ├── document.c        # 文書の生成と解放、ソースの登録と追加、行の先頭の索引、位置、追跡の切り替え
@@ -271,7 +271,7 @@ graph TB
 | BuiltinTypes | Registry | 組み込みの 19 の型の記述子と `amark.core` | 2.1–2.5, 4.1 | NodeCore (P1) | Service |
 | Document | Tree | 文書、ソース、行の索引、位置、追跡の切り替え、構文セットの所有 | 1.1–1.5, 1.9–1.11, 3.5, 7.8 | NodeCore (P0), SyntaxSet (P0), buffer (P0) | Service, State |
 | NodeCore | Tree | ノードの生成・部分木の解放・参照・型のデータ | 1.3, 2.4, 3.1, 3.7, 4.1, 8.12 | SyntaxSet (P0), EditTracking (P0) | Service, State |
-| EditTracking | Tree | 記録と伝播 | 7.1–7.10, 10.4 | tree_internal.h の構造体 (P0) | Service |
+| EditTracking | Tree | 記録と伝播 | 7.1–7.10, 10.4 | tree.h の構造体 (P0) | Service |
 | TokenStore | Tree | トークンの保持と検査 | 6.1–6.8, 10.5 | NodeCore (P0), Document (P0) | Service |
 | LiteralAttr | Tree | リテラルと属性の規則 | 2.2, 2.3, 2.6, 5.1–5.8 | EditTracking (P0), StructureEdit (P0), utf8 (P0) | Service |
 | StructureEdit | Tree | 挿入・移動・置換・切り離し・解放 | 1.6, 1.7, 4.2–4.5, 4.11, 10.3 | NodeCore (P0), EditTracking (P0) | Service |
@@ -458,7 +458,7 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 - Concurrency strategy：凍結後は読み取りだけ。静的な core の構文セットは `const` のデータ。
 
 **Implementation Notes**
-- Integration：`syntax_set_internal.h` は `amark_syntax_set_desc(set, type)`（文書とノードが使う定数時間の検索）を宣言する。組み込みの型は `amark_builtin_types[]`（識別子で添字）から引く。
+- Integration：`syntax_set.h` は `amark_syntax_set_desc(set, type)`（文書とノードが使う定数時間の検索）を宣言する。組み込みの型は `amark_builtin_types[]`（識別子で添字）から引く。
 - Validation：`syntax_set_test.c` と `oom_test.c`。
 - Risks：下流の spec が包含やスロットに不足を見つけたら、この spec を更新する（回避策をとらない）。
 
@@ -779,7 +779,7 @@ AMARK_API amark_error_t amark_node_set_link_label(amark_node_t *node, const char
 - `replace(old, new)`：`new` を `old` の位置に置き、`old` を切り離す。`old` が切り離されていれば `AMARK_ERROR_INVALID_ARGUMENT`。
 - `unlink`：根なら `AMARK_ERROR_INVALID_ARGUMENT`、切り離し済みなら何もせず成功。
 - `destroy`：木にあれば切り離し（親に `CHILDREN`）、`amark_node_destroy_subtree` で解放する。根を渡したときは何もしない。
-- 包含の判定（検査の順の 3）と、検査を済ませた切り離しのノードを親の指定の位置（兄弟の前、NULL なら末尾）につなぐ処理（記録つき）は、`tree_internal.h` の内部関数（`amark_node_allows_child`、`amark_node_link_child`）として、CopyImport の子をまとめた取り込みからも使う（規則を 1 か所に保つ）。
+- 包含の判定（検査の順の 3）と、検査を済ませた切り離しのノードを親の指定の位置（兄弟の前、NULL なら末尾）につなぐ処理（記録つき）は、`tree.h` の内部関数（`amark_node_allows_child`、`amark_node_link_child`）として、CopyImport の子をまとめた取り込みからも使う（規則を 1 か所に保つ）。
 
 **Contracts**: Service [x]
 ```c
@@ -991,7 +991,7 @@ AMARK_API amark_error_t amark_dump_attr_symbol(amark_dump_writer_t *writer, cons
 | Requirements | 4.5, 6.1, 7.5 の検証 |
 
 **Responsibilities & Constraints**
-- `amark_error_t amark_tree_check(const amark_document_t *document, const char **out_reason)`（`tree_internal.h`）：親子と兄弟のリンクの対称性、包含の規則、`DESCENDANTS` の不変条件、トークンの整列と範囲、全ノードの環に属すること、を反復で検査する。違反は `AMARK_ERROR_INVALID_STATE` と理由の静的な文字列。
+- `amark_error_t amark_tree_check(const amark_document_t *document, const char **out_reason)`（`tree.h`）：親子と兄弟のリンクの対称性、包含の規則、`DESCENDANTS` の不変条件、トークンの整列と範囲、全ノードの環に属すること、を反復で検査する。違反は `AMARK_ERROR_INVALID_STATE` と理由の静的な文字列。
 - 文書は内部のカウンタ（祖先への伝播の段数、トークンの移動の回数）を持ち、INTERNAL のテストが計算量（10.3–10.5）を確かめる。公開しない。
 
 ### Test
@@ -1045,7 +1045,7 @@ graph TB
 
 ### Logical Data Model（内部）
 ```c
-/* src/tree/tree_internal.h */
+/* src/tree/tree.h */
 typedef struct amark_token_record {
     size_t offset;
     size_t length;

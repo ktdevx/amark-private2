@@ -137,7 +137,7 @@ src/render/
 ├── html_dispatch.c       # スロットの検査、型の識別子ごとの連鎖の表とフックの一覧の構築と解放
 └── html_render.c         # 入口、オプションの検査、反復のたどり、深さごとの文脈、テキストだけのモード、render_next、入れ子の出力、フックと状態
 src/syntax/
-├── html_core_internal.h  # 19 のスロットの extern 宣言（amark_html_slot_<type>）。html_core.c だけが使う
+├── html_core.h           # 19 のスロットの extern 宣言（amark_html_slot_<type>）。html_core.c だけが使う
 ├── html_core.c           # amark.core.html の構文拡張の表と amark_html_core_extension()
 ├── html_blocks.c         # document、block_quote、list、item、code_block、html_block、paragraph、heading、thematic_break、link_definition のスロット
 └── html_inlines.c        # text、softbreak、linebreak、code、html_inline、emph、strong、link、image のスロット（テキストだけのモードを含む）
@@ -531,7 +531,7 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 /* include/amark/html.h */
 AMARK_API const amark_extension_t *amark_html_core_extension(void);   /* "amark.core.html"。静的、解放しない */
 
-/* src/syntax/html_core_internal.h（html_core.c だけが include する） */
+/* src/syntax/html_core.h（html_core.c だけが include する） */
 extern const amark_html_node_slot_t amark_html_slot_document;   /* … 19 の型のそれぞれ */
 ```
 
