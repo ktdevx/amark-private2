@@ -727,7 +727,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 - 必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT` を返す。解放の関数は NULL を受け付けて何もしない。
 - 失敗し得ない関数（問い合わせ、分類、復号）は値を直接返す。確保の関数（`amark_malloc` など）は `malloc` に倣い、失敗を NULL で示す（サイズ 0 の確保も NULL を返すが、失敗ではない。Allocator を参照）。
 - グローバルな可変状態は、アロケータの設定（`allocator.c` の静的な変数 1 つ）だけとする。ほかの静的なデータはすべて `const`。同じオブジェクトを複数のスレッドから同時に使う場合の同期は利用者の責任。
-- 公開の構造体は、先頭に `size_t struct_size` を置く。ライブラリは `struct_size` が知っている最小のサイズ以上であることを確かめ、自分の知らない末尾のフィールドを読まない。
+- 公開の構造体は、先頭に `size_t struct_size` を置く。ライブラリは `struct_size` が知っている最小のサイズ以上であることを確かめ、自分の知らない末尾のフィールドを読まない。例外は `amark_allocator_t` で、レイアウトを固定するため `struct_size` を持たない（Allocator を参照）。
 - ソースの先頭にはライセンスヘッダを置く（LicenseCheck の書式）。
 
 #### PublicHeaders / Export
@@ -834,8 +834,8 @@ AMARK_API const char *amark_error_string(amark_error_t error);
 
 **Contracts**: Service [x]
 ```c
+/* レイアウトは固定。フィールドの追加・削除・並べ替え・型の変更をしない */
 typedef struct amark_allocator {
-    size_t struct_size;   /* sizeof(amark_allocator_t) を入れる */
     void *(*malloc_fn)(size_t size);
     void *(*calloc_fn)(size_t count, size_t size);
     void *(*realloc_fn)(void *ptr, size_t new_size);
@@ -851,7 +851,7 @@ AMARK_API void *amark_realloc(void *ptr, size_t new_size);
 AMARK_API void amark_free(void *ptr);
 ```
 - 設定しなければ既定のアロケータ（`malloc` / `calloc` / `realloc` / `free`）を使う。
-- `amark_allocator_set`：NULL なら既定に戻して `AMARK_ERROR_NONE`。`struct_size` が v1 の最小のサイズ（`free_fn` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT` で、現在の設定を変えない。
+- `amark_allocator_set`：NULL なら既定に戻して `AMARK_ERROR_NONE`。コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT` で、現在の設定を変えない。
 - 設定を変えてよい条件（11.9）：Amark が確保した未解放のメモリがなく、他のスレッドが Amark の関数を呼んでいないこと。通常はアプリケーションの起動時に 1 回だけ設定する。破ったときの振る舞いは規定しない（検出もしない）。ロックやアトミックは使わない。
 - 設定は Amark の実体ごとに 1 つ。静的版を複数のモジュールにリンクしたときは、それぞれが独立した設定を持ち、あるモジュールで確保したメモリを別のモジュールの Amark で解放しない。
 - コールバックへの保証：`size`、`count`、`new_size` は 0 にならない（次の「0 の確保」を参照）。`calloc_fn` に渡す `count * size` は桁あふれしない。`realloc_fn` と `free_fn` に NULL は渡らない（`amark_realloc(NULL, n)` は `malloc_fn` を、`amark_free(NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。`calloc_fn` は `count * size` バイトをすべて 0 にしたメモリを返すこと（利用者の責任。Amark は 0 埋めを補わない）。`malloc_fn` と `realloc_fn` が返すメモリの内容は、`realloc_fn` が引き継ぐ部分を除いて不定。
@@ -867,7 +867,7 @@ bool amark__size_mul(size_t a, size_t b, size_t *out);
 ```
 
 **Implementation Notes**
-- Risks：`malloc_fn` などの名前は、`malloc`、`calloc`、`free` を関数形式のマクロで置き換えるデバッグ用ツールと衝突しないように選んだ。将来、サイズつきの解放などを任意のフィールドとして末尾に追加できる（`struct_size` で判定）。
+- Risks：`malloc_fn` などの名前は、`malloc`、`calloc`、`free` を関数形式のマクロで置き換えるデバッグ用ツールと衝突しないように選んだ。`amark_allocator_t` は標準ライブラリの 4 関数と 1 対 1 でレイアウトを固定する（11.6）。将来、サイズつきの解放などが必要になったら、この構造体を変えず、別の構造体と設定の関数を追加する。
 
 #### Buffer
 
@@ -991,7 +991,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 ## Testing Strategy
 
 ### Unit Tests（Naos、`tests/runtime/`）
-- **allocator**：未設定と NULL の設定で既定のアロケータになること（11.1, 11.2）、設定した後の確保・0 で初期化する確保・再確保・解放がすべて設定したアロケータを通ること（11.3）、`struct_size` 不足とコールバックの欠落の拒否と、拒否の後に設定が変わらないこと（11.5）、`amark_calloc` が `calloc_fn` を呼んで全バイトが 0 の領域を返すこと、その桁あふれでコールバックが呼ばれないこと（11.7）、0 の確保（`amark_calloc` は `count` だけ、`size` だけ、両方が 0 のとき）がコールバックを呼ばずに NULL を返すこと、`amark_realloc(ptr, 0)` が `free_fn` を 1 回だけ呼んで NULL を返し、ほかのコールバックを呼ばないこと。
+- **allocator**：未設定と NULL の設定で既定のアロケータになること（11.1, 11.2）、設定した後の確保・0 で初期化する確保・再確保・解放がすべて設定したアロケータを通ること（11.3）、コールバックの欠落の拒否と、拒否の後に設定が変わらないこと（11.5）、`amark_calloc` が `calloc_fn` を呼んで全バイトが 0 の領域を返すこと、その桁あふれでコールバックが呼ばれないこと（11.7）、0 の確保（`amark_calloc` は `count` だけ、`size` だけ、両方が 0 のとき）がコールバックを呼ばずに NULL を返すこと、`amark_realloc(ptr, 0)` が `free_fn` を 1 回だけ呼んで NULL を返し、ほかのコールバックを呼ばないこと。
 - **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、`SIZE_MAX` 付近の予約が `AMARK_ERROR_OVERFLOW` で内容が変わらないこと（12.5）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
 - **unicode**：各 Zs の文字と 4 つの制御文字（14.1）、P と S の代表（`$`、`+`、`^`、`€`、`¡`、`「`、絵文字の記号）と非該当（文字、数字、結合文字）（14.2）、ASCII 句読点の 32 文字すべてと隣接する値（14.3）、サロゲートと U+110000 以上（14.4）、`AMARK_UNICODE_VERSION_*` が 17.0.0 であること（14.5）。
