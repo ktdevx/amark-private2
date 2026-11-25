@@ -37,7 +37,7 @@
 - 木の変更（出力は木を変えない）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h`）と内部 API（`base/alloc_internal.h`、`base/buffer_internal.h`）。内部 API は `src/render/` だけが使う
+- `foundation` の公開 API（`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h`）と内部 API（`base/allocator_internal.h`、`base/buffer_internal.h`）。内部 API は `src/render/` だけが使う
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`extension.h`）。`src/tree/` の内部ヘッダは使わない
 - `html-renderer` の `render.h`（`amark_write_fn_t`）
 - `src/syntax/md_*.c` だけが、`block-parser` の公開 API（`parser.h` の `amark_label_normalize`・`amark_label_map_*`、`scan.h` の走査、`commonmark.h` の役割の番号）と `inline-parser` の公開 API（`inline.h` の文字の宣言・ノードの性質・flanking と照合の関数・raw HTML の走査、役割の番号）を使う

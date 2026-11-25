@@ -181,7 +181,7 @@ graph TB
 │       ├── version.c
 │       ├── error.c
 │       ├── allocator.c            # 既定のアロケータ、グローバルの設定、確保の関数
-│       ├── alloc_internal.h       # 桁あふれの検査つきの算術
+│       ├── allocator_internal.h   # 桁あふれの検査つきの算術
 │       ├── buffer.c
 │       ├── buffer_internal.h      # struct amark_buffer の定義、埋め込み用の初期化と破棄
 │       ├── utf8.c
@@ -860,7 +860,7 @@ AMARK_API void amark_free(void *ptr);
 - `amark_calloc`：全バイトが 0 の領域を返す。`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す（失敗）。0 の確保と桁あふれのほかは必ず `calloc_fn` を使い、`malloc_fn` で代用しない。
 - コールバックは標準ライブラリの `malloc` / `calloc` / `realloc` / `free` と同じ形で、利用者のデータを渡さない。状態が要るアロケータは自分の静的な変数などに持つ。複数のスレッドで Amark を使うとき、コールバックはスレッド安全であること。コールバックから Amark の関数を呼ばない。オブジェクトはアロケータを保持しない。`new_size` が 0 でない `amark_realloc` が失敗したとき（`realloc_fn` が NULL を返したとき）、元のブロックは有効なまま。
 
-**内部の契約**（`src/base/alloc_internal.h`）
+**内部の契約**（`src/base/allocator_internal.h`）
 ```c
 bool amark_size_add(size_t a, size_t b, size_t *out);   /* 桁あふれなら false */
 bool amark_size_mul(size_t a, size_t b, size_t *out);

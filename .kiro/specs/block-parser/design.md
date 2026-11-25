@@ -42,7 +42,7 @@
 - spec.txt 全体と CommonMark の準拠テストのランナー（`inline-parser`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`base/alloc_internal.h`、`base/buffer_internal.h`）
+- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`base/allocator_internal.h`、`base/buffer_internal.h`）
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h`）。`src/parse/` は `tree/tree_internal.h` を使わない
 - `html-renderer` の公開 API `amark_html_core_extension()`（`html.h`）：`src/syntax/commonmark.c` の構築関数だけが使う（roadmap の順で `html-renderer` は先に実装される）。`markdown-renderer` の公開 API `amark_markdown_core_extension()`（`markdown.h`）も同じ場所だけが使い、その 1 行は `markdown-renderer` のタスク 3.7 が足す（この spec の実装の時点では使わない）
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`amark_test_support`、`amark_test_tree`、`amark_test_html_gfm`（`html-renderer` の検証用のノード型の記述子。GfmHookTests だけ）、`amark_add_fuzzer`
