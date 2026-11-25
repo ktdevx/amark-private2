@@ -102,9 +102,11 @@ static void check_decoding(const char *text, size_t size)
 
         encoded_length = amark_utf8_encode(codepoint, encoded);
         CHECK((encoded_length >= 1) && (encoded_length <= AMARK_UTF8_MAX_LENGTH));
+
         if (is_invalid)
         {
             CHECK((encoded_length == 3) && (memcmp(encoded, replacement_bytes, 3) == 0));
+
             if (first_invalid == size)
             {
                 first_invalid = position;
@@ -118,6 +120,7 @@ static void check_decoding(const char *text, size_t size)
             /* The encoding of a valid character gives back its bytes. */
             CHECK(encoded_length == length);
             CHECK(memcmp(encoded, text + position, length) == 0);
+
             /* The valid character alone is valid. */
             CHECK(amark_utf8_validate(text + position, length, NULL));
         }
@@ -125,6 +128,7 @@ static void check_decoding(const char *text, size_t size)
         CHECK((replaced_length + encoded_length) < replaced_capacity);
         memcpy(replaced + replaced_length, encoded, encoded_length);
         replaced_length += encoded_length;
+
         position += length;
     }
 
@@ -135,6 +139,7 @@ static void check_decoding(const char *text, size_t size)
     CHECK(valid == (first_invalid == size));
     CHECK(error_offset == first_invalid);
     CHECK(amark_utf8_validate(text, size, NULL) == valid);
+
     /* The prefix before the first invalid sequence is valid. */
     error_offset = size + 1;
     CHECK(amark_utf8_validate(text, first_invalid, &error_offset));
@@ -169,6 +174,7 @@ static void check_encoding(const uint8_t *data, size_t size)
 
         candidates[0] = codepoint;
         candidates[1] = codepoint & 0x1FFFFFu;
+
         for (c = 0; c < 2; c++)
         {
             char encoded[AMARK_UTF8_MAX_LENGTH];
@@ -200,6 +206,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     char *original = (char *)malloc(size > 0 ? size : 1);
 
     CHECK((text != NULL) && (original != NULL));
+
     if (size > 0)
     {
         memcpy(text, data, size);
@@ -212,6 +219,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     if (size > 0)
     {
         size_t error_offset = size;
+
         CHECK(!amark_utf8_validate(NULL, size, &error_offset));
         CHECK(error_offset == 0);
     }
@@ -220,7 +228,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     check_encoding(data, size);
 
     CHECK((size == 0) || (memcmp(text, original, size) == 0));
+
     free(original);
     free(text);
+
     return 0;
 }

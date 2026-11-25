@@ -62,6 +62,7 @@ static int exact_release(exact_t *e, const char *original)
     free(e->block);
     e->block = NULL;
     e->text = NULL;
+
     return changed;
 }
 
@@ -91,6 +92,7 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
     {
         return 1;
     }
+
     while (offset < size)
     {
         uint32_t cp = 0x12345678u;
@@ -171,12 +173,14 @@ static bool validate_exact(const char *bytes, size_t size, size_t *out_offset)
     bool valid;
 
     *out_offset = (size_t)-1;
+
     if (e.text == NULL)
     {
         return false;
     }
 
     valid = amark_utf8_validate(e.text, size, out_offset);
+
     if (exact_release(&e, bytes))
     {
         NAOS_FAIL("the input was changed");
@@ -284,6 +288,7 @@ NAOS_TEST(surrogates_are_replaced_byte_by_byte)
     CHECK_DECODING("\xED\xAD\xBF", {R, 1}, {R, 1}, {R, 1});
     CHECK_DECODING("\xED\xB0\x80", {R, 1}, {R, 1}, {R, 1});
     CHECK_DECODING("\xED\xBF\xBF", {R, 1}, {R, 1}, {R, 1});
+
     /* A surrogate pair (CESU-8) is two invalid sequences. */
     CHECK_DECODING("\xED\xA0\xBD\xED\xB8\x80",
                    {R, 1}, {R, 1}, {R, 1}, {R, 1}, {R, 1}, {R, 1});
@@ -295,6 +300,7 @@ NAOS_TEST(values_above_10ffff_are_replaced)
     CHECK_DECODING("\xF4\xBF\xBF\xBF", {R, 1}, {R, 1}, {R, 1}, {R, 1});
     CHECK_DECODING("\xF5\x80\x80\x80", {R, 1}, {R, 1}, {R, 1}, {R, 1});
     CHECK_DECODING("\xF7\xBF\xBF\xBF", {R, 1}, {R, 1}, {R, 1}, {R, 1});
+
     /* The old 5- and 6-byte forms. */
     CHECK_DECODING("\xF8\x88\x80\x80\x80", {R, 1}, {R, 1}, {R, 1}, {R, 1}, {R, 1});
     CHECK_DECODING("\xFC\x84\x80\x80\x80\x80",
@@ -328,6 +334,7 @@ NAOS_TEST(truncated_sequences_are_replaced_as_one)
     CHECK_DECODING("\xF0\x90\x80", {R, 3});
     CHECK_DECODING("\xF4\x8F\xBF", {R, 3});
     CHECK_DECODING("\xF3\xBF\xBF", {R, 3});
+
     /* Before another character. */
     CHECK_DECODING("\xC2" "A", {R, 1}, {0x41, 1});
     CHECK_DECODING("\xE2\x82" "A", {R, 2}, {0x41, 1});
@@ -345,6 +352,7 @@ NAOS_TEST(lone_continuation_bytes_are_replaced_alone)
     CHECK_DECODING("\x80\x80", {R, 1}, {R, 1});
     CHECK_DECODING("\x80\x80\x80\x80\x80", {R, 1}, {R, 1}, {R, 1}, {R, 1}, {R, 1});
     CHECK_DECODING("A\x80" "B", {0x41, 1}, {R, 1}, {0x42, 1});
+
     /* After a complete character. */
     CHECK_DECODING("\xC2\x80\x80", {0x80, 2}, {R, 1});
     CHECK_DECODING("\xE2\x82\xAC\xAC", {0x20AC, 3}, {R, 1});
@@ -379,14 +387,19 @@ NAOS_TEST(length_limits_the_sequence)
     uint32_t cp = 0;
 
     NAOS_REQUIRE_NOT_NULL(e.text);
+
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode(e.text, 1, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_UINT_EQ(2, amark_utf8_decode(e.text, 2, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_UINT_EQ(3, amark_utf8_decode(e.text, 3, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_UINT_EQ(4, amark_utf8_decode(e.text, 4, &cp));
     NAOS_CHECK_UINT_EQ(0x1F600, cp);
+
     NAOS_CHECK_INT_EQ(0, exact_release(&e, "\xF0\x9F\x98\x80"));
 }
 
@@ -401,8 +414,10 @@ NAOS_TEST(decode_before_decodes_the_prefix)
 
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode_before(text, 1, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_UINT_EQ(2, amark_utf8_decode_before(text, 2, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_UINT_EQ(3, amark_utf8_decode_before(text, 3, &cp));
     NAOS_CHECK_UINT_EQ(0x20AC, cp);
 }
@@ -414,8 +429,10 @@ NAOS_TEST(decode_before_looks_back_at_most_three_continuation_bytes)
 
     NAOS_CHECK_UINT_EQ(4, amark_utf8_decode_before(text, 5, &cp));
     NAOS_CHECK_UINT_EQ(0x10000, cp);
+
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode_before(text, 6, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode_before(text, 7, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
 }
@@ -427,10 +444,13 @@ NAOS_TEST(decode_before_at_the_start_of_the_input)
     uint32_t cp = 0;
 
     NAOS_REQUIRE_NOT_NULL(e.text);
+
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode_before(e.text, 3, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode_before(e.text, 1, &cp));
     NAOS_CHECK_UINT_EQ(R, cp);
+
     NAOS_CHECK_INT_EQ(0, exact_release(&e, "\x80\x80\x80"));
 }
 
@@ -517,23 +537,27 @@ NAOS_TEST(short_inputs_keep_every_property)
     char *block = calloc(4, 1);
 
     NAOS_REQUIRE_NOT_NULL(block);
+
     /* Each input is placed at the end of the 4-byte block, so that a read past
      * its end is caught. */
     for (a = 0; a < INTERESTING_COUNT; a++)
     {
         block[3] = (char)interesting[a];
         failures += check_properties(block + 3, 1) != 0;
+
         for (b = 0; b < INTERESTING_COUNT; b++)
         {
             block[2] = (char)interesting[a];
             block[3] = (char)interesting[b];
             failures += check_properties(block + 2, 2) != 0;
+
             for (c = 0; c < INTERESTING_COUNT; c++)
             {
                 block[1] = (char)interesting[a];
                 block[2] = (char)interesting[b];
                 block[3] = (char)interesting[c];
                 failures += check_properties(block + 1, 3) != 0;
+
                 for (d = 0; d < INTERESTING_COUNT; d++)
                 {
                     block[0] = (char)interesting[a];
@@ -558,6 +582,7 @@ NAOS_TEST(all_two_byte_inputs_keep_every_property)
     char *block = calloc(2, 1);
 
     NAOS_REQUIRE_NOT_NULL(block);
+
     for (a = 0; a < 256; a++)
     {
         for (b = 0; b < 256; b++)
@@ -681,12 +706,16 @@ NAOS_TEST(empty_input_decodes_nothing)
     size_t offset = 99;
 
     NAOS_REQUIRE_NOT_NULL(e.text);
+
     NAOS_CHECK_UINT_EQ(0, amark_utf8_decode(e.text, 0, &cp));
     NAOS_CHECK_UINT_EQ(0x12345678u, cp);
+
     NAOS_CHECK_UINT_EQ(0, amark_utf8_decode_before(e.text, 0, &cp));
     NAOS_CHECK_UINT_EQ(0x12345678u, cp);
+
     NAOS_CHECK_TRUE(amark_utf8_validate(e.text, 0, &offset));
     NAOS_CHECK_UINT_EQ(0, offset);
+
     NAOS_CHECK_INT_EQ(0, exact_release(&e, ""));
 }
 
@@ -700,13 +729,17 @@ NAOS_TEST(null_arguments_do_not_crash)
     NAOS_CHECK_UINT_EQ(0, amark_utf8_decode_before(NULL, 0, &cp));
     NAOS_CHECK_UINT_EQ(0, amark_utf8_decode_before(NULL, 5, &cp));
     NAOS_CHECK_UINT_EQ(0x12345678u, cp);
+
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode("a", 1, NULL));
     NAOS_CHECK_UINT_EQ(1, amark_utf8_decode_before("a", 1, NULL));
+
     NAOS_CHECK_TRUE(amark_utf8_validate(NULL, 0, &offset));
     NAOS_CHECK_UINT_EQ(0, offset);
+
     offset = 99;
     NAOS_CHECK_FALSE(amark_utf8_validate(NULL, 5, &offset));
     NAOS_CHECK_UINT_EQ(0, offset);
+
     NAOS_CHECK_UINT_EQ(0, amark_utf8_encode(0x41, NULL));
 }
 
@@ -717,6 +750,7 @@ NAOS_TEST(embedded_nul_is_an_ordinary_character)
     CHECK_DECODING("\xC2\x00", {R, 1}, {0x00, 1});
     CHECK_DECODING("\xE2\x82\x00\xC3\xA9", {R, 2}, {0x00, 1}, {0xE9, 2});
     CHECK_DECODING("\x00\xF0\x9F\x98\x80\x00", {0x00, 1}, {0x1F600, 4}, {0x00, 1});
+
     CHECK_VALID("a\x00" "b");
     CHECK_VALID("\x00");
     CHECK_INVALID_AT("a\x00\x80", 2);

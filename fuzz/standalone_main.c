@@ -34,10 +34,12 @@ static uint8_t *read_file(const char *path, size_t *out_size)
     for (;;)
     {
         size_t count;
+
         if (size == capacity)
         {
             size_t new_capacity = capacity == 0 ? 4096 : capacity * 2;
             uint8_t *grown;
+
             if (new_capacity < capacity)
             {
                 free(data);
@@ -74,6 +76,7 @@ static uint8_t *read_file(const char *path, size_t *out_size)
     }
 
     fclose(file);
+
     *out_size = size;
     return data;
 }

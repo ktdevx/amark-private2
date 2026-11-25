@@ -125,6 +125,7 @@ static void fuzz_free(void *ptr)
 {
     CHECK(ptr != NULL);
     CHECK(fuzz_allocator.live > 0);
+
     fuzz_allocator.live--;
     free(ptr);
 }
@@ -181,6 +182,7 @@ static void model_init(model_t *model)
 {
     model->bytes = (char *)malloc(MAX_CONTENT + 1);
     CHECK(model->bytes != NULL);
+
     model->bytes[0] = '\0';
     model->length = 0;
     model->capacity = 0;
@@ -189,6 +191,7 @@ static void model_init(model_t *model)
 static void model_append(model_t *model, const char *bytes, size_t size)
 {
     CHECK((model->length + size) <= MAX_CONTENT);
+
     if (size == 0)
     {
         return; /* bytes may be NULL */
@@ -223,6 +226,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
     expected.calls = 0;
     expected.capacity = model->capacity;
     expected.too_large = false;
+
     if (additional == 0)
     {
         return expected;
@@ -357,6 +361,7 @@ static void run_operation(state_t *state, reader_t *reader)
     {
         uint8_t variant = read_byte(reader);
         size_t additional = read_u16(reader);
+
         if (variant & 1u)
         {
             /* Near SIZE_MAX: an overflow, or a huge request that only an injected
@@ -384,6 +389,7 @@ static void run_operation(state_t *state, reader_t *reader)
         size_t size = read_byte(reader);
         size_t available = reader->size - reader->position;
         const char *bytes;
+
         if (size > available)
         {
             size = available;
@@ -391,6 +397,7 @@ static void run_operation(state_t *state, reader_t *reader)
 
         bytes = size == 0 ? NULL : (const char *)reader->data + reader->position;
         reader->position += size;
+
         run_append(buffer, model, bytes, size, inject);
         break;
     }
@@ -398,6 +405,7 @@ static void run_operation(state_t *state, reader_t *reader)
     case OP_APPEND_BYTE:
     {
         char byte = (char)read_byte(reader);
+
         expected = expect_room(model, 1, inject);
         if (expected.too_large)
         {
@@ -418,6 +426,7 @@ static void run_operation(state_t *state, reader_t *reader)
     {
         uint8_t byte = read_byte(reader);
         size_t count = read_u16(reader) & 0x0FFFu;
+
         expected = expect_room(model, count, inject);
         if (expected.too_large)
         {
@@ -442,12 +451,14 @@ static void run_operation(state_t *state, reader_t *reader)
         char text[256];
         size_t size = read_byte(reader);
         size_t i;
+
         for (i = 0; (i < size) && (i < (sizeof(text) - 1)); i++)
         {
             text[i] = (char)read_byte(reader);
         }
 
         text[i] = '\0';
+
         expected = expect_room(model, strlen(text), inject);
         if (expected.too_large)
         {
@@ -469,6 +480,7 @@ static void run_operation(state_t *state, reader_t *reader)
         uint32_t codepoint = read_u32(reader);
         char encoded[AMARK_UTF8_MAX_LENGTH];
         size_t size;
+
         if (codepoint & 0x80000000u)
         {
             /* Mostly in the Unicode range, sometimes beyond it. */
@@ -496,6 +508,7 @@ static void run_operation(state_t *state, reader_t *reader)
     {
         uint8_t variant = read_byte(reader);
         size_t length = read_u16(reader);
+
         if ((variant & 1u) == 0)
         {
             length %= model->length + 1;
@@ -504,6 +517,7 @@ static void run_operation(state_t *state, reader_t *reader)
         expected.error =
             length > model->length ? AMARK_ERROR_INVALID_ARGUMENT : AMARK_ERROR_NONE;
         expected.calls = 0;
+
         RUN(expected, amark_buffer_truncate(buffer, length));
         if (expected.error == AMARK_ERROR_NONE)
         {
@@ -519,16 +533,20 @@ static void run_operation(state_t *state, reader_t *reader)
         amark_buffer_clear(buffer);
         fuzz_allocator.fail = false;
         CHECK(fuzz_allocator.calls == 0);
+
         model_truncate(model, 0);
         break;
+
     case OP_DETACH:
     {
         char sentinel = 'x';
         char *detached = &sentinel;
         size_t detached_length = 1;
+
         expected.error = (model->capacity == 0) && inject ? AMARK_ERROR_OUT_OF_MEMORY
                                                         : AMARK_ERROR_NONE;
         expected.calls = model->capacity == 0 ? 1 : 0;
+
         RUN(expected, amark_buffer_detach(buffer, &detached, &detached_length));
         if (expected.error == AMARK_ERROR_NONE)
         {
@@ -536,7 +554,9 @@ static void run_operation(state_t *state, reader_t *reader)
             CHECK(detached_length == model->length);
             CHECK(memcmp(detached, model->bytes, model->length) == 0);
             CHECK(detached[detached_length] == '\0');
+
             amark_free(detached);
+
             model_truncate(model, 0);
             model->capacity = 0;
         }
@@ -553,6 +573,7 @@ static void run_operation(state_t *state, reader_t *reader)
         /* A part of the buffer's own content, which may move when it grows. */
         size_t offset = read_u16(reader) % (model->length + 1);
         size_t size = read_u16(reader) % (model->length - offset + 1);
+
         expected = expect_room(model, size, inject);
         if (expected.too_large)
         {
@@ -575,6 +596,7 @@ static void run_operation(state_t *state, reader_t *reader)
          * NUL byte, or the terminating NUL. */
         size_t offset = read_u16(reader) % (model->length + 1);
         size_t size = strlen(model->bytes + offset);
+
         expected = expect_room(model, size, inject);
         if (expected.too_large)
         {
@@ -597,6 +619,7 @@ static void run_operation(state_t *state, reader_t *reader)
          * injected failure lets run. */
         uint8_t variant = read_byte(reader);
         size_t count = SIZE_MAX - (size_t)(variant >> 1);
+
         expected = expect_room(model, count, inject);
         if (expected.too_large)
         {
@@ -621,8 +644,10 @@ static void run_operation(state_t *state, reader_t *reader)
         char sentinel = 'x';
         char *detached = &sentinel;
         size_t detached_length = 1;
+
         expected.error = AMARK_ERROR_INVALID_ARGUMENT;
         expected.calls = 0;
+
         switch (read_byte(reader) % 9u)
         {
         case 0:
@@ -669,10 +694,13 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             /* Any non-NULL value, to see that a failure sets it to NULL. */
             amark_buffer_t *created = &state->embedded;
+
             amark_buffer_destroy(state->created);
             state->created = NULL;
+
             expected.error = inject ? AMARK_ERROR_OUT_OF_MEMORY : AMARK_ERROR_NONE;
             expected.calls = 1;
+
             RUN(expected, amark_buffer_create(&created));
             if (inject)
             {
@@ -717,8 +745,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     CHECK(amark_buffer_create(&state.created) == AMARK_ERROR_NONE);
     CHECK(state.created != NULL);
     amark_buffer_init(&state.embedded);
+
     model_init(&state.models[0]);
     model_init(&state.models[1]);
+
     check_buffer(state.created, &state.models[0]);
     check_buffer(&state.embedded, &state.models[1]);
     CHECK((amark_buffer_data(NULL)[0] == '\0') && (amark_buffer_length(NULL) == 0));
@@ -732,8 +762,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     amark_buffer_deinit(&state.embedded);
     free(state.models[0].bytes);
     free(state.models[1].bytes);
+
     /* Every block allocated through the allocator was freed. */
     CHECK(fuzz_allocator.live == 0);
     CHECK(amark_allocator_set(NULL) == AMARK_ERROR_NONE);
+
     return 0;
 }
