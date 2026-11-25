@@ -210,6 +210,11 @@
 - **変更**：`src/tree/tree_internal.h` を `src/tree/tree.h` に、`src/tree/syntax_set_internal.h` を `src/tree/syntax_set.h` に改名した（File Structure Plan、Dependency direction、Components、TreeInvariants、Logical Data Model）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
 - **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-25：`src/tree/` のソースファイル名をコンポーネント名にそろえる
+- **Context**：`edit.c`（編集の記録）と `node_edit.c`（構造の編集）は、名前から役割を区別できなかった。また `node_` の接頭辞が、ノードを扱うファイルの一部にだけ付いていた。
+- **変更**：`edit.c` を `edit_tracking.c` に、`node_edit.c` を `structure_edit.c` に、`node_copy.c` を `copy_import.c` に、`node_attr.c` を `attr.c` に改名した（File Structure Plan、Dependency direction）。コンポーネント名（EditTracking、StructureEdit、CopyImport、LiteralAttr）とテストのファイル名に合わせ、`node_` は NodeCore の `node.c` だけに残す。steering（structure.md）のファイル名の例も `structure_edit.c` に直した。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲と依存の順は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則

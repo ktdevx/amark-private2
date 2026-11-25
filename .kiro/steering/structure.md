@@ -48,7 +48,7 @@
 
 ## Naming Conventions
 
-- **Files**：snake_case（`block_quote.c`、`node_edit.c`）
+- **Files**：snake_case（`block_quote.c`、`structure_edit.c`）
 - **公開関数**：`amark_<対象>_<動作>`（`amark_node_insert_after`、`amark_parser_feed`、`amark_render_html`）
 - **生成と破棄の関数の組**：領域は呼び出し側（または埋め込み先、エンジン）が用意し、構造体の中身だけを生成・破棄する組は `_init` / `_deinit` とする（`amark_buffer_init` / `amark_buffer_deinit`）。不透明型のオブジェクトの領域ごと生成・破棄する組は `_create` / `_destroy` とする（`amark_buffer_create` / `amark_buffer_destroy`）。`malloc` と同じ形の `amark_malloc` / `amark_free` は、メモリそのものの確保と解放なので対象外とする。関数表のコールバックも同じ（`init` / `deinit`）。`init` の対は必ず `deinit` とする。0 で埋めるだけで初期化が済むなら、`init` を置かず `deinit` だけでよい（`deinit_block_data`）。破棄するものがなければ `_deinit` は置かない（`amark_parse_options_init`）。
 - **typedef した型**：構造体、列挙、関数ポインタ、整数の別名のすべてで、末尾に `_t` を付ける。公開型も、モジュールをまたぐ内部の型も `amark_<名前>_t` とする。構造体と列挙のタグには `_t` を付けない。不透明型は `typedef struct amark_node amark_node_t;` の形で宣言する。

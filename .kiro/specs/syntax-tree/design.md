@@ -106,7 +106,7 @@ graph TB
     Renderers --> Tree
 ```
 
-**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit` → `node` → `document` → `token` → `node_edit` → `literal` / `node_attr` → `node_copy` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit.c` と `node.c` は文書の状態（追跡の有無、構文セット）を `tree.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree.h` の構造体だけを使う。違反はレビューでエラーとする。
+**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit_tracking` → `node` → `document` → `token` → `structure_edit` → `literal` / `attr` → `copy_import` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit_tracking.c` と `node.c` は文書の状態（追跡の有無、構文セット）を `tree.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree.h` の構造体だけを使う。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Domain boundaries：公開ヘッダは機能ごとに 1 つ。実装は 1 ファイル 1 責務。
@@ -139,12 +139,12 @@ src/tree/
 ├── syntax_set.c      # 構文セットの生成・変更・複製・凍結・検索・スロットの索引、静的な core の構文セット
 ├── document.c        # 文書の生成と解放、ソースの登録と追加、行の先頭の索引、位置、追跡の切り替え
 ├── node.c            # ノードの生成・部分木の解放（内部）・参照・型の問い合わせ・関連付けたポインタ・型のデータ
-├── edit.c            # 編集の記録と祖先への伝播（amark_edit_mark）
+├── edit_tracking.c   # 編集の記録と祖先への伝播（amark_edit_mark）
 ├── token.c           # 構文トークンの検査・整列した挿入・削除・移動・取得
 ├── literal.c         # 文字列の検査と正規化、リテラルの取得と設定、テキストの一括設定
-├── node_attr.c       # 組み込みの属性の取得と設定
-├── node_edit.c       # 挿入・切り離し・置換・解放（公開）・包含の規則・循環の検査
-├── node_copy.c       # 複製と、別の文書からの取り込み（ソースの複製と識別子の付け替え）
+├── attr.c            # 組み込みの属性の取得と設定
+├── structure_edit.c  # 挿入・切り離し・置換・解放（公開）・包含の規則・循環の検査
+├── copy_import.c     # 複製と、別の文書からの取り込み（ソースの複製と識別子の付け替え）
 ├── token_check.c     # ロスレス性の検証
 ├── span.c            # ノードのソース上の範囲
 ├── iterator.c        # 走査
