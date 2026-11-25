@@ -585,7 +585,7 @@ typedef struct amark_inline_run_match {
 
 /* runs（ソース上の順）の上で process emphasis を行い、一致の順に照合を返す。capacity は
    runs の長さの合計の半分（切り捨て）以上（足りなければ AMARK_ERROR_INVALID_ARGUMENT）。
-   作業の配列は amark_malloc_array で確保して返る前に解放する。時間は O(count + 照合の数) */
+   作業の配列は amark_calloc で確保して返る前に解放する。時間は O(count + 照合の数) */
 AMARK_API amark_error_t amark_inline_match_delimiters(const amark_inline_run_t *runs,
                                                       size_t count, amark_inline_run_match_t *out_matches,
                                                       size_t capacity, size_t *out_count);
