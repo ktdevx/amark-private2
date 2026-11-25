@@ -14,3 +14,5 @@ amark_add_test(allocator_test SOURCES allocator_test.c)
 amark_add_test(allocator_internal_test SOURCES allocator_internal_test.c INTERNAL)
 
 amark_add_test(utf8_test SOURCES utf8_test.c)
+
+amark_add_test(unicode_test SOURCES unicode_test.c)

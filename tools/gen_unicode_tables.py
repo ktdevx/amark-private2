@@ -218,18 +218,13 @@ OUTPUTS = (
 
 
 def check_header_version(repo_root):
-    """Fail unless include/amark/unicode.h states UNICODE_VERSION.
-
-    Returns False (after a warning) when the header does not exist yet.
-    """
+    """Fail unless include/amark/unicode.h states UNICODE_VERSION."""
     path = os.path.join(repo_root, UNICODE_HEADER)
-    if not os.path.exists(path):
-        sys.stderr.write(
-            "warning: {0} not found; skipping the Unicode version check\n"
-            .format(UNICODE_HEADER))
-        return False
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        raise GenError("cannot read {0}: {1}".format(UNICODE_HEADER, e))
     found = []
     for part in ("MAJOR", "MINOR", "UPDATE"):
         match = re.search(
@@ -244,7 +239,6 @@ def check_header_version(repo_root):
             "{0} declares Unicode {1}.{2}.{3} but the script pins {4}"
             .format(UNICODE_HEADER, found[0], found[1], found[2],
                     version_string()))
-    return True
 
 
 def read_existing(path):

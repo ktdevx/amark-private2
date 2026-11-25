@@ -27,6 +27,7 @@ target_sources(amark_objects PRIVATE
   base/error.c
   base/allocator.c
   base/utf8.c
+  base/unicode.c
 )
 amark_target_defaults(amark_objects)
 target_include_directories(amark_objects PRIVATE

@@ -91,7 +91,7 @@
   - _Boundary: UnicodeTableGen_
   - _Requirements: 14.5, 14.7_
 
-- [ ] 2.6 CommonMark の文字の分類を実装する
+- [x] 2.6 CommonMark の文字の分類を実装する
   - Unicode whitespace character、Unicode punctuation character、ASCII punctuation character の判定を作る。ASCII は表を引かずに、それ以外は生成した表を二分探索して判定する
   - サロゲートと U+10FFFF を超える値はどの分類にも当たらないとする
   - Unicode の版を公開ヘッダのマクロで示し、生成スクリプトの版と一致させる
