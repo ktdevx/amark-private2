@@ -33,6 +33,7 @@ Amark では CommonMark の構文も利用者の拡張と同じ公開 API の上
   - `html-renderer` の組み込みの HTML 出力と、GFM 相当の HTML の検証用部品を使う。
   - `markdown-renderer` は、この spec が記録したインラインの構文トークンと、宣言されたエスケープに関わる文字を使って書き戻す。あわせて、区切り文字の開閉の判定と照合、生の HTML の判定を、この spec が公開する関数で行い、同じ規則を重複して実装しない。
   - `block-parser` は、リンクの宛先の括弧の入れ子の上限、エンジンの役割の番号の範囲の分け方、GFM 相当のブロックの検証用拡張のテスト用ライブラリ、文書を返すパースの検査の補助、HTML のタグのバイト列の走査を提供する（`block-parser` の spec が実装する）。この spec はそれらを使い、同じものを実装しない。
+  - 例の区切りのデータ（spec.txt と同じ形式）からテストを生成する手順は、`block-parser` が先に唯一の読み手として作る。この spec はそれを拡張し（期待の種類、構文セットの生成関数、検査の関数の指定）、別の読み手を作らない。固定した spec の版の定義はこの spec が 1 か所に置き、他の spec はそれを再利用する。
   - `markdown-renderer` は、この spec の例の生成の手順に別の検査の関数を指定して同じデータを使い、GFM 相当の構文セットに Markdown の出力の検証用部品を加える（その変更は `markdown-renderer` のタスクが行う）。
 
 ## Requirements
@@ -150,6 +151,7 @@ Amark では CommonMark の構文も利用者の拡張と同じ公開 API の上
 3. The Amark Inline Parser shall CommonMark spec が実装に許す制限（リンクの宛先の括弧の入れ子の深さなど）を設ける場合、その値を文書化し、spec の例をすべて満たす値にする
 4. If 中身に NUL や不正な UTF-8 が含まれる, then the Amark Inline Parser shall クラッシュせず、意味の値では U+FFFD に置き換えて解析を続ける
 5. The Amark Inline Parser shall 任意のバイト列と任意の区切りの逐次の入力に対して、クラッシュせず、リークせず、構文木の不変条件と構文トークンの被覆を満たす文書を返すことを、ファジングと計算量のテストで確かめられるようにする
+6. Where 開発者がテストを無効にしてファジングだけを有効にする, the Amark Inline Parser shall インラインのファジングのターゲットとそれがリンクする検証用のライブラリを、テストのフレームワーク（Naos）に依存せずに構成してビルドできるようにする
 
 ### Requirement 12: CommonMark spec の準拠テスト
 **Objective:** As a Amark の開発者, I want 固定した版の CommonMark spec の全例が、パースと HTML 出力で期待どおりになることを確かめるテストがあること, so that Amark が CommonMark に 100% 準拠していることを継続的に保証できる
@@ -171,6 +173,7 @@ Amark では CommonMark の構文も利用者の拡張と同じ公開 API の上
 3. The Amark Inline Parser shall 検証用拡張を組み合わせた文書でも、構文トークンの被覆と、逐次の入力と一括のパースの結果の一致を確かめる
 4. The Amark Inline Parser shall 検証用拡張を配布するライブラリとインストールする成果物に含めない
 5. The Amark Inline Parser shall 検証用拡張を書くために上流の公開 API に不足があれば、回避策を作らず、その API を持つ spec の変更として扱う
+6. The Amark Inline Parser shall インラインの検証用拡張が記録する構文トークンの役割の番号を検証用拡張のヘッダで公開し、拡張が定義したリンク（ブラケットや括弧のトークンを持たないリンク）を、組み込みのリンクの書式と区別できるようにする
 
 ### Requirement 14: 検証
 **Objective:** As a Amark の開発者, I want インラインの各構文とエンジンの振る舞いが、木のダンプと構文トークンで確かめられること, so that 準拠テストだけでは見えないトークンや API の誤りを見つけられる

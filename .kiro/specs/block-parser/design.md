@@ -30,7 +30,9 @@
 - スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`（0x0100）、`AMARK_SLOT_PARAGRAPH_CONSUMER`（0x0101）、`AMARK_SLOT_POSTPROCESS`（0x0102）、`AMARK_SLOT_PARSE_STATE`（0x0103）とその構造体
 - 組み込みのブロック構文の構文トークンの役割の番号（`commonmark.h`。0x0001–0x00FF に収める）と、エンジンが使う役割の番号の範囲 0xFF00–0xFFFF の割り当て（ブロックのエンジン 0xFF00–0xFF0F をこの spec が使い、インラインのエンジン 0xFF10–0xFF1F を `inline-parser` に割り当て、0xFF20–0xFFFF を予約する。`block.h` の注記）
 - `src/runtime/` への追加：case fold（`case_fold_tables.inc`、`amark_unicode_case_fold`）、文字参照（`entity.c`、`entity_tables.inc`）と、その生成手順（`tools/gen_unicode_tables.py` の拡張、`tools/gen_entity_table.py`）
-- テスト：`tests/parse/`、`tests/syntax/`、`tests/runtime/` の追加分、テスト用の補助 `tests/support/parse_check.{h,c}`（INTERFACE ライブラリ `amark_test_parse`）、GFM 相当のブロックの検証用の構文 `tests/parse/gfm_block_ext.{h,c}`（INTERFACE ライブラリ `amark_test_parse_gfm`。`inline-parser` のテストが再利用する）、`fuzz/block_parse_fuzz.c`、`bench/`
+- テスト：`tests/parse/`、`tests/syntax/`、`tests/runtime/` の追加分、テスト用の補助 `tests/support/parse_check.{h,c}`（INTERFACE ライブラリ `amark_test_parse`）、GFM 相当のブロックの検証用の構文 `tests/parse/gfm_block_ext.{h,c}`（INTERFACE ライブラリ `amark_test_parse_gfm`。`inline-parser` のテストが再利用する）、`fuzz/block_parse_fuzz.c`、`bench/`（`bench/CMakeLists.txt` と、その中のベンチマークの登録関数 `amark_add_bench`。`bench/CMakeLists.txt` は他の spec も追記する。下の「共同で編集するファイル」）
+- 共有のテスト生成スクリプト `tests/support/gen_examples.cmake`：spec.txt の例の形式（32 個のバッククォートの区切り）を読む唯一のパーサ。この spec が先に実装して作り、データの形式・テストの名前の規則・基本の ARGS（`EXPECT=dump`、`DUMP_FLAGS=`）・基本の検査の経路の契約を持つ。`inline-parser` は同じファイルに `EXPECT=html`、`FACTORY=`、`CHECK=` を追加で足す（SyntaxTests の「`gen_examples.cmake` の契約」。拡張は追加だけで、基本の経路の出力を変えない）
+- **共同で編集するファイル**：`bench/CMakeLists.txt` はこの spec が作り、オプション `AMARK_BUILD_BENCH` と登録関数 `amark_add_bench` を持つ。`inline-parser`（`inline_pathological`）など他の spec は、そこに `amark_add_bench(...)` の行を追記するだけで、関数と構成を変えない。`tests/support/gen_examples.cmake` は上のとおり `inline-parser` が拡張する。最上位の `CMakeLists.txt` の `AMARK_BUILD_BENCH` と `add_subdirectory(bench)`、`.gitattributes` の `tests/syntax/data/spec_blocks.txt export-ignore` は、`foundation` が所有するファイルへの追記で、`foundation` の Downstream Extension Points の表に載る拡張点として行う（表への行の追加は `foundation` の spec が行う。この spec はその行の内容に従い、拡張点の外の編集をしない）
 
 ### Out of Boundary
 - インライン構文のエンジンと公開インライン構文 API、インラインの構文トークンの役割の番号（`inline-parser`）。この spec は委譲の取り決めだけを定める
@@ -48,17 +50,37 @@
 - レイヤーの規則：`src/parse/` は `src/render/` と `src/syntax/` を参照しない。`src/syntax/` は公開ヘッダだけを使う（`src/parse/` の内部ヘッダに依存しない）。`src/runtime/` の追加分は他のレイヤーを参照しない
 
 ### Revalidation Triggers
+独立に変わりうる継ぎ目ごとに分ける（spec は分けない）。
+
+**ブロックのエンジンと公開ブロック構文 API**
 - ブロック構文・段落の先頭の消費・後処理・パースの状態のスロットの構造体、コールバックの契約、優先度の値の変更 → 利用者の拡張、`inline-parser` の検証用拡張
 - インラインへの委譲の取り決め（`amark_inline_delegate`、`amark_text_input`、呼ぶ順序）の変更 → `inline-parser`
 - 役割の番号、トークンの所有の規則（空行、遅延継続、葉のインデント）の変更 → `markdown-renderer`、`inline-parser`
+- エンジンの役割の番号の範囲の分け方（ブロック 0xFF00–0xFF0F、インライン 0xFF10–0xFF1F）の変更 → `inline-parser`、`markdown-renderer`
+- 入れ子の深さの既定の上限の変更 → 利用者（文書化された値）
+- パーサの生成の入口（`amark_parser_new` が構文セットを借りるだけであること、所有権を受け取る `amark_parser_new_take_syntax_set` の契約）の変更 → 利用者、`inline-parser` と `markdown-renderer` のテスト
+
+**`scan.h` の走査（バイト列と区間の並び）**
+- HTML ブロックの開始と終わりの条件、HTML のタグの走査（バイト列の版と区間の並びの版）の契約の変更 → `markdown-renderer`（HTML ブロックと保護の判定）、`inline-parser`（raw HTML）
+- `amark_label_map`、`amark_label_normalize`、リンクの宛先・タイトル・ラベルの走査と解読の関数の契約の変更 → `inline-parser`
+- 宛先の括弧の入れ子の上限（`AMARK_SCAN_MAX_LINK_PAREN_DEPTH`）の変更 → `inline-parser`（インラインのリンク）、利用者（文書化された値）
+
+**実行時の文字データ（case fold、文字参照）**
+- `amark_unicode_case_fold` の契約、または元データの版（Unicode 17.0.0 の `CaseFolding.txt` の状態 C と F）の変更 → ラベルの正規化（この spec）、`inline-parser`（ラベルの照合）、`foundation`（`tools/gen_unicode_tables.py --check`）
+- `amark_char_ref_decode` の契約、または名前付き文字参照の表（WHATWG `entities.json`）の版の変更 → `inline-parser`（文字参照のインライン）、`html-renderer` と `markdown-renderer`（出力の照合のデータ）
+
+**CommonMark の構文セットの構築関数**
 - 組み込み拡張の名前、構築関数が加える拡張の順（出力の core 拡張の位置を含む）、ノード型と拡張の対応表の変更 → `html-renderer`、`markdown-renderer`、`inline-parser`
 - `amark_html_core_extension()` の名前・登録の規則の変更（`html-renderer` 側の変更）、`amark_markdown_core_extension()` の名前・登録の規則の変更（`markdown-renderer` 側の変更）→ この spec の構築関数
-- HTML ブロックの開始と終わりの条件、HTML のタグの走査（バイト列の版と区間の並びの版）の契約の変更 → `markdown-renderer`（HTML ブロックと保護の判定）、`inline-parser`（raw HTML）
-- `amark_label_map`、`amark_label_normalize`、走査と解読の関数の契約の変更 → `inline-parser`
-- 入れ子の深さの既定の上限の変更 → 利用者（文書化された値）
-- 宛先の括弧の入れ子の上限（`AMARK_SCAN_MAX_LINK_PAREN_DEPTH`）の変更 → `inline-parser`（インラインのリンク）、利用者（文書化された値）
-- エンジンの役割の番号の範囲の分け方（ブロック 0xFF00–0xFF0F、インライン 0xFF10–0xFF1F）の変更 → `inline-parser`、`markdown-renderer`
-- `amark_test_parse_gfm`（`gfm_block_ext.h` の取得関数、脚注の定義の表の関数、表のセルの区間とトークンの規則）と `amark_test_parse_check` の契約の変更 → `inline-parser` のテスト
+- 便宜の関数（`amark_syntax_set_new_commonmark`、`amark_parser_new_commonmark`、`amark_parse_commonmark`）の所有の規則の変更 → 利用者、`inline-parser` の `FACTORY=` の関数
+
+**GFM 相当の検証用ライブラリとテストの補助**
+- `amark_test_parse_gfm`（`gfm_block_ext.h` の取得関数、拡張の名前、テスト用の役割の番号、脚注の定義の表の関数、表のセルの区間とトークンの規則）の変更 → `inline-parser` のテスト（`amark_test_gfm`）
+- `amark_test_parse_check` と `AMARK_CHECK_PARSE` の契約の変更 → `inline-parser` のテスト（`amark_test_check_example`）、`markdown-renderer` のテスト
+- `tests/support/gen_examples.cmake` の基本の契約（データの形式、テストの名前の規則、`n=`、`EXPECT=dump`、`DUMP_FLAGS=`、予約した名前と拡張の規則）の変更 → `inline-parser`（拡張する側）、`markdown-renderer`（`CHECK=` の利用者）
+
+**ベンチマークの基盤**
+- オプション `AMARK_BUILD_BENCH` の名前と既定値、`bench/CMakeLists.txt` の `amark_add_bench` の引数の変更 → `bench/CMakeLists.txt` に追記する spec（`inline-parser` の `inline_pathological`）、`foundation`（Downstream Extension Points の表の行）
 
 ## Architecture
 
@@ -178,7 +200,11 @@ tools/
 tests/
 ├── support/
 │   ├── parse_check.h           # パースして、被覆・不変条件・逐次の入力の一致・ダンプを確かめる補助
-│   └── parse_check.c
+│   ├── parse_check.c
+│   ├── gen_examples.cmake      # spec.txt の例の形式のデータからテストを生成する共有のスクリプト（唯一のパーサ。
+│   │                           # inline-parser が EXPECT=html、FACTORY=、CHECK= を追加で足す）
+│   └── data/
+│       └── gen_examples_selftest.txt  # 生成の自己テスト（NUL、CR、タブ、n=、見出しの名前）
 ├── runtime/
 │   ├── case_fold_test.c
 │   └── entity_test.c
@@ -204,31 +230,30 @@ tests/
 │   └── scale_test.c            # 計算量のカウンタ、深い入れ子（INTERNAL）
 └── syntax/
     ├── CMakeLists.txt
-    ├── gen_block_cases.cmake   # データファイルから、パースとダンプの照合のテストを生成する
     └── data/
         ├── thematic_break.txt  # 構文ごとの入力と期待するダンプ（トークンつき）
         ├── ...                 # 構文ごとに 1 ファイル（atx_heading、setext_heading、indented_code、fenced_code、
         │                       # html_block、link_reference_definition、paragraph、block_quote、list_item、
         │                       # tabs_and_chars、lossless）
-        └── spec_blocks.txt     # CommonMark 0.31.2 の 2.2、2.3、4 章、5 章の例と、期待するブロックの構造
+        └── spec_blocks.txt     # CommonMark 0.31.2 の 2.2、2.3、4 章、5 章の例（n= で spec の番号）と、期待するブロックの構造
 fuzz/
 ├── block_parse_fuzz.c
 └── corpus/block_parse/
 bench/
-├── CMakeLists.txt
+├── CMakeLists.txt              # amark_add_bench()。他の spec は登録の行を追記する
 └── block_pathological.c        # 病的な入力の大きさを倍々にしたときの時間を表示する
 ```
 
 ### Modified Files
-- `include/amark/amark.h` — `extension.h` の後に `entity.h`、`scan.h`、`parser.h`、`block.h`、`commonmark.h` をこの順に追加する。 依存の順（左は右を include しない）：`entity.h` → `scan.h` → `parser.h`（`extension.h` も include）→ `block.h` → `commonmark.h`。
+- `include/amark/amark.h` — `entity.h`、`scan.h`、`parser.h`、`block.h`、`commonmark.h` を、`foundation` が定める正準の順（`amark.h` の include の順の規則）のそれぞれの位置に追加する（`inline-parser` の `inline.h` は後で `block.h` と `commonmark.h` の間に入る）。 依存の順（左は右を include しない）：`entity.h` → `scan.h` → `parser.h`（`extension.h` も include）→ `block.h` → `commonmark.h`。
 - `include/amark/extension.h` — `syntax-tree` が置いたスロットの種類の範囲の表（`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` / `_LAST`、0x0100–0x01FF）の `block-parser` の節の下に、スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`、`AMARK_SLOT_PARAGRAPH_CONSUMER`、`AMARK_SLOT_POSTPROCESS`、`AMARK_SLOT_PARSE_STATE` の番号を追記する。
 - `include/amark/unicode.h`、`src/runtime/unicode.c` — `amark_unicode_case_fold()` を追加する。
 - `tools/gen_unicode_tables.py` — `CaseFolding.txt`（状態 C と F）を読み、`case_fold_tables.inc` を出力する。`--check` の対象に加える。
 - `src/CMakeLists.txt` — `amark_objects` に `src/parse/*.c`、`src/syntax/*.c`、`src/runtime/entity.c` を追加する。
-- `tests/CMakeLists.txt` — INTERFACE ライブラリ `amark_test_parse`（INTERFACE のソース `support/parse_check.c`）を定義し、`add_subdirectory(parse)`、`add_subdirectory(syntax)` を追加する。`tests/parse/CMakeLists.txt` は INTERFACE ライブラリ `amark_test_parse_gfm`（INTERFACE のソース `${CMAKE_CURRENT_SOURCE_DIR}/gfm_block_ext.c`、インクルード `tests/parse/`、`amark_test_html_gfm` に依存）を定義する。ターゲットは全体で見えるので、`inline-parser` の `tests/extensions/` からリンクできる。`tests/runtime/CMakeLists.txt` に case fold と文字参照のテストを足す。
+- `tests/CMakeLists.txt` — INTERFACE ライブラリ `amark_test_parse`（INTERFACE のソース `support/parse_check.c`）を定義し、`add_subdirectory(parse)`、`add_subdirectory(syntax)` を追加する。`tests/parse/CMakeLists.txt` は INTERFACE ライブラリ `amark_test_parse_gfm`（INTERFACE のソース `${CMAKE_CURRENT_SOURCE_DIR}/gfm_block_ext.c`、インクルード `tests/parse/`、`amark_test_html_gfm` に依存）を定義する。ターゲットは全体で見えるので、`inline-parser` の `tests/extensions/` からリンクできる。`tests/syntax/CMakeLists.txt` は `tests/support/gen_examples.cmake` を生成スクリプトとして使う（SyntaxTests）。`tests/runtime/CMakeLists.txt` に case fold と文字参照のテストを足す。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(block_parse SOURCES block_parse_fuzz.c CORPUS corpus/block_parse)`。
-- `CMakeLists.txt`（最上位）— オプション `AMARK_BUILD_BENCH`（既定 OFF）と `add_subdirectory(bench)`。
-- `.gitattributes` — `tests/syntax/data/spec_blocks.txt export-ignore`。
+- `CMakeLists.txt`（最上位）— オプション `AMARK_BUILD_BENCH`（既定 OFF）と、ON のときの `add_subdirectory(bench)`。`foundation` の Downstream Extension Points の表に載る拡張点への追記。
+- `.gitattributes` — `tests/syntax/data/spec_blocks.txt export-ignore`。同じく `foundation` の拡張点への追記。
 - 上流の変更（`syntax-tree` の所有。`syntax-tree` の spec に反映済みで、`syntax-tree` のタスクが実装する）：`amark_document_take_syntax_set`、`amark_node_import_children`、スロットの種類の範囲の表（Integration の節）。
 
 ## System Flows
@@ -302,12 +327,13 @@ stateDiagram-v2
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
 | 1.1 | 一括のパースとアロケータ | ParserAPI | `amark_parse` | パースの全体 |
-| 1.2 | CommonMark の便宜の関数と所有 | CommonMarkSet, ParserAPI | `amark_parse_commonmark`, `AMARK_PARSE_TAKE_SYNTAX_SET` | パースの全体 |
+| 1.2 | CommonMark の便宜の関数と所有 | CommonMarkSet, ParserAPI | `amark_parse_commonmark`, `amark_parser_new_take_syntax_set` | パースの全体 |
 | 1.3 | 逐次の入力と一括の一致 | ParserAPI, LineReader | `amark_parser_feed`, `amark_parser_finish` | パースの全体 |
 | 1.4 | 凍結していない構文セット | ParserAPI | `amark_parser_new` | — |
 | 1.5 | 終了後の操作 | ParserAPI | 状態 | パーサの状態 |
 | 1.6 | 確保の失敗 | ParserAPI, 全コンポーネント | `Failed` | パーサの状態 |
 | 1.7 | スレッドと構文セットの共有 | ParserAPI, BlockEngine | 構文セットは読み取りだけ | — |
+| 1.9 | 借りる生成と所有権を受け取る生成の分離 | ParserAPI, CommonMarkSet | `amark_parser_new`（`const`）, `amark_parser_new_take_syntax_set`（非 `const`） | — |
 | 1.8 | 追跡を無効のまま | ParserAPI | `AMARK_PARSE_NO_EDIT_TRACKING` | — |
 | 2.1 | 改行コード | LineReader, BlockContext, Builtin syntaxes | 行の記録、`LINE_ENDING` | — |
 | 2.2 | タブと部分的なタブ | BlockContext | `amark_block_consume_columns` | — |
@@ -379,8 +405,9 @@ stateDiagram-v2
 | 13.1, 13.2, 13.3, 13.4 | GFM 相当のフック | GfmHookTests | 公開 API | — |
 | 13.5 | 検証用の構文の再利用 | GfmHookTests | `amark_test_parse_gfm`, `amark_test_gfm_*_extension`, `amark_test_gfm_footnote_definitions` | — |
 | 13.6 | セルの中の `\|` | GfmHookTests | セルの区間と `AMARK_TEST_GFM_ROLE_CELL_PIPE_ESCAPE` | — |
-| 14.1, 14.2, 14.3, 14.4 | 検証 | SyntaxTests, ParseCheck | `gen_block_cases.cmake`, `amark_test_parse_check` | — |
+| 14.1, 14.2, 14.3, 14.4 | 検証 | SyntaxTests, ParseCheck | `gen_examples.cmake`, `amark_test_parse_check` | — |
 | 14.5 | 文書を返す検査の補助 | ParseCheck | `amark_test_parse_check`（関数）, `AMARK_CHECK_PARSE` | — |
+| 14.6 | 共有のテスト生成スクリプト | SyntaxTests | `tests/support/gen_examples.cmake` | — |
 
 ## Components and Interfaces
 
@@ -420,11 +447,11 @@ stateDiagram-v2
 | Requirements | 1.1–1.8, 2.7, 4.8, 5.2, 5.4, 5.5, 6.1, 6.4, 6.6, 11.1–11.3 |
 
 **Responsibilities & Constraints**
-- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）、アロケータを受け取る。文書を作り（`amark_document_new`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`AMARK_PARSE_TAKE_SYNTAX_SET` のときは、最後の段階（他のすべての確保と `init` の後）で `amark_document_take_syntax_set(document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを生成の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
+- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）、アロケータを受け取る。文書を作り（`amark_document_new`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_new` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_new_take_syntax_set` だけが行う。これは `amark_parser_new` と同じ内部の生成（`amark__parser_create`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_new_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
 - 入力：バイト列をソースに追加し（`amark_document_append_source`）、LineReader が切り出した完全な行を BlockEngine に渡す。
 - 終了：最後の行を処理し、開いているブロックをすべて閉じる → 後処理（インラインの前）→ インラインの段階 → 後処理（インラインの後）→ パースの状態の `destroy` とパースの間のデータの解放 → 追跡の有効化（オプションで無効にしない限り）→ 文書を返す。構文セットの所有権は生成のときに文書へ渡してあるので、返した文書はそれを保持し続け、パーサと独立する（11.3）。
 - インラインの段階：根から前順にたどり、インラインの入力が登録されたノードごとに `delegate->parse` を呼ぶ。`begin` は最初の呼び出しの前に 1 回、`end` は最後（失敗のときも）に 1 回。
-- 解放：終了していなければ文書を解放する。文書が構文セットを所有していれば（`TAKE_SYNTAX_SET` の生成が成功した後）、`amark_document_free` がノードの後でそれを解放する。生成が成功した後は、パースの成否によらず構文セットは文書のものである（`parser.h` に文書化する）。
+- 解放：終了していなければ文書を解放する。文書が構文セットを所有していれば（`amark_parser_new_take_syntax_set` の生成が成功した後）、`amark_document_free` がノードの後でそれを解放する。生成が成功した後は、パースの成否によらず構文セットは文書のものである（`parser.h` に文書化する）。
 
 **Contracts**: Service [x] / State [x]
 
@@ -435,7 +462,6 @@ stateDiagram-v2
 typedef struct amark_parser amark_parser;
 
 #define AMARK_PARSE_NO_EDIT_TRACKING    0x01u   /* 返す文書の追跡を無効のままにする */
-#define AMARK_PARSE_TAKE_SYNTAX_SET     0x02u   /* 構文セットの所有権を受け取り、文書へ渡す */
 #define AMARK_PARSE_DEFAULT_MAX_DEPTH   128u
 #define AMARK_PARSE_MAX_DEPTH_LIMIT     65535u
 
@@ -457,8 +483,13 @@ typedef struct amark_parse_options {
 
 AMARK_API void amark_parse_options_init(amark_parse_options *options);
 
+/* 構文セットを借りる（変更も解放もしない）。呼び出し側は文書より長く構文セットを保つ */
 AMARK_API amark_status amark_parser_new(const amark_syntax_set *syntax, const amark_parse_options *options,
                                         const amark_allocator *allocator, amark_parser **out_parser);
+/* amark_parser_new と同じ生成の後、構文セットの所有権を受け取って文書へ渡す。
+   成功したら所有権は文書のもの、失敗したら呼び出し側に残る */
+AMARK_API amark_status amark_parser_new_take_syntax_set(amark_syntax_set *syntax, const amark_parse_options *options,
+                                                        const amark_allocator *allocator, amark_parser **out_parser);
 AMARK_API amark_status amark_parser_feed(amark_parser *parser, const char *data, size_t length);
 AMARK_API amark_status amark_parser_finish(amark_parser *parser, amark_document **out_document);
 AMARK_API void amark_parser_free(amark_parser *parser);
@@ -470,7 +501,7 @@ AMARK_API amark_status amark_parse(const amark_syntax_set *syntax, const char *d
 AMARK_API const amark_inline_delegate *amark_inline_delegate_default(void);
 AMARK_API const amark_inline_delegate *amark_inline_delegate_plain(void);
 ```
-- Preconditions：`syntax` は NULL でない凍結済みの構文セット（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`max_container_depth` が上限を超える、`inline_delegate` の `parse` が NULL、`struct_size` が不足、未知の `flags` のビットは `AMARK_ERROR_INVALID_ARGUMENT`。`AMARK_PARSE_TAKE_SYNTAX_SET` のとき、`syntax` はヒープに作られた構文セット（`amark_syntax_set_core()` は `amark_document_take_syntax_set` が拒否し、生成が `AMARK_ERROR_INVALID_ARGUMENT` で失敗する）。生成が失敗したとき、所有権は呼び出し側に残る。
+- Preconditions：`syntax` は NULL でない凍結済みの構文セット（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`max_container_depth` が上限を超える、`inline_delegate` の `parse` が NULL、`struct_size` が不足、未知の `flags` のビットは `AMARK_ERROR_INVALID_ARGUMENT`。`flags` の 0x02 は使わない（以前の所有権の印。未知のビットとして拒否する）。`amark_parser_new_take_syntax_set` の `syntax` はヒープに作られた構文セット（静的な構文セットは型の上でも `const` なので渡せず、仮に渡されても `amark_document_take_syntax_set` が拒否し、生成が `AMARK_ERROR_INVALID_ARGUMENT` で失敗する）。生成が失敗したとき、所有権は呼び出し側に残る。`amark_parse` は借りるだけで、所有権を受け取る一括の版は持たない（必要なら `amark_parse_commonmark` か、`amark_parser_new_take_syntax_set` と feed と finish を使う）。
 - Postconditions：`finish` の成功で、文書は無編集で、追跡は有効（印がなければ）。`feed` の `data` が NULL で `length` が 0 なら何もしない。
 - Invariants：同じ入力は、区切り方によらず同じ木とトークンになる（1.3）。
 
@@ -883,7 +914,7 @@ AMARK_API size_t amark_label_map_count(const amark_label_map *map);
 - 挿入先の文書の構文セットとアロケータで、一時的な文書をパースする（ブロックの文脈は通常のパース。インラインの文脈は、断片の全体を 1 つの区間として一時的な段落のインラインの入力にし、委譲先だけを実行する）。
 - `AMARK_FRAGMENT_TARGET_DEFINITIONS`：パースの前に、挿入先の文書の木の link_definition を前順にたどって表に登録する（10.3）。
 - 挿入：`amark_node_import_children(parent, before, scratch_parent)`（`syntax-tree` の 4.10、4.11）で、一時的な文書の根（ブロック）または一時的な段落（インライン）の子をすべて取り込んで挿入する。`syntax-tree` は根を `source_parent` にすることを認めている（`amark_node_import` は根を拒否するので使わない）。`syntax-tree` が型の対応付けと包含の検査、ソースの複製（ソースごとに 1 回）、ノードの複製をつなぎ込みの前にすべて行うので、包含の規則に反するノードや確保の失敗があれば何も挿入されず、挿入先の文書は変わらない（10.4。包含の違反は `AMARK_ERROR_INVALID_ARGUMENT`）。この spec は挿入の前に独自の検査や巻き戻しを持たない。挿入の編集の記録は `syntax-tree` の規則に従う（追跡が有効なら、`parent` に `CHILDREN`、各ノードに `RELOCATED`。10.5）。断片が空で子がなければ、何も挿入せず成功する。一時的な文書は最後に解放する（取り込んだノードのトークンは挿入先に複製したソースを参照するので、解放の影響を受けない）。
-- 一時的な文書は挿入先の文書の構文セットを参照するだけで、所有しない（`AMARK_PARSE_TAKE_SYNTAX_SET` を使わない）。
+- 一時的な文書は挿入先の文書の構文セットを参照するだけで、所有しない（`amark_parser_new` で借りる）。
 
 **Contracts**: Service [x]
 ```c
@@ -895,7 +926,7 @@ AMARK_API amark_status amark_parse_fragment(amark_node *parent, amark_node *befo
                                             amark_fragment_context context, const char *data, size_t length,
                                             const amark_parse_options *options, uint32_t fragment_flags);
 ```
-- Preconditions：`before` は NULL か `parent` の子。`parent` の文書の構文セットを使う。`AMARK_PARSE_TAKE_SYNTAX_SET` は指定できない。
+- Preconditions：`before` は NULL か `parent` の子。`parent` の文書の構文セットを借りて使う（所有権は扱わない）。
 - Postconditions：成功なら、得たノードがその順で挿入され、各ノードは取り込んだソースを参照するトークンを持つ。失敗なら挿入先の木は変わらない。
 
 ### Syntax
@@ -909,7 +940,7 @@ AMARK_API amark_status amark_parse_fragment(amark_node *parent, amark_node *befo
 
 **Responsibilities & Constraints**
 - `amark_syntax_set_add_commonmark`：凍結していない構文セットの末尾に、次の順で拡張を加える。(1) 組み込みのノード型の出力の core 拡張：`amark_html_core_extension()`（`amark.core.html`）、その直後に `amark_markdown_core_extension()`（`amark.core.markdown`）。構築関数の中の「出力の core 拡張の一覧」は取得関数の静的な配列で、要素の数は配列から求める（追加でループや失敗時の取り除きの処理を変えない）。この spec のタスク 8.1 は `amark.core.html` だけの配列で実装し、`amark.core.markdown` の 1 行と、拡張の順（`amark.core`、`amark.core.html`、`amark.core.markdown`、構文の拡張）を確かめるテストは `markdown-renderer` のタスク 3.7 が足す（`markdown-renderer` の登録の規則 4）。この spec の側に追加のタスクは要らない。構文セットは `amark.core` を先頭に持つので、出力の core 拡張は `amark.core` の直後になる。(2) ブロックの構文の拡張：`commonmark.block_quote`、`commonmark.list_item`、`commonmark.atx_heading`、`commonmark.setext_heading`、`commonmark.thematic_break`、`commonmark.fenced_code`、`commonmark.indented_code`、`commonmark.html_block`、`commonmark.link_reference_definition`、`commonmark.paragraph`。(3) `inline-parser` はこの後に自分のインラインの拡張を足す。途中で失敗したら加えたものを取り除く。利用者の構文セットにすでに同じ名前の拡張があれば `AMARK_ERROR_INVALID_ARGUMENT`（構文セットは変えない）。
-- 便宜の関数は、構文セットを作って加えて凍結し、`AMARK_PARSE_TAKE_SYNTAX_SET` でパーサに渡す。パーサの生成が失敗したら所有権は便宜の関数に残るので、それを解放して失敗を返す。生成が成功した後は文書が構文セットを所有し、返した文書はそれを保持し続ける（1.2。ParserAPI）。
+- 便宜の関数は、構文セットを作って加えて凍結し、非 `const` の構文セットを保持したまま `amark_parser_new_take_syntax_set` でパーサに渡す（所有権の受け渡しは、非 `const` の構文セットを持つこの経路だけで起こる）。パーサの生成が失敗したら所有権は便宜の関数に残るので、それを解放して失敗を返す。`amark_parse_commonmark` は `amark_parser_new_commonmark`、feed、finish、free の組み合わせで、feed か finish が失敗したら、構文セットはすでに文書のものなので、パーサの解放が文書ごと解放する。生成が成功した後は文書が構文セットを所有し、返した文書はそれを保持し続ける（1.2。ParserAPI）。
 - 各構文のファイルは、`static const amark_slot_header *const slots[]` と `static const amark_extension` を持ち、取得の関数で返す。組み込みのノード型の出力は構文ではなくノード型に従うので、構文の拡張は出力のスロットを持たない（出力は `amark.core.html` などが持つ）。特定の構文だけが独自の出力を必要とする場合は、そのファイルの `slots[]` に足せば、構文セットの順で core の出力を上書きする（7.6）。
 
 **Contracts**: Service [x]
@@ -1067,12 +1098,30 @@ amark_status amark_test_parse_check(const amark_test_parse_spec *spec, const cha
 #define AMARK_CHECK_PARSE(spec, input, input_length, expected_dump) /* ... */
 ```
 - `tests/support/parse_check.c` は INTERFACE ライブラリ `amark_test_parse` のソース（`amark_test_tree` と同じ方式）。
-- 返す文書の構文セットの寿命：`spec->syntax` が NULL のとき、補助はテスト用の構文セットを作って `AMARK_PARSE_TAKE_SYNTAX_SET` でパーサに渡すので、返した文書がそれを所有する。`spec->syntax` を指定したときは、呼び出し側が文書より長く構文セットを保つ。
+- 返す文書の構文セットの寿命：`spec->syntax` が NULL のとき、補助はテスト用の構文セットを作り、非 `const` のまま `amark_parser_new_take_syntax_set` でパーサに渡すので、返した文書がそれを所有する（逐次の入力の比較のためのパースは、同じ構文セットを `amark_parser_new` で借りる）。`spec->syntax` を指定したときは、呼び出し側が文書より長く構文セットを保つ。
 - `inline-parser` は、この関数の上に HTML の照合を重ねる（`amark_test_check_example`）。そのため、検査の内容（被覆、不変条件、逐次の一致）と期待のダンプの照合を分け、期待との照合はマクロだけが行う。
 
 #### SyntaxTests、ParseTests、Fuzz、Bench
-- データの形式（`gen_block_cases.cmake`）：CommonMark の spec.txt と同じ区切り（`` ```````````````````````````````` example `` から `.` までが入力、`.` から閉じまでが期待するダンプ）。入力の `→` はタブ。見出しの行（`## ...`）がスイートの名前、例の番号がテストの名前になる。`AmarkTestGen.cmake` の 16 進の補助で NUL と CR を失わない。
-- `spec_blocks.txt`：CommonMark 0.31.2 の 2.2（タブ）、2.3（不正な文字）、4 章、5 章のすべての例の入力と、期待するブロックの構造のダンプ（単純な委譲先のインライン、トークンなし）。spec の例の番号を名前にする。CC-BY-SA 4.0 のテストデータとして扱い、ファイルの先頭に出典と許諾を書き、`export-ignore` を付ける（14.4）。
+- **`gen_examples.cmake` の契約**（`tests/support/gen_examples.cmake`。spec.txt の例の形式の唯一のパーサ。この spec が作り、`inline-parser` のタスク 1.4 が拡張する。14.1、14.6）：
+  - 呼び出し：`foundation` の `amark_add_generated_tests(<target> GENERATOR ${PROJECT_SOURCE_DIR}/tests/support/gen_examples.cmake DATA ... [ARGS ...] ...)`。`foundation` が渡す `AMARK_TESTGEN_INPUT`、`AMARK_TESTGEN_OUTPUT`、`AMARK_TESTGEN_SUITE`、`AMARK_TESTGEN_MODULE` を使い、`AMARK_TESTGEN_MODULE`（`AmarkTestGen.cmake`）を include して 16 進の補助でバイト列を埋め込む。
+  - データの形式（基本。拡張で変えない）：
+    - 例の開始は、32 個のバッククォートの後に ` example` が続く行（その後に空白で区切った語を続けてよい）。例の終わりは 32 個のバッククォートだけの行。開始と終わりの間の最初の `.` だけの行が、入力と期待の区切り。
+    - 入力と期待は、それぞれの行に LF を付けて連結したバイト列（spec.txt と同じ）。両方の `→`（U+2192）をタブ（0x09）に置き換える。
+    - ファイルは `file(READ ... HEX)` で読み、LF だけで行に分けるので、データの中の CR、NUL などのバイトはそのまま入力と期待に残る。
+    - 例の外の、`#` から `######` で始まる見出しの行を節の名前にする。例の外のその他の行（spec の文章）は無視する。
+    - テストの名前は `ex<4 桁の番号>_<節の名前の C の識別子>`。番号はファイルの中の例の通し番号（1 から。spec.txt では spec の例の番号と一致）。開始の行の語 `n=<N>` で番号を明示でき、以後の例は N+1 から続く（spec の一部を写したデータで spec の番号を保つため。spec.txt には現れないので、spec.txt の番号の付け方は変わらない）。C の識別子は、見出しの `#` と前後の空白を除き、ASCII の英数字以外の並びを 1 つの `_` にし、小文字にして前後の `_` を除いたもの（見出しがなければ `top`）。
+    - 開始の行の `n=` 以外の語は予約し、未知の語は `FATAL_ERROR`。閉じのない例、区切りのない例、同じテストの名前の重複も、データのファイル名と行番号を示して `FATAL_ERROR`。
+  - ARGS（基本。この spec が実装する）：
+    - `EXPECT=dump`（既定。省略してよい）：期待はダンプ。
+    - `DUMP_FLAGS=<C の式>`（既定 `0`）：`amark_test_parse_spec` の `dump_flags`（例：`AMARK_DUMP_TOKENS`）。
+    - 基本の検査の経路：各テストは `amark_test_parse_spec spec = { NULL, NULL, <DUMP_FLAGS> };`（テスト用の構文セットと単純な委譲先）で `AMARK_CHECK_PARSE(&spec, input, input_length, expected)` を呼ぶ。生成するソースは `<amark/amark.h>` と `parse_check.h` を include するので、呼び出し側は `LIBRARIES amark_test_parse` をリンクする。
+    - 未知の ARGS の名前は `FATAL_ERROR`。`FACTORY`、`CHECK` の名前と `EXPECT=html` は `inline-parser` のために予約し、この spec の版では「`inline-parser` の拡張が必要」と示して `FATAL_ERROR` にする。
+  - 拡張の規則（`inline-parser` との取り決め。追加だけで行う）：
+    - `inline-parser` は `EXPECT=html`、`FACTORY=<C の関数名>`、`CHECK=<C の関数名>` を足し、`FACTORY=` か `CHECK=` があるときの経路（`amark_test_check_example` か `<CHECK>` の呼び出しと、そのための include と宣言）を加える。`FACTORY=` と `CHECK=` がどちらもないとき（基本の経路）に生成するソースは、この spec の版とバイト単位で同じに保つ。
+    - データの形式、テストの名前の規則、`n=`、`EXPECT=dump` と `DUMP_FLAGS=` の基本の経路での意味は変えない。開始の行の新しい語や ARGS の新しい名前は追加してよい。`DUMP_FLAGS=` を `FACTORY=` / `CHECK=` と組み合わせたときの扱いは `inline-parser` が決める。
+    - 生成スクリプトの内部の構造は、基本の経路の出力が変わらない限り `inline-parser` が変えてよい。この spec の自己テスト（`tests/support/data/gen_examples_selftest.txt`）は拡張の後も通る。
+  - 登録（`tests/syntax/CMakeLists.txt`）：`data/` の構文ごとのファイルを構成時に集め（`spec_blocks.txt` を除く）、`amark_add_generated_tests(syntax GENERATOR ${PROJECT_SOURCE_DIR}/tests/support/gen_examples.cmake DATA <構文ごとのファイル> ARGS DUMP_FLAGS=AMARK_DUMP_TOKENS INTERNAL LIBRARIES amark_test_parse)` と、`amark_add_generated_tests(syntax_spec GENERATOR ... DATA data/spec_blocks.txt ARGS DUMP_FLAGS=0 INTERNAL LIBRARIES amark_test_parse)` で登録する。
+- `spec_blocks.txt`：CommonMark 0.31.2 の 2.2（タブ）、2.3（不正な文字）、4 章、5 章のすべての例の入力と、期待するブロックの構造のダンプ（単純な委譲先のインライン、トークンなし）。各例の開始の行に `n=<spec の例の番号>` を書き、spec の例の番号を名前にする。CC-BY-SA 4.0 のテストデータとして扱い、ファイルの先頭に出典と許諾を書き、`export-ignore` を付ける（14.4）。
 #### GfmHookTests（`amark_test_parse_gfm`）
 
 | Field | Detail |
@@ -1154,7 +1203,7 @@ typedef struct amark__node_entry {          /* ノードを鍵とする内部の
 struct amark_parser {
     amark_allocator allocator;
     const amark_syntax_set *syntax;
-    /* TAKE_SYNTAX_SET の構文セットは生成の最後に文書へ渡すので、パーサは所有の印を持たない */
+    /* amark_parser_new_take_syntax_set の構文セットは生成の最後に文書へ渡すので、パーサは所有の印を持たない */
     amark_parse_options options;
     amark_document *document;
     amark_source_id source;
@@ -1211,7 +1260,7 @@ struct amark_parser {
 ### Performance / Robustness
 - **scale**（INTERNAL）：深さ 128 の引用と、深さ 64 のリストに 10 万行の遅延継続行と空行、10 万個のリンク参照定義、10 万個の `[` で始まる段落、深い括弧（`(` の 10 万個の並び）を宛先に持つリンク参照定義、表の検証用の構文で 10 万行の段落、それぞれ入力を倍にしたときのカウンタ（照合、開始、消費の走査の行、トークン）の比が 2.2 倍以下（12.3）。深さ 65535 の上限での深い入力がスタックを使い果たさないこと（12.4）。
 - **fuzz**（`block_parse_fuzz`）：入力の先頭のバイトで区切りの規則と深さの上限を選び、一括と逐次でパースし、被覆、不変条件、ダンプの一致を確かめる。確保の失敗を注入する回もある（12.5）。
-- **bench**：`block_pathological` が上記の入力の大きさを 1、2、4、8 倍にして時間を表示する（CI では実行しない）。
+- **bench**：`block_pathological` が上記の入力の大きさを 1、2、4、8 倍にして時間を表示する（CI では実行しない）。`bench/CMakeLists.txt` は `amark_add_bench(<name> SOURCES <source>... [INTERNAL])` を定義する（実行ファイルを作り、`amark_target_defaults()` を適用し、`amark`（`INTERNAL` なら `amark_internal`）をリンクし、出力を `${PROJECT_BINARY_DIR}/bin` に置く。CTest には登録しない）。この spec は `amark_add_bench(block_pathological SOURCES block_pathological.c INTERNAL)` を置き、`inline-parser` などは同じ形の 1 行を追記する。
 
 ## Security Considerations
 - 信頼できない入力に対して、範囲の検査、サイズの計算の桁あふれの検査（`amark__size_add` / `amark__size_mul`）、再帰の不使用、深さの上限、決定的な平衡木（衝突を狙った入力への耐性）で、時間とメモリを入力の大きさにほぼ比例させる。
@@ -1225,10 +1274,11 @@ struct amark_parser {
 
 ## Integration & Upstream Changes
 - **`syntax-tree` への追加（2026-11-25 に `syntax-tree` の spec に反映済み。実装は `syntax-tree` のタスク 3.4、5.5 が行う）**：
-  1. `AMARK_API amark_status amark_document_take_syntax_set(amark_document *document, amark_syntax_set *set);`（`syntax-tree` の 1.10、1.11）— 文書が使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードとソースの後に解放する。静的な構文セット、文書が使っていない構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT` で、所有権は呼び出し側に残る。確保をしない。この spec はパーサの生成の最後に呼ぶ（ParserAPI。1.2、11.3）。
+  1. `AMARK_API amark_status amark_document_take_syntax_set(amark_document *document, amark_syntax_set *set);`（`syntax-tree` の 1.10、1.11。非 `const` の受け取りのまま）— 文書が使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードとソースの後に解放する。静的な構文セット、文書が使っていない構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT` で、所有権は呼び出し側に残る。確保をしない。この spec は、非 `const` の構文セットを受け取る `amark_parser_new_take_syntax_set` の生成の最後でだけ呼ぶ（ParserAPI。1.2、1.9、11.3）。
   2. `AMARK_API amark_status amark_node_import_children(amark_node *parent, amark_node *before, const amark_node *source_parent);`（`syntax-tree` の 4.10、4.11）— `source_parent`（根でもよい）の子をすべて、ソースごとに 1 回だけ複製して取り込み、`before` の前（NULL なら末尾）に順に挿入する。型の対応付け・包含の検査・確保をつなぎ込みの前に終え、全か無か。記録は `parent` に `CHILDREN`、各複製に `RELOCATED`。この spec は断片のパースで使う（Fragment。10.1、10.2、10.4、10.5）。
   3. スロットの種類の範囲の表（`syntax-tree` の 8.13。`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` 0x0100 – `_LAST` 0x01FF）。この spec は、その `block-parser` の節の下に 0x0100–0x0103 を追記する（予定どおりの追記）。
 - **`foundation` の生成手順への追加**（foundation の design が予定している作業）：case fold の表と関数、文字参照の表と関数、`.gitattributes` の `export-ignore`。
+- **`foundation` の Downstream Extension Points（2026-11-25 の横断レビュー r1）**：この spec の最上位の `CMakeLists.txt` への追記（オプション `AMARK_BUILD_BENCH` と `add_subdirectory(bench)`）と、`.gitattributes` への `tests/syntax/data/spec_blocks.txt export-ignore` の追記は、`foundation` の Downstream Extension Points の表の行として載る（行の追加は `foundation` の spec が行う。この spec はその表の拡張点の範囲で編集する）。`amark.h` への追加は `foundation` の正準の順に従う。
 - **スロットの種類の番号の範囲**：`block-parser` 0x0100–0x01FF、`inline-parser` 0x0200–0x02FF、`html-renderer` 0x0300–0x03FF（`AMARK_SLOT_HTML_NODE` 0x0301、`AMARK_SLOT_HTML_HOOKS` 0x0302。`html-renderer` の design と一致）、`markdown-renderer` 0x0400–0x04FF。この表は `syntax-tree` の `extension.h` に定数と注記として置かれた（上記 3）。
 - **`html-renderer` との関係**：構築関数は `amark_html_core_extension()` を `amark.core` の直後に加える（`html-renderer` の登録の規則 4）。
 - **`markdown-renderer` からの依頼（2026-11-25 に反映。`markdown-renderer` の design の Integration & Upstream Changes の `block-parser` の 1、2）**：
@@ -1240,4 +1290,5 @@ struct amark_parser {
   3. `tests/parse/gfm_block_ext.{h,c}` を INTERFACE ライブラリ `amark_test_parse_gfm` として公開し、3 つの拡張の取得関数、`amark_test_gfm_footnote_definitions`、セルの中の `\|` の扱いを提供する（GfmHookTests。13.5、13.6）。
   4. `amark_test_parse_check` を、検査の後に一括の文書を返す関数の形にし、`AMARK_CHECK_PARSE` をその上のマクロにする（ParseCheck。14.5）。
   - この spec は `inline-parser` より先に実装されるので、これらはこの spec のタスク（1.1、1.4、3.3、6.2、7.10、9.1–9.3、10.2）で実装する。これら 4 つ（宛先の括弧の入れ子の上限、役割の範囲の分け方、`amark_test_parse_gfm`、`amark_test_parse_check`）の所有者と唯一の実装者はこの spec で、`inline-parser` はそれを使うだけで、同じものを実装しない。`inline-parser` のタスク 1.2、1.3 が同じ作業を実装として書いている重複は、`inline-parser` の側で、実装済みのものを確かめる作業に直す（この spec の変更は要らない）。
+- **`inline-parser` との共有のテスト基盤（2026-11-25 の横断レビュー r1）**：spec.txt の例の形式のパーサは `tests/support/gen_examples.cmake` の 1 つだけにする。この spec が先に作り（タスク 1.4）、`inline-parser` のタスク 1.4 が `EXPECT=html`、`FACTORY=`、`CHECK=` を追加で足す（SyntaxTests の契約）。`bench/CMakeLists.txt` はこの spec が作り、`inline-parser` は `amark_add_bench` の 1 行を追記する。
 - **`inline-parser` が行うこと**：`amark_inline_delegate_default()` を自分のエンジンに変える。`amark_syntax_set_add_commonmark` にインラインの組み込み拡張を足す。走査・解読・ラベルの表・`amark_unicode_case_fold`・`amark_char_ref_decode` を使い、重複して実装しない。
