@@ -24,7 +24,7 @@
   - 未使用の変数を含む試しのソースが、最上位の構成ではエラー、警告をエラーにしない指定では警告だけになることを確認できる
   - _Requirements: 1.2, 1.4, 1.5, 1.6, 5.2_
 
-- [ ] 1.4 トップレベルの構成とライブラリのターゲットを作る
+- [x] 1.4 トップレベルの構成とライブラリのターゲットを作る
   - CMake 3.21 以上を要求し、版の定義から読んだ版でプロジェクトを定義する。オプション（動的ライブラリ、テスト、取り込みのテスト、インストール、警告、サニタイザ、ファジング、短時間実行の秒数）を設計どおりの既定値で宣言する
   - ソースを 1 回だけコンパイルするオブジェクトの集まりから、構成に従う静的/動的の `amark` と、エイリアス `Amark::amark` を作る。動的版には互換性番号と、利用者に伝わる動的版の定義を付ける。MSVC 形式の静的版は出力名を変えて衝突を避ける
   - エクスポートマクロと C++ 向けの宣言の囲みを公開ヘッダとして用意し、実行時の版の数値と文字列を返す関数を実装する
@@ -226,3 +226,5 @@
 - 1.2: 設計どおりの `(long)` キャストのため、`AMARK_VERSION_NUMBER` は `#if` では使えない（C の定数式としては使える）。設計の改訂の要否は人の判断に委ねる
 - 1.3: `cmake/AmarkCompilerOptions.cmake` は `project()` とオプションの宣言の後、ターゲットを作る前に include する（サニタイザはディレクトリ単位で、include 以降のターゲットにだけ効く）。ターゲットには `amark_target_defaults(<target>)` を呼ぶ
 - 1.3: このコンテナの clang にはサニタイザのランタイムがない。サニタイザの成功経路は gcc で確かめる
+- 1.4: 最上位の CMakeLists.txt の `include(AmarkTesting OPTIONAL)` と `if(EXISTS tests/CMakeLists.txt)` の囲みは暫定。1.5 で外す。`include(AmarkFuzz OPTIONAL)` と `if(EXISTS fuzz/CMakeLists.txt)` は 3.5 で外す。この目的に限り、1.5 と 3.5 は最上位の CMakeLists.txt を編集してよい
+- 1.4: ターゲットは `amark_objects`（OBJECT、`amark_target_defaults` を適用）、`amark`、`Amark::amark`、`amark_internal`（テストかファジングのときだけ、include/ と src/ を PUBLIC に持つ）。テストを作るときの実行時の出力先は `${PROJECT_BINARY_DIR}/bin`

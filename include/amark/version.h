@@ -7,7 +7,7 @@
  * cmake/AmarkVersion.cmake reads the three "#define AMARK_VERSION_MAJOR/MINOR/PATCH"
  * lines below; every other version (the version string, the runtime version, the
  * CMake package version, the pkg-config version and the shared library SOVERSION)
- * is derived from them.
+ * is derived from them. The header also declares the runtime version functions.
  *
  * Write each number as a plain decimal without leading zeros, parentheses or
  * suffixes: it is stringified as-is into AMARK_VERSION_STRING. The minor and
@@ -15,6 +15,8 @@
  */
 #ifndef AMARK_VERSION_H
 #define AMARK_VERSION_H
+
+#include <amark/export.h>
 
 #define AMARK_VERSION_MAJOR 0
 #define AMARK_VERSION_MINOR 1
@@ -38,5 +40,17 @@
 /* The version of these headers as a comparable number, e.g. 1000 for 0.1.0. */
 #define AMARK_VERSION_NUMBER \
     AMARK_VERSION_ENCODE(AMARK_VERSION_MAJOR, AMARK_VERSION_MINOR, AMARK_VERSION_PATCH)
+
+AMARK_BEGIN_DECLS
+
+/* Returns AMARK_VERSION_NUMBER of the library that is actually linked, which can
+ * differ from the AMARK_VERSION_NUMBER of the headers the caller was built with. */
+AMARK_API long amark_version_number(void);
+
+/* Returns AMARK_VERSION_STRING of the library that is actually linked. The string
+ * is static; do not free it. */
+AMARK_API const char *amark_version_string(void);
+
+AMARK_END_DECLS
 
 #endif /* AMARK_VERSION_H */
