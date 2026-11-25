@@ -135,8 +135,10 @@ string(APPEND tests "    NAOS_ADD_TEST(c_identifier_examples),\n")
 
 # amark_testgen_read_lines_hex() on files written here: a final LF ends the last
 # line and adds no empty line; an empty file has no line.
+# The file is written with NEWLINE_STYLE UNIX: file(WRITE) of the MSYS2 build of
+# CMake writes CR LF for "\n", which would put a CR in the lines.
 set(scratch "${AMARK_TESTGEN_OUTPUT}.lines.tmp")
-file(WRITE "${scratch}" "a\n\nb\n")
+file(CONFIGURE OUTPUT "${scratch}" CONTENT "a\n\nb\n" @ONLY NEWLINE_STYLE UNIX)
 amark_testgen_read_lines_hex(lf_lines "${scratch}")
 list(LENGTH lf_lines lf_count)
 amark_testgen_join_lines_hex(lf_joined "${lf_lines}")

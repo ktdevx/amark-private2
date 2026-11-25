@@ -93,9 +93,10 @@ static block_t *find_block(void *ptr, const char *operation)
         }
     }
     NAOS_NOTE("%s of %p", operation, ptr);
+    /* naos_fail does not return (NAOS_NORETURN), so no return statement follows:
+     * one would be unreachable code, which MSVC reports (C4702). */
     NAOS_FAIL("test allocator: unknown pointer, not allocated by the test allocator "
               "or already freed");
-    return NULL; /* not reached */
 }
 
 /* Counts an allocation call; returns 1 when it must fail. */

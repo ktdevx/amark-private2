@@ -132,7 +132,6 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
 
     if (exact_release(&e, bytes)) {
         NAOS_FAIL("the input was changed");
-        failures++;
     }
     return failures;
 }
