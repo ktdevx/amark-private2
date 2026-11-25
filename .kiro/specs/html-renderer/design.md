@@ -109,7 +109,7 @@ graph TB
 2. `amark.core.html` はノード型とパースのスロットを持たず、HTML のスロット（`AMARK_SLOT_HTML_NODE` を 19 個）だけを持つ。公開の `amark_html_core_extension()` で取得する。
 3. CommonMark の構文の構文拡張（`block-parser` と `inline-parser` が `src/syntax/` に置く `commonmark.*`）は、組み込みのノード型の HTML のスロットを持たない。特定の構文だけが独自の HTML を必要とする場合（CommonMark にはない）は、その構文拡張に HTML のスロットを足してよく、順の規則で `amark.core.html` を上書きする。
 4. CommonMark の構文セットの構築関数（`block-parser` が所有）は、`amark.core.html` を `amark.core` の直後（最初に追加する構文拡張）に追加する。この spec は構築関数のファイルを編集しない。
-5. 利用者が `amark_syntax_set_new` から自分で構文セットを作る場合は、組み込みのノード型を出力するために `amark.core.html` を追加する。追加しなければ、組み込みのノード型は出力の処理を持たない型として扱われる（要件 9.4）。
+5. 利用者が `amark_syntax_set_create` から自分で構文セットを作る場合は、組み込みのノード型を出力するために `amark.core.html` を追加する。追加しなければ、組み込みのノード型は出力の処理を持たない型として扱われる（要件 9.4）。
 6. 組み込みの出力を差し替える利用者は、`amark.core.html` より後に同じノード型の HTML のスロットを持つ構文拡張を追加する（`amark_syntax_set_replace` で `amark.core.html` を置き換えてもよい）。
 
 ### Technology Stack
@@ -536,7 +536,7 @@ extern const amark_html_node_slot_t amark_html_slot_document;   /* … 19 の型
 ```
 
 **Implementation Notes**
-- Integration：`block-parser` の CommonMark の構文セットの構築関数が `amark_html_core_extension()` を最初に追加する（登録の規則 4）。この spec のテストは `amark_syntax_set_new` → `amark_syntax_set_append(set, amark_html_core_extension())` → 凍結で構文セットを作る。
+- Integration：`block-parser` の CommonMark の構文セットの構築関数が `amark_html_core_extension()` を最初に追加する（登録の規則 4）。この spec のテストは `amark_syntax_set_create` → `amark_syntax_set_append(set, amark_html_core_extension())` → 凍結で構文セットを作る。
 - Validation：`data/block_cases.txt` と `data/inline_cases.txt` の生成テストが表の各分岐を照合する。
 - Risks：cmark の版を上げるときは表を再照合する（Revalidation Trigger）。
 
@@ -557,7 +557,7 @@ extern const amark_html_node_slot_t amark_html_slot_document;   /* … 19 の型
 | Requirements | 10.6 の基盤（全テストが使う） |
 
 **Responsibilities & Constraints**
-- `html_test_make_set(extra_extensions[], count, &set)`：`amark_syntax_set_new` → `amark.core.html` → 追加の拡張 → 凍結。`html_test_render_sexpr(set, sexpr, flags, attr_fn, &buffer)`：文書を作り、`amark_test_tree_build` で木を組み立てて出力する。`AMARK_CHECK_HTML(set, sexpr, flags, expected_literal)`：出力と期待値を比べ、違えば両方を表示して失敗する。
+- `html_test_make_set(extra_extensions[], count, &set)`：`amark_syntax_set_create` → `amark.core.html` → 追加の拡張 → 凍結。`html_test_render_sexpr(set, sexpr, flags, attr_fn, &buffer)`：文書を作り、`amark_test_tree_build` で木を組み立てて出力する。`AMARK_CHECK_HTML(set, sexpr, flags, expected_literal)`：出力と期待値を比べ、違えば両方を表示して失敗する。
 - `amark` と `amark_internal` のどちらとも組める（公開 API だけを使う）。
 
 #### GfmHtmlExt

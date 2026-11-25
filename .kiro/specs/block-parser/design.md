@@ -58,7 +58,7 @@
 - 役割の番号、トークンの所有の規則（空行、遅延継続、葉のインデント）の変更 → `markdown-renderer`、`inline-parser`
 - エンジンの役割の番号の範囲の分け方（ブロック 0xFF00–0xFF0F、インライン 0xFF10–0xFF1F）の変更 → `inline-parser`、`markdown-renderer`
 - 入れ子の深さの既定の上限の変更 → 利用者（文書化された値）
-- パーサの生成の入口（`amark_parser_new` が構文セットを借りるだけであること、所有権を受け取る `amark_parser_new_take_syntax_set` の契約）の変更 → 利用者、`inline-parser` と `markdown-renderer` のテスト
+- パーサの生成の入口（`amark_parser_create` が構文セットを借りるだけであること、所有権を受け取る `amark_parser_create_take_syntax_set` の契約）の変更 → 利用者、`inline-parser` と `markdown-renderer` のテスト
 
 **`scan.h` の走査（バイト列と区間の並び）**
 - HTML ブロックの開始と終わりの条件、HTML のタグの走査（バイト列の版と区間の並びの版）の契約の変更 → `markdown-renderer`（HTML ブロックと保護の判定）、`inline-parser`（raw HTML）
@@ -72,7 +72,7 @@
 **CommonMark の構文セットの構築関数**
 - 組み込み拡張の名前、構築関数が加える拡張の順（出力の core 拡張の位置を含む）、ノード型と拡張の対応表の変更 → `html-renderer`、`markdown-renderer`、`inline-parser`
 - `amark_html_core_extension()` の名前・登録の規則の変更（`html-renderer` 側の変更）、`amark_markdown_core_extension()` の名前・登録の規則の変更（`markdown-renderer` 側の変更）→ この spec の構築関数
-- 便宜の関数（`amark_syntax_set_new_commonmark`、`amark_parser_new_commonmark`、`amark_parse_commonmark`）の所有の規則の変更 → 利用者、`inline-parser` の `FACTORY=` の関数
+- 便宜の関数（`amark_syntax_set_create_commonmark`、`amark_parser_create_commonmark`、`amark_parse_commonmark`）の所有の規則の変更 → 利用者、`inline-parser` の `FACTORY=` の関数
 
 **GFM 相当の検証用ライブラリとテストの補助**
 - `amark_test_parse_gfm`（`gfm_block_ext.h` の取得関数、拡張の名前、テスト用の役割の番号、脚注の定義の表の関数、表のセルの区間とトークンの規則）の変更 → `inline-parser` のテスト（`amark_test_gfm`）
@@ -328,13 +328,13 @@ stateDiagram-v2
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
 | 1.1 | 一括のパースとグローバルのアロケータ | ParserAPI | `amark_parse` | パースの全体 |
-| 1.2 | CommonMark の便宜の関数と所有 | CommonMarkSet, ParserAPI | `amark_parse_commonmark`, `amark_parser_new_take_syntax_set` | パースの全体 |
+| 1.2 | CommonMark の便宜の関数と所有 | CommonMarkSet, ParserAPI | `amark_parse_commonmark`, `amark_parser_create_take_syntax_set` | パースの全体 |
 | 1.3 | 逐次の入力と一括の一致 | ParserAPI, LineReader | `amark_parser_feed`, `amark_parser_finish` | パースの全体 |
-| 1.4 | 凍結していない構文セット | ParserAPI | `amark_parser_new` | — |
+| 1.4 | 凍結していない構文セット | ParserAPI | `amark_parser_create` | — |
 | 1.5 | 終了後の操作 | ParserAPI | 状態 | パーサの状態 |
 | 1.6 | 確保の失敗 | ParserAPI, 全コンポーネント | `Failed` | パーサの状態 |
 | 1.7 | スレッドと構文セットの共有 | ParserAPI, BlockEngine | 構文セットは読み取りだけ | — |
-| 1.9 | 借りる生成と所有権を受け取る生成の分離 | ParserAPI, CommonMarkSet | `amark_parser_new`（`const`）, `amark_parser_new_take_syntax_set`（非 `const`） | — |
+| 1.9 | 借りる生成と所有権を受け取る生成の分離 | ParserAPI, CommonMarkSet | `amark_parser_create`（`const`）, `amark_parser_create_take_syntax_set`（非 `const`） | — |
 | 1.8 | 追跡を無効のまま | ParserAPI | `AMARK_PARSE_NO_EDIT_TRACKING` | — |
 | 2.1 | 改行コード | LineReader, BlockContext, Builtin syntaxes | 行の記録、`LINE_ENDING` | — |
 | 2.2 | タブと部分的なタブ | BlockContext | `amark_block_consume_columns` | — |
@@ -363,7 +363,7 @@ stateDiagram-v2
 | 5.1 | 後処理の登録と段階 | ParseContext | `amark_postprocess_t` | パースの全体 |
 | 5.2 | 終了時の順序 | ParserAPI | `finish` | パースの全体 |
 | 5.3 | 拡張の状態 | ParseContext | `amark_parse_state_slot_t`, `amark_parse_extension_state` | — |
-| 5.4 | 状態とデータの解放 | ParserAPI, ParseContext | `finish`, `amark_parser_free` | — |
+| 5.4 | 状態とデータの解放 | ParserAPI, ParseContext | `finish`, `amark_parser_destroy` | — |
 | 5.5 | 後処理を記録しない | ParserAPI | 追跡の有効化の時点 | パースの全体 |
 | 6.1 | 文書の順の委譲 | ParserAPI, ParseContext | `amark_inline_delegate_t.parse` | パースの全体 |
 | 6.2 | 区間の並び | TextInput | `amark_text_input_t` | — |
@@ -373,7 +373,7 @@ stateDiagram-v2
 | 6.6 | 委譲先の失敗 | ParserAPI | エラーコードの伝播 | パーサの状態 |
 | 7.1 | 全ブロック構文 | Builtin syntaxes | 各拡張 | — |
 | 7.2 | 構文ごとの拡張 | Builtin syntaxes | `commonmark.*` | — |
-| 7.3 | 構文セットを作る手段 | CommonMarkSet | `amark_syntax_set_add_commonmark`, `amark_syntax_set_new_commonmark` | — |
+| 7.3 | 構文セットを作る手段 | CommonMarkSet | `amark_syntax_set_add_commonmark`, `amark_syntax_set_create_commonmark` | — |
 | 7.4 | 取り除きと置き換え | CommonMarkSet | 拡張の名前 | — |
 | 7.5 | 属性とリテラル | Builtin syntaxes | `amark_node_set_*` | — |
 | 7.6 | 出力のスロットを足せる構造 | Builtin syntaxes, CommonMarkSet | 静的なスロットの一覧、対応表、出力の core 拡張の配列 | — |
@@ -448,11 +448,11 @@ stateDiagram-v2
 | Requirements | 1.1–1.8, 2.7, 4.8, 5.2, 5.4, 5.5, 6.1, 6.4, 6.6, 11.1–11.3 |
 
 **Responsibilities & Constraints**
-- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）を受け取る。文書を作り（`amark_document_new`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_new` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_new_take_syntax_set` だけが行う。これは `amark_parser_new` と同じ内部の生成（`amark_parser_create`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_new_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
+- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）を受け取る。文書を作り（`amark_document_create`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_create` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_create_take_syntax_set` だけが行う。これは `amark_parser_create` と同じ内部の生成（`amark_parser_build`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_create_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
 - 入力：バイト列をソースに追加し（`amark_document_append_source`）、LineReader が切り出した完全な行を BlockEngine に渡す。
 - 終了：最後の行を処理し、開いているブロックをすべて閉じる → 後処理（インラインの前）→ インラインの段階 → 後処理（インラインの後）→ パースの状態の `deinit` とパースの間のデータの解放 → 追跡の有効化（オプションで無効にしない限り）→ 文書を返す。構文セットの所有権は生成のときに文書へ渡してあるので、返した文書はそれを保持し続け、パーサと独立する（11.3）。
 - インラインの段階：根から前順にたどり、インラインの入力が登録されたノードごとに `delegate->parse` を呼ぶ。`begin` は最初の呼び出しの前に 1 回、`end` は最後（失敗のときも）に 1 回。
-- 解放：終了していなければ文書を解放する。文書が構文セットを所有していれば（`amark_parser_new_take_syntax_set` の生成が成功した後）、`amark_document_free` がノードの後でそれを解放する。生成が成功した後は、パースの成否によらず構文セットは文書のものである（`parser.h` に文書化する）。
+- 解放：終了していなければ文書を解放する。文書が構文セットを所有していれば（`amark_parser_create_take_syntax_set` の生成が成功した後）、`amark_document_destroy` がノードの後でそれを解放する。生成が成功した後は、パースの成否によらず構文セットは文書のものである（`parser.h` に文書化する）。
 
 **Contracts**: Service [x] / State [x]
 
@@ -485,15 +485,15 @@ typedef struct amark_parse_options {
 AMARK_API void amark_parse_options_init(amark_parse_options_t *options);
 
 /* 構文セットを借りる（変更も解放もしない）。呼び出し側は文書より長く構文セットを保つ */
-AMARK_API amark_error_t amark_parser_new(const amark_syntax_set_t *syntax, const amark_parse_options_t *options,
-                                         amark_parser_t **out_parser);
-/* amark_parser_new と同じ生成の後、構文セットの所有権を受け取って文書へ渡す。
+AMARK_API amark_error_t amark_parser_create(const amark_syntax_set_t *syntax, const amark_parse_options_t *options,
+                                            amark_parser_t **out_parser);
+/* amark_parser_create と同じ生成の後、構文セットの所有権を受け取って文書へ渡す。
    成功したら所有権は文書のもの、失敗したら呼び出し側に残る */
-AMARK_API amark_error_t amark_parser_new_take_syntax_set(amark_syntax_set_t *syntax, const amark_parse_options_t *options,
-                                                         amark_parser_t **out_parser);
+AMARK_API amark_error_t amark_parser_create_take_syntax_set(amark_syntax_set_t *syntax, const amark_parse_options_t *options,
+                                                            amark_parser_t **out_parser);
 AMARK_API amark_error_t amark_parser_feed(amark_parser_t *parser, const char *data, size_t length);
 AMARK_API amark_error_t amark_parser_finish(amark_parser_t *parser, amark_document_t **out_document);
-AMARK_API void amark_parser_free(amark_parser_t *parser);
+AMARK_API void amark_parser_destroy(amark_parser_t *parser);
 
 AMARK_API amark_error_t amark_parse(const amark_syntax_set_t *syntax, const char *data, size_t length,
                                     const amark_parse_options_t *options,
@@ -502,7 +502,7 @@ AMARK_API amark_error_t amark_parse(const amark_syntax_set_t *syntax, const char
 AMARK_API const amark_inline_delegate_t *amark_inline_delegate_default(void);
 AMARK_API const amark_inline_delegate_t *amark_inline_delegate_plain(void);
 ```
-- Preconditions：`syntax` は NULL でない凍結済みの構文セット（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`max_container_depth` が上限を超える、`inline_delegate` の `parse` が NULL、`struct_size` が不足、未知の `flags` のビットは `AMARK_ERROR_INVALID_ARGUMENT`。`flags` の 0x02 は使わない（以前の所有権の印。未知のビットとして拒否する）。`amark_parser_new_take_syntax_set` の `syntax` はヒープに作られた構文セット（静的な構文セットは型の上でも `const` なので渡せず、仮に渡されても `amark_document_take_syntax_set` が拒否し、生成が `AMARK_ERROR_INVALID_ARGUMENT` で失敗する）。生成が失敗したとき、所有権は呼び出し側に残る。`amark_parse` は借りるだけで、所有権を受け取る一括の版は持たない（必要なら `amark_parse_commonmark` か、`amark_parser_new_take_syntax_set` と feed と finish を使う）。
+- Preconditions：`syntax` は NULL でない凍結済みの構文セット（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`max_container_depth` が上限を超える、`inline_delegate` の `parse` が NULL、`struct_size` が不足、未知の `flags` のビットは `AMARK_ERROR_INVALID_ARGUMENT`。`flags` の 0x02 は使わない（以前の所有権の印。未知のビットとして拒否する）。`amark_parser_create_take_syntax_set` の `syntax` はヒープに作られた構文セット（静的な構文セットは型の上でも `const` なので渡せず、仮に渡されても `amark_document_take_syntax_set` が拒否し、生成が `AMARK_ERROR_INVALID_ARGUMENT` で失敗する）。生成が失敗したとき、所有権は呼び出し側に残る。`amark_parse` は借りるだけで、所有権を受け取る一括の版は持たない（必要なら `amark_parse_commonmark` か、`amark_parser_create_take_syntax_set` と feed と finish を使う）。
 - Postconditions：`finish` の成功で、文書は無編集で、追跡は有効（印がなければ）。`feed` の `data` が NULL で `length` が 0 なら何もしない。
 - Invariants：同じ入力は、区切り方によらず同じ木とトークンになる（1.3）。
 
@@ -817,8 +817,8 @@ typedef struct amark_text_segment {
     unsigned leading_columns;
 } amark_text_segment_t;
 
-AMARK_API amark_error_t amark_text_input_new(amark_document_t *document, amark_text_input_t **out_input);
-AMARK_API void amark_text_input_free(amark_text_input_t *input);
+AMARK_API amark_error_t amark_text_input_create(amark_document_t *document, amark_text_input_t **out_input);
+AMARK_API void amark_text_input_destroy(amark_text_input_t *input);
 AMARK_API amark_error_t amark_text_input_add(amark_text_input_t *input, const amark_text_segment_t *segment);
 AMARK_API size_t amark_text_input_length(const amark_text_input_t *input);
 AMARK_API size_t amark_text_input_segment_count(const amark_text_input_t *input);
@@ -885,8 +885,8 @@ AMARK_API amark_error_t amark_parse_add_decoded(amark_parse_context_t *ctx, amar
 ```c
 /* include/amark/parser.h（続き） */
 AMARK_API amark_error_t amark_label_normalize(const char *label, size_t length, amark_buffer_t *out);
-AMARK_API amark_error_t amark_label_map_new(amark_label_map_t **out_map);
-AMARK_API void amark_label_map_free(amark_label_map_t *map);
+AMARK_API amark_error_t amark_label_map_create(amark_label_map_t **out_map);
+AMARK_API void amark_label_map_destroy(amark_label_map_t *map);
 AMARK_API amark_error_t amark_label_map_add(amark_label_map_t *map, const char *key, size_t length, void *value,
                                             bool *out_added);   /* key は正規化済み */
 AMARK_API void *amark_label_map_find(const amark_label_map_t *map, const char *key, size_t length);
@@ -915,7 +915,7 @@ AMARK_API size_t amark_label_map_count(const amark_label_map_t *map);
 - 挿入先の文書の構文セットで、一時的な文書をパースする（ブロックの文脈は通常のパース。インラインの文脈は、断片の全体を 1 つの区間として一時的な段落のインラインの入力にし、委譲先だけを実行する）。
 - `AMARK_FRAGMENT_TARGET_DEFINITIONS`：パースの前に、挿入先の文書の木の link_definition を前順にたどって表に登録する（10.3）。
 - 挿入：`amark_node_import_children(parent, before, scratch_parent)`（`syntax-tree` の 4.10、4.11）で、一時的な文書の根（ブロック）または一時的な段落（インライン）の子をすべて取り込んで挿入する。`syntax-tree` は根を `source_parent` にすることを認めている（`amark_node_import` は根を拒否するので使わない）。`syntax-tree` が型の対応付けと包含の検査、ソースの複製（ソースごとに 1 回）、ノードの複製をつなぎ込みの前にすべて行うので、包含の規則に反するノードや確保の失敗があれば何も挿入されず、挿入先の文書は変わらない（10.4。包含の違反は `AMARK_ERROR_INVALID_ARGUMENT`）。この spec は挿入の前に独自の検査や巻き戻しを持たない。挿入の編集の記録は `syntax-tree` の規則に従う（追跡が有効なら、`parent` に `CHILDREN`、各ノードに `RELOCATED`。10.5）。断片が空で子がなければ、何も挿入せず成功する。一時的な文書は最後に解放する（取り込んだノードのトークンは挿入先に複製したソースを参照するので、解放の影響を受けない）。
-- 一時的な文書は挿入先の文書の構文セットを参照するだけで、所有しない（`amark_parser_new` で借りる）。
+- 一時的な文書は挿入先の文書の構文セットを参照するだけで、所有しない（`amark_parser_create` で借りる）。
 
 **Contracts**: Service [x]
 ```c
@@ -941,7 +941,7 @@ AMARK_API amark_error_t amark_parse_fragment(amark_node_t *parent, amark_node_t 
 
 **Responsibilities & Constraints**
 - `amark_syntax_set_add_commonmark`：凍結していない構文セットの末尾に、次の順で拡張を加える。(1) 組み込みのノード型の出力の core 拡張：`amark_html_core_extension()`（`amark.core.html`）、その直後に `amark_markdown_core_extension()`（`amark.core.markdown`）。構築関数の中の「出力の core 拡張の一覧」は取得関数の静的な配列で、要素の数は配列から求める（追加でループや失敗時の取り除きの処理を変えない）。この spec のタスク 8.1 は `amark.core.html` だけの配列で実装し、`amark.core.markdown` の 1 行と、拡張の順（`amark.core`、`amark.core.html`、`amark.core.markdown`、構文の拡張）を確かめるテストは `markdown-renderer` のタスク 3.7 が足す（`markdown-renderer` の登録の規則 4）。この spec の側に追加のタスクは要らない。構文セットは `amark.core` を先頭に持つので、出力の core 拡張は `amark.core` の直後になる。(2) ブロックの構文の拡張：`commonmark.block_quote`、`commonmark.list_item`、`commonmark.atx_heading`、`commonmark.setext_heading`、`commonmark.thematic_break`、`commonmark.fenced_code`、`commonmark.indented_code`、`commonmark.html_block`、`commonmark.link_reference_definition`、`commonmark.paragraph`。(3) `inline-parser` はこの後に自分のインラインの拡張を足す。途中で失敗したら加えたものを取り除く。利用者の構文セットにすでに同じ名前の拡張があれば `AMARK_ERROR_INVALID_ARGUMENT`（構文セットは変えない）。
-- 便宜の関数は、構文セットを作って加えて凍結し、非 `const` の構文セットを保持したまま `amark_parser_new_take_syntax_set` でパーサに渡す（所有権の受け渡しは、非 `const` の構文セットを持つこの経路だけで起こる）。パーサの生成が失敗したら所有権は便宜の関数に残るので、それを解放して失敗を返す。`amark_parse_commonmark` は `amark_parser_new_commonmark`、feed、finish、free の組み合わせで、feed か finish が失敗したら、構文セットはすでに文書のものなので、パーサの解放が文書ごと解放する。生成が成功した後は文書が構文セットを所有し、返した文書はそれを保持し続ける（1.2。ParserAPI）。
+- 便宜の関数は、構文セットを作って加えて凍結し、非 `const` の構文セットを保持したまま `amark_parser_create_take_syntax_set` でパーサに渡す（所有権の受け渡しは、非 `const` の構文セットを持つこの経路だけで起こる）。パーサの生成が失敗したら所有権は便宜の関数に残るので、それを解放して失敗を返す。`amark_parse_commonmark` は `amark_parser_create_commonmark`、feed、finish、free の組み合わせで、feed か finish が失敗したら、構文セットはすでに文書のものなので、パーサの解放が文書ごと解放する。生成が成功した後は文書が構文セットを所有し、返した文書はそれを保持し続ける（1.2。ParserAPI）。
 - 各構文のファイルは、`static const amark_slot_header_t *const slots[]` と `static const amark_extension_t` を持ち、取得の関数で返す。組み込みのノード型の出力は構文ではなくノード型に従うので、構文の拡張は出力のスロットを持たない（出力は `amark.core.html` などが持つ）。特定の構文だけが独自の出力を必要とする場合は、そのファイルの `slots[]` に足せば、構文セットの順で core の出力を上書きする（7.6）。
 
 **Contracts**: Service [x]
@@ -959,9 +959,9 @@ AMARK_API const amark_extension_t *amark_commonmark_link_reference_definition(vo
 AMARK_API const amark_extension_t *amark_commonmark_paragraph(void);
 
 AMARK_API amark_error_t amark_syntax_set_add_commonmark(amark_syntax_set_t *set);
-AMARK_API amark_error_t amark_syntax_set_new_commonmark(amark_syntax_set_t **out_set);
-AMARK_API amark_error_t amark_parser_new_commonmark(const amark_parse_options_t *options,
-                                                    amark_parser_t **out_parser);
+AMARK_API amark_error_t amark_syntax_set_create_commonmark(amark_syntax_set_t **out_set);
+AMARK_API amark_error_t amark_parser_create_commonmark(const amark_parse_options_t *options,
+                                                       amark_parser_t **out_parser);
 AMARK_API amark_error_t amark_parse_commonmark(const char *data, size_t length, const amark_parse_options_t *options,
                                                amark_document_t **out_document);
 ```
@@ -1088,7 +1088,7 @@ typedef struct amark_test_parse_spec {
 
 /* input を一括でパースし、(1) amark_document_check_tokens が OK、(2) amark_tree_check が成功（INTERNAL のときだけ）、
    (3) 1 バイトずつ・2 分割・ランダムな区切りの逐次の入力のダンプ（spec->dump_flags）が一括と一致、を確かめる。
-   すべて通れば AMARK_ERROR_NONE を返し、一括でパースした文書を *out_document に渡す（呼び出し側が amark_document_free で解放する）。
+   すべて通れば AMARK_ERROR_NONE を返し、一括でパースした文書を *out_document に渡す（呼び出し側が amark_document_destroy で解放する）。
    パースが失敗したらそのエラーコードを、検査が失敗したら入力・失敗した検査・両方のダンプを表示して
    AMARK_ERROR_INVALID_STATE を返す。どちらの失敗でも *out_document は NULL で、リークしない */
 amark_error_t amark_test_parse_check(const amark_test_parse_spec_t *spec, const char *input, size_t length,
@@ -1099,7 +1099,7 @@ amark_error_t amark_test_parse_check(const amark_test_parse_spec_t *spec, const 
 #define AMARK_CHECK_PARSE(spec, input, input_length, expected_dump) /* ... */
 ```
 - `tests/support/parse_check.c` は INTERFACE ライブラリ `amark_test_parse` のソース（`amark_test_tree` と同じ方式）。
-- 返す文書の構文セットの寿命：`spec->syntax` が NULL のとき、補助はテスト用の構文セットを作り、非 `const` のまま `amark_parser_new_take_syntax_set` でパーサに渡すので、返した文書がそれを所有する（逐次の入力の比較のためのパースは、同じ構文セットを `amark_parser_new` で借りる）。`spec->syntax` を指定したときは、呼び出し側が文書より長く構文セットを保つ。
+- 返す文書の構文セットの寿命：`spec->syntax` が NULL のとき、補助はテスト用の構文セットを作り、非 `const` のまま `amark_parser_create_take_syntax_set` でパーサに渡すので、返した文書がそれを所有する（逐次の入力の比較のためのパースは、同じ構文セットを `amark_parser_create` で借りる）。`spec->syntax` を指定したときは、呼び出し側が文書より長く構文セットを保つ。
 - `inline-parser` は、この関数の上に HTML の照合を重ねる（`amark_test_check_example`）。そのため、検査の内容（被覆、不変条件、逐次の一致）と期待のダンプの照合を分け、期待との照合はマクロだけが行う。
 
 #### SyntaxTests、ParseTests、Fuzz、Bench
@@ -1160,7 +1160,7 @@ const amark_extension_t *amark_test_gfm_tasklist_extension(void);     /* test.bl
    構文セットに test.block.footnote_def がなければ NULL */
 amark_label_map_t *amark_test_gfm_footnote_definitions(amark_parse_context_t *ctx);
 ```
-- 3 つの拡張は互いに独立で、構文セットに任意の組み合わせで加えられる（`inline-parser` の `amark_test_gfm_set_new` は CommonMark の拡張の後に 3 つを加える）。各拡張の名前と取得関数の名前は Revalidation Triggers の対象。
+- 3 つの拡張は互いに独立で、構文セットに任意の組み合わせで加えられる（`inline-parser` の `amark_test_gfm_set_create` は CommonMark の拡張の後に 3 つを加える）。各拡張の名前と取得関数の名前は Revalidation Triggers の対象。
 
 ## Data Models
 
@@ -1204,7 +1204,7 @@ typedef struct amark_node_entry {          /* ノードを鍵とする内部の�
 
 struct amark_parser {
     const amark_syntax_set_t *syntax;
-    /* amark_parser_new_take_syntax_set の構文セットは生成の最後に文書へ渡すので、パーサは所有の印を持たない */
+    /* amark_parser_create_take_syntax_set の構文セットは生成の最後に文書へ渡すので、パーサは所有の印を持たない */
     amark_parse_options_t options;
     amark_document_t *document;
     amark_source_id_t source;
@@ -1275,7 +1275,7 @@ struct amark_parser {
 
 ## Integration & Upstream Changes
 - **`syntax-tree` への追加（2026-11-25 に `syntax-tree` の spec に反映済み。実装は `syntax-tree` のタスク 3.4、5.5 が行う）**：
-  1. `AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);`（`syntax-tree` の 1.10、1.11。非 `const` の受け取りのまま）— 文書が使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードとソースの後に解放する。静的な構文セット、文書が使っていない構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT` で、所有権は呼び出し側に残る。確保をしない。この spec は、非 `const` の構文セットを受け取る `amark_parser_new_take_syntax_set` の生成の最後でだけ呼ぶ（ParserAPI。1.2、1.9、11.3）。
+  1. `AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);`（`syntax-tree` の 1.10、1.11。非 `const` の受け取りのまま）— 文書が使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_destroy` でノードとソースの後に解放する。静的な構文セット、文書が使っていない構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT` で、所有権は呼び出し側に残る。確保をしない。この spec は、非 `const` の構文セットを受け取る `amark_parser_create_take_syntax_set` の生成の最後でだけ呼ぶ（ParserAPI。1.2、1.9、11.3）。
   2. `AMARK_API amark_error_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent);`（`syntax-tree` の 4.10、4.11）— `source_parent`（根でもよい）の子をすべて、ソースごとに 1 回だけ複製して取り込み、`before` の前（NULL なら末尾）に順に挿入する。型の対応付け・包含の検査・確保をつなぎ込みの前に終え、全か無か。記録は `parent` に `CHILDREN`、各複製に `RELOCATED`。この spec は断片のパースで使う（Fragment。10.1、10.2、10.4、10.5）。
   3. スロットの種類の範囲の表（`syntax-tree` の 8.13。`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` 0x0100 – `_LAST` 0x01FF）。この spec は、その `block-parser` の節の下に 0x0100–0x0103 を追記する（予定どおりの追記）。
 - **`foundation` の生成手順への追加**（foundation の design が予定している作業）：case fold の表と関数、文字参照の表と関数、`.gitattributes` の `export-ignore`。

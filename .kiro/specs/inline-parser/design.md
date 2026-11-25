@@ -73,7 +73,7 @@
 - `AMARK_REQUIRE_SPEC_TESTS`、スキップの報告、`.gitattributes` の `export-ignore` の変更 → CI、`foundation`
 
 **C. GFM 相当の組み合わせのライブラリ（`tests/extensions/`、`amark_test_gfm`）**
-- `amark_test_gfm_set_new` の部品の並び、`gfm_inline_ext.h` の拡張の名前と振る舞い、検証用の役割の番号 `AMARK_TEST_GFM_ROLE_*`（0x0E40–0x0E61）の変更 → `markdown-renderer` のテスト（`amark_test_md_gfm`）、`inline_parse_fuzz`
+- `amark_test_gfm_set_create` の部品の並び、`gfm_inline_ext.h` の拡張の名前と振る舞い、検証用の役割の番号 `AMARK_TEST_GFM_ROLE_*`（0x0E40–0x0E61）の変更 → `markdown-renderer` のテスト（`amark_test_md_gfm`）、`inline_parse_fuzz`
 - `amark_test_gfm` とその依存が Naos に依存しない取り決め（`foundation` の規則）の変更 → `inline_parse_fuzz`、`markdown-renderer` のファジング
 - 上流の検証用ライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_html_gfm`（`html-renderer`）の契約の変更 → この spec（GfmSet、GFM 相当のテスト、ファジング）
 
@@ -891,7 +891,7 @@ amark_error_t amark_cm_link_match(amark_inline_context_t *ctx, const amark_brack
 ```c
 /* tests/support/inline_check.h */
 typedef amark_error_t (*amark_test_set_factory_t)(amark_syntax_set_t **out_set);
-/* factory は凍結した構文セットを返す（amark_syntax_set_new_commonmark、amark_test_gfm_set_new） */
+/* factory は凍結した構文セットを返す（amark_syntax_set_create_commonmark、amark_test_gfm_set_create） */
 typedef enum amark_test_expect { AMARK_TEST_EXPECT_DUMP = 1, AMARK_TEST_EXPECT_HTML = 2 } amark_test_expect_t;
 
 /* factory の構文セットと既定の委譲先で、amark_test_parse_check（被覆、不変条件、逐次の一致）を行い、
@@ -918,7 +918,7 @@ typedef void (*amark_test_example_check_fn_t)(amark_test_set_factory_t factory, 
 #### SpecTests
 - `tests/spec/spec_version.cmake`：`set(AMARK_COMMONMARK_SPEC_VERSION 0.31.2)`、`set(AMARK_COMMONMARK_SPEC_SHA256 257c41ad946f7a1414a499aca402a1aa8fdac3678532266611348c1cf54f4b80)`（12.3）。この spec が所有し、変数の定義だけを置いて副作用を持たない（`include()` で読める）。`markdown-renderer` は同じ spec.txt を使うとき、版と SHA-256 を複製せずにこのファイルを include して再利用する。
 - `tests/spec/CMakeLists.txt`：
-  - `data/spec.txt` があれば `file(SHA256)` で照合し、違えば版と両方の値を示して `FATAL_ERROR`（12.3）。一致すれば `amark_add_generated_tests(spec GENERATOR ../support/gen_examples.cmake DATA data/spec.txt ARGS EXPECT=html FACTORY=amark_syntax_set_new_commonmark INTERNAL LIBRARIES amark_test_inline amark_test_parse)`（12.1、12.2）。
+  - `data/spec.txt` があれば `file(SHA256)` で照合し、違えば版と両方の値を示して `FATAL_ERROR`（12.3）。一致すれば `amark_add_generated_tests(spec GENERATOR ../support/gen_examples.cmake DATA data/spec.txt ARGS EXPECT=html FACTORY=amark_syntax_set_create_commonmark INTERNAL LIBRARIES amark_test_inline amark_test_parse)`（12.1、12.2）。
   - なければ `message(STATUS "CommonMark spec.txt not found: conformance tests skipped")` と、`AMARK_SKIP: spec.txt not found` を出して終わる CTest のテスト `spec.conformance_skipped`（`SKIP_REGULAR_EXPRESSION`、ラベル `spec`）を登録する。合格ではなくスキップとして報告される（12.5）。
   - オプション `AMARK_REQUIRE_SPEC_TESTS`（既定 OFF）が ON でデータがなければ `FATAL_ERROR`（12.6）。CI は ON にする。
 - `data/NOTICE.txt`：出典（commonmark-spec のタグ 0.31.2）、許諾（CC-BY-SA 4.0）、テストデータとしてだけ使い配布物に含めないこと（12.4）。spec.txt と NOTICE.txt は `export-ignore`。ライブラリの install 規則は `tests/` を含まない（`foundation`）。
@@ -941,11 +941,11 @@ typedef void (*amark_test_example_check_fn_t)(amark_test_set_factory_t factory, 
 #define AMARK_TEST_GFM_ROLE_FOOTNOTE_REF_LABEL   0x0E61u  /* 脚注の参照のラベル（TEXT） */
 ```
   - 拡張オートリンクの link は、ブラケットや括弧のトークン（`LINK_OPEN`、`LINK_CLOSE`、`LINK_PAREN_*`、`LINK_REF_*`）を持たない。link が持つトークンは `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK` の印だけで、元のバイトは子の text のトークンが覆う。`markdown-renderer` の検証用部品は、この印で拡張オートリンクを見分ける（無編集なら元のバイトのまま出せる）。
-- `tests/extensions/gfm_set.{h,c}`：`amark_test_gfm_set_new(&set)` は、`amark_syntax_set_new` → `amark_syntax_set_add_commonmark` → `amark_test_parse_gfm` の `test.block.table`、`test.block.footnote_def`、`test.block.tasklist` → `test.inline.*` → `amark_test_html_gfm` の各部品（表、取り消し線、タスク項目、脚注、タグフィルタのフィルタ方式）→ 凍結、の順で作る。部品は `gfm_set.c` の中の 1 つの配列（取得関数の並び）に置き、後の spec が 1 か所に足せる形にする。`markdown-renderer` のタスク 4.2 が HTML の部品の後に `amark_test_md_gfm` の部品を足し、`amark_test_gfm` に依存を足す（その編集は `markdown-renderer` が行う。この spec の HTML の照合の結果は変わらない）。
+- `tests/extensions/gfm_set.{h,c}`：`amark_test_gfm_set_create(&set)` は、`amark_syntax_set_create` → `amark_syntax_set_add_commonmark` → `amark_test_parse_gfm` の `test.block.table`、`test.block.footnote_def`、`test.block.tasklist` → `test.inline.*` → `amark_test_html_gfm` の各部品（表、取り消し線、タスク項目、脚注、タグフィルタのフィルタ方式）→ 凍結、の順で作る。部品は `gfm_set.c` の中の 1 つの配列（取得関数の並び）に置き、後の spec が 1 か所に足せる形にする。`markdown-renderer` のタスク 4.2 が HTML の部品の後に `amark_test_md_gfm` の部品を足し、`amark_test_gfm` に依存を足す（その編集は `markdown-renderer` が行う。この spec の HTML の照合の結果は変わらない）。
 - INTERFACE ライブラリ `amark_test_gfm`（`gfm_inline_ext.c`、`gfm_set.c`。`block-parser` が提供する `amark_test_parse_gfm` と、`amark_test_html_gfm` に依存）。配布物とインストールには含めない（13.4）。
   - Naos に依存しない（ファジングのターゲットがリンクする。11.6）：ソースは Naos のヘッダを include せず、依存にも Naos を使うターゲットを含めない。依存する上流の検証用ライブラリも Naos に依存しないことを前提にする（`foundation` の規則。各 spec が守る）。Naos を使う検査（`amark_test_check_example` などの照合、`gfm_compose_test.c` の検査）は `amark_test_gfm` に入れず、Naos を使う `amark_test_inline` とテストの実行ファイルの側に置く。GFM 相当に固有の Naos を使う検査の補助が要るときは、`amark_test_gfm` に足さず、別の INTERFACE ライブラリ（`amark_test_gfm_check`。ファジングはリンクしない）に分ける。
   - `foundation` の規則どおり、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON のときに定義される。Naos を使うテスト（生成テスト、組み合わせのテスト）の登録は `AMARK_BUILD_TESTS` が ON のときだけ。
-- `data/gfm_cases.txt`：自前の代表的な入力（GFM spec の文章は写さない）と、cmark-gfm と同じ形の HTML。拡張オートリンクの範囲にエスケープか文字参照を含む入力は、4.5 の規則で cmark-gfm と結果が違いうるので、このデータには入れず `gfm_compose_test.c` と `text_scanner_test.c` で確かめる。節は 表、取り消し線、タスクリスト、拡張オートリンク、タグフィルタ、脚注、組み合わせ（表のセルの中の取り消し線とオートリンク、脚注の中のタスクリストと表、強調の中のオートリンク）。`gen_examples.cmake` で `EXPECT=html FACTORY=amark_test_gfm_set_new`（13.2、13.3）。
+- `data/gfm_cases.txt`：自前の代表的な入力（GFM spec の文章は写さない）と、cmark-gfm と同じ形の HTML。拡張オートリンクの範囲にエスケープか文字参照を含む入力は、4.5 の規則で cmark-gfm と結果が違いうるので、このデータには入れず `gfm_compose_test.c` と `text_scanner_test.c` で確かめる。節は 表、取り消し線、タスクリスト、拡張オートリンク、タグフィルタ、脚注、組み合わせ（表のセルの中の取り消し線とオートリンク、脚注の中のタスクリストと表、強調の中のオートリンク）。`gen_examples.cmake` で `EXPECT=html FACTORY=amark_test_gfm_set_create`（13.2、13.3）。
 - `gfm_compose_test.c`：各部品を構文セットから取り除いたとき、残りの部品と CommonMark の結果が変わらないこと、組み合わせた文書の被覆と逐次の一致、エスケープに関わる文字の問い合わせに `~` と `"www."` などが出ること（13.2、13.3、9.2）。
 
 ## Data Models
@@ -1097,5 +1097,5 @@ struct amark_inline_context {
 - **`syntax-tree`**：並行して追加中の `amark_document_take_syntax_set`、`amark_node_import_children`、スロットの範囲の表に依存する。範囲の表の `inline-parser` の行（0x0200–0x02FF、0x0201–0x0206 の名前）をこの spec が `extension.h` に追記する。それ以外の変更は要らない。
 - **`html-renderer`**：変更は要らない。`gfm_html_ext.h` が公開する記述子（`test.strikethrough`、`test.footnote_ref` とそのラベルの設定）と部品の拡張をそのまま使う。準拠テストで出力の差が見つかったら、`html-renderer` の出力の表を直す。
 - **`foundation`**：予定どおり、`.gitattributes` に spec.txt の `export-ignore` を加える。CI の構成に `AMARK_REQUIRE_SPEC_TESTS=ON` を加える。`amark.h` の `inline.h` の位置は `foundation` の正規の順に従う。ファジングのターゲットがリンクするテスト支援ライブラリの規則（Naos に依存しない、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` で定義される、`LIBRARIES` のターゲットがなければ `amark_add_fuzzer` が構成を失敗させる）に `amark_test_gfm` を合わせる。
-- **`block-parser`（例の生成の手順とベンチマーク）**：`tests/support/gen_examples.cmake` は `block-parser` のタスク 1.4 が spec.txt の形式の唯一のパーサとして先に作る（基本の契約は `block-parser` の design）。この spec は予約済みの名前を追加で足して拡張し、基本の経路の出力を変えない。`bench/CMakeLists.txt`（`amark_add_bench` の定義と登録）も `block-parser` が所有し（`AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は最上位の `CMakeLists.txt` の `foundation` の拡張点）、この spec は `amark_add_bench(inline_pathological ...)` の 1 行を追記する。`amark_parser_new` は構文セットを借りるだけで、所有権を渡すのは `amark_parser_new_take_syntax_set`（`AMARK_PARSE_TAKE_SYNTAX_SET` の印はない）。この spec のテストと補助は、構文セットを渡すとき `block-parser` のこの取り決めに従う。
+- **`block-parser`（例の生成の手順とベンチマーク）**：`tests/support/gen_examples.cmake` は `block-parser` のタスク 1.4 が spec.txt の形式の唯一のパーサとして先に作る（基本の契約は `block-parser` の design）。この spec は予約済みの名前を追加で足して拡張し、基本の経路の出力を変えない。`bench/CMakeLists.txt`（`amark_add_bench` の定義と登録）も `block-parser` が所有し（`AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は最上位の `CMakeLists.txt` の `foundation` の拡張点）、この spec は `amark_add_bench(inline_pathological ...)` の 1 行を追記する。`amark_parser_create` は構文セットを借りるだけで、所有権を渡すのは `amark_parser_create_take_syntax_set`（`AMARK_PARSE_TAKE_SYNTAX_SET` の印はない）。この spec のテストと補助は、構文セットを渡すとき `block-parser` のこの取り決めに従う。
 - **`markdown-renderer` への提供**：インラインの役割の番号、トークンの所有の規則（区切り文字は作ったノード、リンクの表記はリンク、改行の前の空白は改行のノード、残りの区切り文字とブラケットは text の `UNMATCHED`）、エスケープに関わる文字の問い合わせ、`amark_inline_delimiter_flanks`・`amark_inline_match_delimiters`・`amark_inline_scan_raw_html`（旧名 `amark_scan_raw_html`）、テキストの走査の採否の規則（4.5）、`gen_examples.cmake` の `CHECK=`、`tests/spec/spec_version.cmake`（include して再利用する）、リンクの書式の分類に使うトークンの規則（組み込みのリンクと画像は必ず `LINK_OPEN`・`LINK_CLOSE` を持ち、`LINK_PAREN_OPEN` があればインラインの形、`LINK_PAREN_*` がなければ参照の形（完全・省略・短縮）、`AUTOLINK_*` があればオートリンク、`LINK_OPEN`・`LINK_PAREN_*`・`LINK_REF_*`・`AUTOLINK_*` のどれも持たなければ拡張が定義するリンク（例：`AMARK_TEST_GFM_ROLE_EXT_AUTOLINK`）。分類の規則は `markdown-renderer` の design の「リンクの書式の分類」に従う）、Naos に依存しない `amark_test_gfm`。エスケープの方式はこの spec では決めない。

@@ -89,7 +89,7 @@
 - **Alternatives Considered**：
   1. 切り離しと同時に解放する
   2. 切り離しは所有を変えず、解放は明示する。文書の解放で残りをすべて解放する
-- **Selected Approach**：2。ノードは常に作った文書に属する。`amark_node_unlink` は切り離すだけ、`amark_node_free` は（必要なら切り離してから）部分木を解放する。文書はすべてのノードを内部の環でつなぎ、解放時にまとめて解放する。
+- **Selected Approach**：2。ノードは常に作った文書に属する。`amark_node_unlink` は切り離すだけ、`amark_node_destroy` は（必要なら切り離してから）部分木を解放する。文書はすべてのノードを内部の環でつなぎ、解放時にまとめて解放する。
 - **Rationale**：移動や一時的な取り外しが安全になる。解放し忘れても文書の寿命で回収される。
 - **Trade-offs**：長い編集のセッションで、切り離したまま解放しないノードは文書の解放まで残る（文書化する）。
 - **Follow-up**：ノードの確保は 1 回の確保（ヘッダ ＋ 型のデータ）。必要になればスラブの確保に変えても API は変わらない。
@@ -199,7 +199,7 @@
 - **Context**：全 spec を横断したレビューで、この spec に関わる指摘が 3 つあった（#7、#8、#9）。承認済みの要件・設計・タスクの意味は変えず、記述をそろえる修正だけを行う。
 - **#9 スロットの種類の範囲の表が古い**：表の右の列が「各 spec の design が定める」のままだった。承認済みの下流の design に合わせ、具体的な種類を記した：`block-parser` 0x0100–0x0103（`BLOCK_SYNTAX`、`PARAGRAPH_CONSUMER`、`POSTPROCESS`、`PARSE_STATE`）、`inline-parser` 0x0201–0x0206（`INLINE_SYNTAX`、`INLINE_DELIMITER`、`INLINE_BRACKET`、`INLINE_TEXT_SCANNER`、`INLINE_NODE_TRAITS`、`INLINE_SPECIAL`）、`html-renderer` 0x0301–0x0302（`HTML_NODE`、`HTML_HOOKS`）、`markdown-renderer` 0x0401–0x0402（`MARKDOWN_NODE`、`MARKDOWN_HOOKS`）。`extension.h` の範囲の節の注記にも同じ一覧を置き、タスク 1.1 に反映した。定義の正本は各 spec の design のままとし、種類を足す・変える spec が表と注記を更新することを Revalidation Triggers に加えた。要件 8.13 の文言は変えない（表を公開ヘッダに置く、という要件のまま）。
 - **#7 `amark.h` の include の順**：`amark.h` は `foundation` が所有し、正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）を定める。この spec の「`unicode.h` の後に追加する」という書き方をやめ、`foundation` の正規の順の「木のヘッダ」の位置に 6 つのヘッダを置く、という参照に改めた（File Structure Plan、公開ヘッダの構成、タスク 1.1）。正規の順の変更を Revalidation Triggers に加えた。
-- **#8 `amark_document_take_syntax_set` の `const`**：`block-parser` の `amark_parser_new(const amark_syntax_set_t *)` から非 `const` の `take` を呼ぶと `const` を外すキャストが要る、という指摘。所有権の受け渡し（解放の責任の移動）は `const` のポインタでは表せないため、この関数の引数は非 `const` のままとする。設計に「`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストをしない）」と明記した。`const` でないポインタを持つ経路だけで受け渡すよう直すのは `block-parser` の側で行う。
+- **#8 `amark_document_take_syntax_set` の `const`**：`block-parser` の `amark_parser_create(const amark_syntax_set_t *)` から非 `const` の `take` を呼ぶと `const` を外すキャストが要る、という指摘。所有権の受け渡し（解放の責任の移動）は `const` のポインタでは表せないため、この関数の引数は非 `const` のままとする。設計に「`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストをしない）」と明記した。`const` でないポインタを持つ経路だけで受け渡すよう直すのは `block-parser` の側で行う。
 - **Implications**：API・要件の受け入れ基準・タスクの範囲は変わらない。承認は維持する。
 
 ### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）

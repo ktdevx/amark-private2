@@ -880,8 +880,8 @@ bool amark_size_mul(size_t a, size_t b, size_t *out);
 ```c
 typedef struct amark_buffer amark_buffer_t;   /* 不透明型 */
 
-AMARK_API amark_error_t amark_buffer_new(amark_buffer_t **out_buffer);
-AMARK_API void amark_buffer_free(amark_buffer_t *buffer);
+AMARK_API amark_error_t amark_buffer_create(amark_buffer_t **out_buffer);
+AMARK_API void amark_buffer_destroy(amark_buffer_t *buffer);
 
 AMARK_API const char *amark_buffer_data(const amark_buffer_t *buffer);  /* NULL にならない。常に NUL 終端 */
 AMARK_API size_t amark_buffer_length(const amark_buffer_t *buffer);

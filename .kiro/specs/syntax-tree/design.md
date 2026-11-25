@@ -228,10 +228,10 @@ graph TB
 
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
-| 1.1, 1.2 | 文書の生成、既定の構文セット | Document, SyntaxSet | `amark_document_new`, `amark_syntax_set_core` | 組み立て |
-| 1.3 | 文書の解放ですべて解放 | Document, NodeCore | `amark_document_free` | — |
+| 1.1, 1.2 | 文書の生成、既定の構文セット | Document, SyntaxSet | `amark_document_create`, `amark_syntax_set_core` | 組み立て |
+| 1.3 | 文書の解放ですべて解放 | Document, NodeCore | `amark_document_destroy` | — |
 | 1.4, 1.5 | ソースの登録と追加 | Document | `amark_document_add_source`, `amark_document_append_source` | 組み立て |
-| 1.6, 1.7 | 切り離しと解放 | StructureEdit, NodeCore | `amark_node_unlink`, `amark_node_free`, `amark_node_destroy_subtree` | — |
+| 1.6, 1.7 | 切り離しと解放 | StructureEdit, NodeCore | `amark_node_unlink`, `amark_node_destroy`, `amark_node_destroy_subtree` | — |
 | 1.8 | 確保失敗時の強い保証 | 全コンポーネント | エラーコード | — |
 | 1.9 | スレッドと構文セットの共有 | SyntaxSet, Document | 凍結、`const` の静的データ | — |
 | 1.10, 1.11 | 文書による構文セットの所有 | Document, SyntaxSet | `amark_document_take_syntax_set` | 組み立て |
@@ -241,7 +241,7 @@ graph TB
 | 3.1, 3.7 | 関係の参照、ポインタの関連付け | NodeCore | `amark_node_parent` など | — |
 | 3.2, 3.3, 3.4 | 走査と走査中の編集、再設定 | Iterator | `amark_iter_*` | — |
 | 3.5, 3.6 | ソース上の範囲と行・列 | SourceSpan, Document | `amark_node_source_span`, `amark_document_position` | — |
-| 4.1 | ノードの生成 | NodeCore, BuiltinTypes | `amark_node_new` | — |
+| 4.1 | ノードの生成 | NodeCore, BuiltinTypes | `amark_node_create` | — |
 | 4.2, 4.3, 4.4, 4.5 | 挿入、移動、置換、拒否 | StructureEdit | `amark_node_insert_*`, `amark_node_replace` | — |
 | 4.6, 4.7, 4.8 | 複製と取り込み | CopyImport | `amark_node_copy`, `amark_node_import` | — |
 | 4.9 | 深い木 | Iterator, CopyImport, NodeCore, Equality, Dump | 再帰しない実装 | — |
@@ -419,10 +419,10 @@ typedef struct amark_extension {
     void *user_data;
 } amark_extension_t;
 
-AMARK_API amark_error_t amark_syntax_set_new(amark_syntax_set_t **out_set);
+AMARK_API amark_error_t amark_syntax_set_create(amark_syntax_set_t **out_set);
 AMARK_API amark_error_t amark_syntax_set_clone(const amark_syntax_set_t *set,
                                                amark_syntax_set_t **out_set);   /* 凍結していない複製 */
-AMARK_API void amark_syntax_set_free(amark_syntax_set_t *set);
+AMARK_API void amark_syntax_set_destroy(amark_syntax_set_t *set);
 AMARK_API const amark_syntax_set_t *amark_syntax_set_core(void);
 
 AMARK_API amark_error_t amark_syntax_set_append(amark_syntax_set_t *set, const amark_extension_t *extension);
@@ -495,7 +495,7 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 | 19 | image | INLINE | INLINE | INLINE | NONE | destination、title（""） |
 
 - 文字列の属性を持つ型は、`deinit` / `copy` / `equal` / `dump` の関数表で、`amark_malloc` などで確保した文字列を管理する。`equal` は list の start を type が ordered のときだけ比べる。
-- `document` 型のノードは文書の生成時に 1 つだけ作る。`amark_node_new` で document を指定すると `AMARK_ERROR_INVALID_ARGUMENT`。
+- `document` 型のノードは文書の生成時に 1 つだけ作る。`amark_node_create` で document を指定すると `AMARK_ERROR_INVALID_ARGUMENT`。
 
 **Contracts**: Service [x]
 ```c
@@ -524,10 +524,10 @@ enum {
 
 **Responsibilities & Constraints**
 - 生成：凍結済みの構文セット（NULL なら `amark_syntax_set_core()`）を参照し、document 型の根のノードを作る。凍結していない構文セットは `AMARK_ERROR_INVALID_STATE`。編集の追跡は無効で始まる。
-- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `deinit` を呼ぶ）。次にソースを解放する。文書が構文セットを所有していれば、その後で `amark_syntax_set_free` で解放し、最後に文書の構造体を解放する。ノードの `deinit` は記述子と構文セットを参照してよい（解放の順序で保証する）。
+- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `deinit` を呼ぶ）。次にソースを解放する。文書が構文セットを所有していれば、その後で `amark_syntax_set_destroy` で解放し、最後に文書の構造体を解放する。ノードの `deinit` は記述子と構文セットを参照してよい（解放の順序で保証する）。
 - 構文セットの所有（`amark_document_take_syntax_set`、1.10、1.11）：
   - 受け付ける条件：`set` が、文書が使っている構文セットそのもの（`set == amark_document_syntax_set(document)`）で、静的な構文セット（`is_static`）でなく、文書がまだ構文セットを所有していない。どれかに反すれば `AMARK_ERROR_INVALID_ARGUMENT`（NULL の引数も同じ）で、文書は変わらず、所有権は呼び出し側に残る。文書が使うのは凍結済みの構文セットだけなので、受け取る構文セットは常に凍結済み（凍結の規則はそのまま）。
-  - 成功の後：構文セットは文書のものになる。呼び出し側は `amark_syntax_set_free` を呼んではならない。凍結済みなので内容は変わらない。
+  - 成功の後：構文セットは文書のものになる。呼び出し側は `amark_syntax_set_destroy` を呼んではならない。凍結済みなので内容は変わらない。
   - 共有：同じ構文セットを使う他の文書があってよいが、それらを所有する文書より先に解放する（構文セットは使うすべての文書より長く生きる、という既存の規則の言い換え。破ったときの振る舞いは規定しない）。
   - 確保をしないので、メモリ不足で失敗しない。編集の記録とは無関係。
   - `set` の引数は `const` でない（所有権の受け渡しで解放の責任が移るため。`const` にはしない）。`amark_document_syntax_set` の戻り値や `const amark_syntax_set_t *` の引数など、`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストで渡さない）。渡せるのは、構文セットを自分で作り `const` でないポインタを持ち続けている呼び出し側（例：`block-parser` の便宜の関数）だけである。
@@ -537,9 +537,9 @@ enum {
 **Contracts**: Service [x] / State [x]
 ```c
 /* include/amark/document.h */
-AMARK_API amark_error_t amark_document_new(const amark_syntax_set_t *syntax,
-                                           amark_document_t **out_document);
-AMARK_API void amark_document_free(amark_document_t *document);
+AMARK_API amark_error_t amark_document_create(const amark_syntax_set_t *syntax,
+                                              amark_document_t **out_document);
+AMARK_API void amark_document_destroy(amark_document_t *document);
 AMARK_API amark_node_t *amark_document_root(const amark_document_t *document);
 AMARK_API const amark_syntax_set_t *amark_document_syntax_set(const amark_document_t *document);
 
@@ -556,7 +556,7 @@ AMARK_API amark_error_t amark_document_position(const amark_document_t *document
 AMARK_API void amark_document_set_edit_tracking(amark_document_t *document, bool enabled);
 AMARK_API bool amark_document_edit_tracking(const amark_document_t *document);
 
-/* 文書が使っている、ヒープに作られた構文セットの所有権を受け取る。成功したら、amark_document_free が
+/* 文書が使っている、ヒープに作られた構文セットの所有権を受け取る。成功したら、amark_document_destroy が
    ノードとソースの後でこの構文セットを解放する。失敗したら所有権は呼び出し側に残る。
    const のポインタしか持たない呼び出し側は渡さない（const を外すキャストをしない） */
 AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);
@@ -576,7 +576,7 @@ AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *documen
 
 **Responsibilities & Constraints**
 - ノードは 1 回の確保で、ヘッダと型のデータ（`data_size`、`max_align` の境界）を持つ。型のデータは 0 で埋めてから `init` を呼ぶ。`init` が失敗したら確保を戻して失敗を返す。
-- 部分木の解放の内部関数 `amark_node_destroy_subtree`：切り離されたノードの部分木を後順に反復で解放する（各ノードの `deinit`、リテラル、トークン、全ノードの環からの除去）。公開の `amark_node_free` は StructureEdit が実装する。
+- 部分木の解放の内部関数 `amark_node_destroy_subtree`：切り離されたノードの部分木を後順に反復で解放する（各ノードの `deinit`、リテラル、トークン、全ノードの環からの除去）。公開の `amark_node_destroy` は StructureEdit が実装する。
 - 生成時、追跡が有効なら `CREATED` を記録する。
 - 子を持てるかは `accepts != 0 || can_contain != NULL` で決まる。
 
@@ -584,7 +584,7 @@ AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *documen
 ```c
 /* include/amark/node.h（続き。前方宣言は公開ヘッダの構成を参照） */
 
-AMARK_API amark_error_t amark_node_new(amark_document_t *document, amark_node_type_t type, amark_node_t **out_node);
+AMARK_API amark_error_t amark_node_create(amark_document_t *document, amark_node_type_t type, amark_node_t **out_node);
 
 AMARK_API amark_node_type_t amark_node_get_type(const amark_node_t *node);
 AMARK_API const char *amark_node_type_name(const amark_node_t *node);
@@ -778,14 +778,14 @@ AMARK_API amark_error_t amark_node_set_link_label(amark_node_t *node, const char
 - 挿入するノードが木にあれば、先に元の位置から外す（元の親に `CHILDREN`）。挿入後、新しい親に `CHILDREN`、挿入したノードに `RELOCATED`（`CREATED` でなければ）。
 - `replace(old, new)`：`new` を `old` の位置に置き、`old` を切り離す。`old` が切り離されていれば `AMARK_ERROR_INVALID_ARGUMENT`。
 - `unlink`：根なら `AMARK_ERROR_INVALID_ARGUMENT`、切り離し済みなら何もせず成功。
-- `free`：木にあれば切り離し（親に `CHILDREN`）、`amark_node_destroy_subtree` で解放する。根を渡したときは何もしない。
+- `destroy`：木にあれば切り離し（親に `CHILDREN`）、`amark_node_destroy_subtree` で解放する。根を渡したときは何もしない。
 - 包含の判定（検査の順の 3）と、検査を済ませた切り離しのノードを親の指定の位置（兄弟の前、NULL なら末尾）につなぐ処理（記録つき）は、`tree_internal.h` の内部関数（`amark_node_allows_child`、`amark_node_link_child`）として、CopyImport の子をまとめた取り込みからも使う（規則を 1 か所に保つ）。
 
 **Contracts**: Service [x]
 ```c
 /* include/amark/node.h（続き） */
 AMARK_API amark_error_t amark_node_unlink(amark_node_t *node);
-AMARK_API void amark_node_free(amark_node_t *node);
+AMARK_API void amark_node_destroy(amark_node_t *node);
 AMARK_API amark_error_t amark_node_insert_before(amark_node_t *sibling, amark_node_t *node);
 AMARK_API amark_error_t amark_node_insert_after(amark_node_t *sibling, amark_node_t *node);
 AMARK_API amark_error_t amark_node_prepend_child(amark_node_t *parent, amark_node_t *node);
@@ -907,8 +907,8 @@ typedef enum amark_event {
     AMARK_EVENT_NONE = 0, AMARK_EVENT_DONE = 1, AMARK_EVENT_ENTER = 2, AMARK_EVENT_EXIT = 3
 } amark_event_t;
 
-AMARK_API amark_error_t amark_iter_new(amark_node_t *root, amark_iter_t **out_iter);
-AMARK_API void amark_iter_free(amark_iter_t *iter);
+AMARK_API amark_error_t amark_iter_create(amark_node_t *root, amark_iter_t **out_iter);
+AMARK_API void amark_iter_destroy(amark_iter_t *iter);
 AMARK_API amark_event_t amark_iter_next(amark_iter_t *iter);
 AMARK_API amark_node_t *amark_iter_node(const amark_iter_t *iter);
 AMARK_API amark_event_t amark_iter_event(const amark_iter_t *iter);
