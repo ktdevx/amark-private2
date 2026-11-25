@@ -39,6 +39,51 @@ if(AMARK_BUILD_TESTS)
       "-DAMARK_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
       -P "${PROJECT_SOURCE_DIR}/cmake/scripts/check_license_headers.cmake")
   set_tests_properties(lint.license_headers PROPERTIES LABELS lint)
+
+  # The export check of the shared library (2.4, 4.10, 4.12, 9.3, label "abi"):
+  # every symbol the shared library exports is an amark_ function declared with
+  # AMARK_API in include/amark/. Registered only for the shared library; see
+  # cmake/scripts/check_exported_symbols.cmake for the listing tools. Without a
+  # listing tool it prints "AMARK_SKIP:" and CTest reports it as skipped.
+  if(BUILD_SHARED_LIBS)
+    if(WIN32 OR CYGWIN)
+      set(_amark_abi_format PE)
+      # dumpbin is next to the MSVC linker; llvm-readobj comes with LLVM.
+      set(_amark_abi_hints "")
+      if(CMAKE_LINKER)
+        get_filename_component(_amark_abi_linker_dir "${CMAKE_LINKER}" DIRECTORY)
+        list(APPEND _amark_abi_hints "${_amark_abi_linker_dir}")
+        unset(_amark_abi_linker_dir)
+      endif()
+      if(CMAKE_C_COMPILER)
+        get_filename_component(_amark_abi_compiler_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+        list(APPEND _amark_abi_hints "${_amark_abi_compiler_dir}")
+        unset(_amark_abi_compiler_dir)
+      endif()
+      find_program(AMARK_DUMPBIN NAMES dumpbin HINTS ${_amark_abi_hints})
+      find_program(AMARK_LLVM_READOBJ NAMES llvm-readobj HINTS ${_amark_abi_hints})
+      mark_as_advanced(AMARK_DUMPBIN AMARK_LLVM_READOBJ)
+      unset(_amark_abi_hints)
+    elseif(APPLE)
+      set(_amark_abi_format MACHO)
+    else()
+      set(_amark_abi_format ELF)
+    endif()
+    add_test(NAME abi.exported_symbols
+      COMMAND "${CMAKE_COMMAND}"
+        "-DLIBRARY=$<TARGET_FILE:amark>"
+        "-DFORMAT=${_amark_abi_format}"
+        "-DHEADER_DIR=${PROJECT_SOURCE_DIR}/include/amark"
+        "-DNM=${CMAKE_NM}"
+        "-DDUMPBIN=${AMARK_DUMPBIN}"
+        "-DLLVM_READOBJ=${AMARK_LLVM_READOBJ}"
+        "-DOBJDUMP=${CMAKE_OBJDUMP}"
+        -P "${PROJECT_SOURCE_DIR}/cmake/scripts/check_exported_symbols.cmake")
+    set_tests_properties(abi.exported_symbols PROPERTIES
+      LABELS abi
+      SKIP_REGULAR_EXPRESSION "AMARK_SKIP:")
+    unset(_amark_abi_format)
+  endif()
 endif()
 
 add_subdirectory(base)
