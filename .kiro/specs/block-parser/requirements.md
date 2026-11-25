@@ -27,7 +27,8 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
   - GFM 相当の構文そのものの提供（検証用の拡張は `inline-parser` がテストの中にだけ置く）
 - **Adjacent expectations**：
   - `syntax-tree` のノード、構文トークン、編集の追跡、拡張のレジストリを使う。不足が見つかったら `syntax-tree` に戻って更新する。
-  - `inline-parser` は、この spec の委譲の取り決めとリンク参照定義の表を使ってインラインを解析し、インラインの構文トークンを記録する。エンジンの役割の番号はこの spec が分けた範囲の中で定め、GFM 相当の検証ではこの spec の検証用の構文とパースの検査の補助をテストの中で再利用する。
+  - `inline-parser` は、この spec の委譲の取り決めとリンク参照定義の表を使ってインラインを解析し、インラインの構文トークンを記録する。エンジンの役割の番号はこの spec が分けた範囲の中で定め、GFM 相当の検証ではこの spec の検証用の構文とパースの検査の補助をテストの中で再利用する。spec の例の形式のデータからテストを生成する共有の手順と、ベンチマークのビルドの構成はこの spec が作り、`inline-parser` はそれを拡張する（生成の手順への検査の種類の追加、ベンチマークの追加）。
+  - `foundation` が所有する最上位のビルドの構成と配布物の除外の設定へのこの spec の追記（ベンチマークの有効化のオプション、テストデータの除外）は、`foundation` が定める下流の拡張点として行う。
   - `markdown-renderer` は、この spec が記録した構文トークンから元の表記を復元する。HTML ブロックとして再パースされるかの判定には、この spec が公開する HTML ブロックの開始と終わりの条件、HTML のタグの走査（1 行のバイト列の版）を使い、規則を複製しない。
   - `html-renderer` は組み込みのノード型の HTML 出力を 1 つの構文拡張 `amark.core.html` として提供し、`markdown-renderer` は同じ形の `amark.core.markdown` を提供する。この spec の CommonMark の構文セットを作る手段は、`amark.core.html` を `amark.core` の直後に、`amark.core.markdown` をその直後に加える。`amark.core.markdown` を加える 1 行の変更は `markdown-renderer` のタスクが行い、この spec はその 1 行で足せる形を用意する。
 
@@ -45,6 +46,7 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
 6. If パースの途中で確保が失敗する, then the Amark Block Parser shall メモリ不足を返し、リークせず、以後はパーサの解放だけを受け付ける
 7. The Amark Block Parser shall 異なるパーサを別々のスレッドで同時に使えるようにし、1 つの凍結した構文セットを複数のパーサで共有できるようにする
 8. Where 利用者がオプションで編集の追跡を無効のままにすることを選ぶ, the Amark Block Parser shall 返す文書の編集の追跡を無効のままにする
+9. The Amark Block Parser shall 通常のパーサの生成では、利用者が指定した構文セットを読み取り専用で借りるだけで変更も解放もせず、構文セットの所有権を文書へ渡す生成は、変更可能な構文セットを受け取る別の明示の入口としてだけ提供する
 
 ### Requirement 2: 入力の前処理と文字の扱い
 **Objective:** As a 信頼できない Markdown を扱う開発者, I want どんなバイト列を与えても CommonMark どおりに解釈され、元の表記が失われないこと, so that 不正な入力でも安全に処理でき、往復で同じバイト列を得られる
@@ -192,3 +194,4 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
 3. The Amark Block Parser shall すべてのパースのテストで、構文トークンが入力を過不足なく覆うことと、逐次の入力の結果が一括のパースと等しいことを確かめる
 4. The Amark Block Parser shall CommonMark spec の例をテストデータとしてだけ扱い、配布物に含めない
 5. The Amark Block Parser shall パースの検査の補助を、被覆、不変条件、逐次の入力の一致を確かめた後に一括でパースした文書を呼び出し側へ返す形で提供し、他の spec のテストが同じ検査の上に独自の照合（HTML の出力など）を重ねられるようにする
+6. The Amark Block Parser shall CommonMark spec の例の形式のデータからテストを生成する手順を、プロジェクトで唯一の共有の生成手順として提供し、データの形式とテストの名前の規則を変えずに、後続の spec が引数の追加だけで検査の種類を拡張できるようにする
