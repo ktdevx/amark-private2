@@ -1057,10 +1057,10 @@ struct amark_inline_context {
 
 ### Integration Tests
 - **raw_html の同値性**：`raw_html.txt` の各入力と、各種類の成立と不成立・閉じのない種類・改行をまたぐタグの入力について、`amark_inline_scan_raw_html` の判定と構文の成立の範囲が一致すること（7.7）。
-- **構文ごとのデータ**（`tests/inline/data/*.txt`、`EXPECT=dump`）：各構文の成立と不成立、値（宛先、タイトル、コードの中身、オートリンクの宛先）、トークン（役割、書式の区別、区切り文字の文字と長さ、改行の表記）（7.1、7.4、8.2–8.6、14.1）。`lossless_inline.txt`：引用やリストの中の複数行のリンクとコードスパン、CRLF、タブ、NUL、不正な UTF-8、行末の空白（1.3、8.1、8.5、11.4）。
+- **構文ごとのデータ**（`tests/inline/data/*.txt`、`EXPECT=dump FACTORY=<テスト用の構文セットの生成関数>`）：各構文の成立と不成立、値（宛先、タイトル、コードの中身、オートリンクの宛先）、トークン（役割、書式の区別、区切り文字の文字と長さ、改行の表記）（7.1、7.4、8.2–8.6、14.1）。`lossless_inline.txt`：引用やリストの中の複数行のリンクとコードスパン、CRLF、タブ、NUL、不正な UTF-8、行末の空白（1.3、8.1、8.5、11.4）。
 - **準拠テスト**（`tests/spec/`）：spec.txt 0.31.2 の 652 例の HTML のバイト単位の一致と、被覆・不変条件・逐次の一致（7.1、7.6、12.1、12.2）。spec.txt を一時的に除いた構成でスキップが報告され、`AMARK_REQUIRE_SPEC_TESTS=ON` で構成が失敗すること、SHA-256 の不一致で構成が失敗することは、CMake のスクリプトのテスト（`tests/spec/CMakeLists.txt` の `spec.config_checks`、`cmake -P` で別の作業ディレクトリに構成する）で確かめる（12.3、12.5、12.6）。
 - **GFM 相当**（`tests/extensions/`）：`gfm_cases.txt` の HTML、組み合わせのテスト（13.1–13.3）。`www\.example.com` や `www.example&#46;com` が拡張オートリンクにならないこと（4.5）。
-- **生成の手順**：自己テストのデータを `CHECK=` で数える検査の関数に渡したテストと、`EXPECT=` のテストの両方がビルドされて実行されること、`CHECK=` と `EXPECT=` を両方指定すると構成が失敗すること、引数がないときの `block-parser` の版の既定の動作が変わらないこと（`block-parser` の自己テストが通ること）（14.4）。
+- **生成の手順**：自己テストのデータで、`FACTORY=` と `EXPECT=dump`／`EXPECT=html` のテストと、`CHECK=` で数える検査の関数に渡したテストがビルドされて実行されること。`CHECK=` と `EXPECT=` の両方、`FACTORY=` のない `EXPECT=html`、`FACTORY=` と `DUMP_FLAGS=` の組み合わせで構成が失敗すること。`FACTORY=` も `CHECK=` もないときの生成ソースが `block-parser` の版とバイト単位で同じで、`block-parser` の自己テスト（`gen_examples_selftest.txt`）が通ること（14.4）。
 - **構築関数の順**：`amark_syntax_set_add_commonmark` の構文セットで、10 個のインラインの拡張がこの順で現れること（相対の順だけ。絶対の位置やブロックの拡張との間は確かめない）（7.3）。
 - **oom**：`AMARK_CHECK_OOM_SWEEP` で、すべてのインライン構文を含む文書の一括のパース、GFM の構文セットのパース、インラインの断片のパースが、メモリ不足を返してリークしないこと（14.3、1.5）。
 - **エクスポートとヘッダ**：`inline.h` の単独コンパイル、公開シンボルの検査（`foundation` の仕組み）。
