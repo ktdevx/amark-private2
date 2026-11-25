@@ -124,7 +124,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（`src/parse/inline_*`）と構文（`src/syntax/`）。構文の知識をエンジンに置かない。エンジンが知る組み込みのノード型は、テキストのまとめに使う `text` と、改行の受け皿の `softbreak` だけ（`syntax-tree` の組み込みの型で、構文ではない）。
-- Existing patterns preserved：エラーコードと出力引数、`struct_size`（スロットは `amark_slot_header_t`）、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、内部関数も `amark_`、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
+- Existing patterns preserved：エラーコードと出力引数、`struct_size`（スロットは `amark_slot_t`）、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、内部関数も `amark_`、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
 - Steering compliance：構文ごとに 1 ファイル、組み込みも公開 API だけ、parse → tree の一方向、spec.txt はテストデータだけ。
 
 ### Technology Stack
@@ -392,7 +392,7 @@ graph TB
 | InlineTests / Fuzz / Bench | Test | 要件の検証 | 11.5, 14.1–14.3 | InlineCheck (P0) | Batch |
 
 ### 共通の規約
-- `foundation`・`syntax-tree`・`block-parser` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。スロットの構造体は `amark_slot_header_t` の `struct_size` が v1 の最小（`user_data` の末尾）以上であること。6 種類のスロットの構造体は、どれも v1 の最後の欄を `void *user_data` にする（コールバックを持たない `amark_inline_special_t` と `amark_inline_node_traits_t` も、慣例をそろえ、後の版で欄を足しても v1 の最小が変わらないように持つ）。
+- `foundation`・`syntax-tree`・`block-parser` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。スロットの構造体は `amark_slot_t` の `struct_size` が v1 の最小（`user_data` の末尾）以上であること。6 種類のスロットの構造体は、どれも v1 の最後の欄を `void *user_data` にする（コールバックを持たない `amark_inline_special_t` と `amark_inline_node_traits_t` も、慣例をそろえ、後の版で欄を足しても v1 の最小が変わらないように持つ）。
 - 位置はすべて葉の中身の論理的なバイトの位置（`amark_text_input_t` の位置、区間の隙間を数えない）。範囲は `[start, end)`。
 - `amark_inline_context_t *` はコールバックの間だけ有効。コールバックが `AMARK_ERROR_NONE` 以外を返したら、エンジンは葉の解析を止め、そのエラーコードを委譲先から返す（パーサは `Failed` になる。`block-parser` の規約）。
 - コールバックの中で作ったノードと、記録したトークンの所有者は、成立したときにエンジンへ渡すか、自分で解放する。不成立（`NONE`）のとき、文脈の変更（テキストとノードの追加、開きの積み、引き取り）をしてはならない（2.5）。
@@ -415,7 +415,7 @@ graph TB
 ```c
 /* include/amark/inline.h */
 typedef struct amark_inline_special {
-    amark_slot_header_t header;            /* kind = AMARK_SLOT_INLINE_SPECIAL */
+    amark_slot_t base;                     /* kind = AMARK_SLOT_INLINE_SPECIAL */
     const unsigned char *chars;            /* 256 ビットの集合（32 バイト）。NULL 可 */
     const char *const *sequences;          /* 構文を始める文字の並び（例："![", "www."）。NULL 可 */
     size_t sequence_count;
@@ -549,7 +549,7 @@ typedef enum amark_delimiter_rule {
 } amark_delimiter_rule_t;
 
 typedef struct amark_inline_delimiter {
-    amark_slot_header_t header;          /* kind = AMARK_SLOT_INLINE_DELIMITER */
+    amark_slot_t base;                   /* kind = AMARK_SLOT_INLINE_DELIMITER */
     const char *name;                    /* 診断用 */
     unsigned char character;
     int32_t priority;                    /* 同じバイトのインライン構文との順 */
@@ -651,7 +651,7 @@ typedef struct amark_bracket_result {
 } amark_bracket_result_t;
 
 typedef struct amark_inline_bracket {
-    amark_slot_header_t header;                 /* kind = AMARK_SLOT_INLINE_BRACKET */
+    amark_slot_t base;                          /* kind = AMARK_SLOT_INLINE_BRACKET */
     const char *name;
     int32_t priority;
     uint32_t opener_mask;
@@ -665,7 +665,7 @@ typedef struct amark_inline_bracket {
 #define AMARK_INLINE_TRAIT_LINK 0x01u   /* リンクを含めない。ブラケットで作られたら前の LINK の開きを無効にする。
                                            テキストの走査に in_link を伝える */
 typedef struct amark_inline_node_traits {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_INLINE_NODE_TRAITS */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_INLINE_NODE_TRAITS */
     const char *node_type;
     uint32_t traits;
     void *user_data;                    /* v1 のスロットの慣例どおり末尾に置く。エンジンは読まない */
@@ -695,7 +695,7 @@ typedef struct amark_inline_node_traits {
 ```c
 /* include/amark/inline.h */
 typedef struct amark_inline_text_scanner {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_INLINE_TEXT_SCANNER */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_INLINE_TEXT_SCANNER */
     const char *name;
     int32_t priority;
     size_t leaf_state_size;

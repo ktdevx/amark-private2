@@ -47,7 +47,7 @@
 - 構文トークンの種類・印・フィールドの追加や意味の変更 → `block-parser`、`inline-parser`、`markdown-renderer`
 - 編集の記録のビットの追加や伝播の規則の変更 → `markdown-renderer`
 - 組み込みのノード型の追加、属性・リテラルの規則（LF の正規化、検査）の変更 → すべての下流の spec
-- 包含の規則、`amark_node_type_desc_t` / `amark_extension_t` / `amark_slot_header_t` の形、識別子の割り当て規則、スロットの番号の範囲と種類の一覧の変更 → すべての下流の spec と利用者の拡張
+- 包含の規則、`amark_node_type_desc_t` / `amark_extension_t` / `amark_slot_t` の形、識別子の割り当て規則、スロットの番号の範囲と種類の一覧の変更 → すべての下流の spec と利用者の拡張
 - ソースの扱い（追加、取り込み時の複製）の変更 → `block-parser`、`markdown-renderer`
 - 構文セットの所有の受け渡しの規則（受け付ける条件、解放の順序）、子をまとめた取り込みの規則（検査の順、全か無か、編集の記録）の変更 → `block-parser`（便宜の関数と断片のパース）と、同じ関数を使う上位の spec
 - ダンプの形式の変更 → ダンプで期待値を書くすべての spec のテスト
@@ -131,7 +131,7 @@ include/amark/
 ├── token.h           # 構文トークンの型・種類・印と操作
 ├── iterator.h        # 走査（入る/出るイベント）
 ├── dump.h            # S 式のダンプとダンプの書き手
-└── extension.h       # ノード型の記述子、構文拡張の記述子、スロットの見出し、構文セット
+└── extension.h       # ノード型の記述子、構文拡張の記述子、スロットの基底、構文セット
 src/tree/
 ├── tree.h            # struct amark_document / amark_node / amark_token_record / amark_source と、モジュール間の内部関数
 ├── syntax_set.h      # struct amark_syntax_set、識別子から記述子を引く内部関数、組み込みの記述子の表の宣言
@@ -253,7 +253,7 @@ graph TB
 | 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.9 | 記録と伝播 | EditTracking, LiteralAttr, StructureEdit, CopyImport | `amark_node_edits`, `amark_node_mark_edited` | 判定 |
 | 7.8 | 追跡の切り替え | Document | `amark_document_set_edit_tracking` | 組み立て |
 | 7.10 | 記録の種類の追加 | EditTracking | 未知のビットの規則 | 判定 |
-| 8.1, 8.2, 8.9 | 記述子とスロット | SyntaxSet | `amark_node_type_desc_t`, `amark_extension_t`, `amark_slot_header_t` | — |
+| 8.1, 8.2, 8.9 | 記述子とスロット | SyntaxSet | `amark_node_type_desc_t`, `amark_extension_t`, `amark_slot_t` | — |
 | 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.10, 8.11 | 構文セットの操作、凍結、問い合わせ | SyntaxSet | `amark_syntax_set_*` | — |
 | 8.12 | 関数表の呼び出し | NodeCore, CopyImport, Equality, Dump | 記述子の関数表 | — |
 | 8.13 | Amark のスロットの種類の通し番号の一覧 | SyntaxSet | `AMARK_SLOT_KIND_AMARK_FIRST` / `_LAST`、種類の一覧 | — |
@@ -316,7 +316,7 @@ graph TB
 
 **Responsibilities & Constraints**
 - 構文セットは作成時に `amark.core`（組み込みの型だけを持つ拡張）を先頭に持つ。`amark.core` の削除・置換・前への挿入は `AMARK_ERROR_INVALID_ARGUMENT`。
-- 追加・挿入・置換のとき記述子を検査する：`struct_size` が v1 の最小以上、名前が `[a-z0-9][a-z0-9_.-]*`、拡張の名前が構文セットの中で重複しない、ノード型の記述子の検査（下記）、スロットの `kind` が 0 でなく `struct_size >= sizeof(amark_slot_header_t)`。
+- 追加・挿入・置換のとき記述子を検査する：`struct_size` が v1 の最小以上、名前が `[a-z0-9][a-z0-9_.-]*`、拡張の名前が構文セットの中で重複しない、ノード型の記述子の検査（下記）、スロットの `kind` が 0 でなく `struct_size >= sizeof(amark_slot_t)`。
 - ノード型の記述子の検査：拡張の型の名前は `.` を含む（`.` のない名前は組み込みに予約）。`flags` は `BLOCK` か `INLINE` のどちらか一方。`literal_mode` が既知の値。`data_size` が `AMARK_NODE_TYPE_MAX_DATA_SIZE`（64 KiB）以下。
 - 凍結：すべての型の名前の重複を検査し（重複は `AMARK_ERROR_INVALID_ARGUMENT`、構文セットは凍結されないまま）、拡張の型に 256 から順に識別子を割り当て、名前の索引とスロットの索引（種類ごとに構文セットの順）を作る。凍結後の変更は `AMARK_ERROR_INVALID_STATE`。
 - 記述子と拡張は構文セットより長く生きること（通常は静的な記憶域）。構文セットはそれを使うすべての文書より長く生きること。凍結した構文セットは読み取りだけなので、複数のスレッドから同時に使える。
@@ -385,11 +385,11 @@ struct amark_node_type_desc {         /* typedef は node.h が前方宣言で�
     void *user_data;
 };
 
-/* スロット：種類ごとの構造体は、先頭のメンバーにこの見出しを置く */
-typedef struct amark_slot_header {
+/* スロットの基底：種類ごとの構造体は、先頭のメンバー base にこの型を置く */
+typedef struct amark_slot {
     size_t struct_size;               /* 種類ごとの構造体全体の大きさ */
     uint32_t kind;
-} amark_slot_header_t;
+} amark_slot_t;
 
 #define AMARK_SLOT_KIND_AMARK_FIRST   1u   /* 1–255：Amark の spec が使う */
 #define AMARK_SLOT_KIND_AMARK_LAST  255u
@@ -410,7 +410,7 @@ typedef struct amark_extension {
     const char *name;                                  /* 例："commonmark.atx_heading" */
     const amark_node_type_desc_t *const *node_types;
     size_t node_type_count;
-    const amark_slot_header_t *const *slots;
+    const amark_slot_t *const *slots;
     size_t slot_count;
     void *user_data;
 } amark_extension_t;
@@ -442,8 +442,8 @@ AMARK_API bool amark_syntax_set_node_type_of(const amark_syntax_set_t *set, cons
 AMARK_API const amark_node_type_desc_t *amark_syntax_set_node_type_desc(const amark_syntax_set_t *set,
                                                                         amark_node_type_t type);
 AMARK_API size_t amark_syntax_set_slot_count(const amark_syntax_set_t *set, uint32_t kind);
-AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax_set_t *set, uint32_t kind,
-                                                              size_t index, const amark_extension_t **out_extension);
+AMARK_API const amark_slot_t *amark_syntax_set_slot_at(const amark_syntax_set_t *set, uint32_t kind,
+                                                       size_t index, const amark_extension_t **out_extension);
 ```
 - Preconditions：`remove` / `replace` / `insert_before` の名前が見つからなければ `AMARK_ERROR_INVALID_ARGUMENT`。`replace` は同じ名前でなくてもよい（新しい名前も重複の検査をする）。
 - Postconditions：凍結に成功した構文セットでは、同じ拡張の並びから作った別の構文セットと同じ識別子が割り当たる（8.6）。`slot_at` は構文セットの順、拡張の中ではスロットの一覧の順に返す。

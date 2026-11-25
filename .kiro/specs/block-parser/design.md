@@ -433,7 +433,7 @@ stateDiagram-v2
 | GfmHookTests | Test | GFM 相当のフックの検証と、再利用できる検証用の構文（`amark_test_parse_gfm`） | 13.1–13.6 | ParseCheck (P0), amark_test_html_gfm (P0) | Service, Batch |
 
 ### 共通の規約
-- `foundation` と `syntax-tree` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。解放の関数は NULL を受け付ける。公開の構造体は先頭に `size_t struct_size`（スロットの構造体は `amark_slot_header_t` の `struct_size`）を持ち、ライブラリは知っている最小のサイズ以上であることを確かめる。
+- `foundation` と `syntax-tree` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。解放の関数は NULL を受け付ける。公開の構造体は先頭に `size_t struct_size`（スロットの構造体は `amark_slot_t` の `struct_size`）を持ち、ライブラリは知っている最小のサイズ以上であることを確かめる。
 - **パーサの失敗の例外**：`amark_parser_feed` と `amark_parser_finish` は、確保の失敗とコールバックの失敗のとき、強い保証ではなく「リークせず、パーサが `Failed` の状態になる」保証とする（入力の途中まで組み立てた木を巻き戻すと、行ごとに複製が必要になるため）。`Failed` のパーサは解放だけを受け付ける。利用者は入力を最初から与え直す。この例外は `parser.h` に文書化する。
 - コールバックに渡す `amark_block_context_t *` と `amark_parse_context_t *` は、そのコールバックの間だけ有効。行の内容のポインタも同じ。
 - ブロック構文のコールバックが `AMARK_ERROR_NONE` 以外を返したら、エンジンは処理を止めてそのエラーコードを返す（4.8）。
@@ -605,7 +605,7 @@ typedef enum amark_block_continue_result {
 } amark_block_continue_result_t;
 
 struct amark_block_syntax {
-    amark_slot_header_t header;             /* kind = AMARK_SLOT_BLOCK_SYNTAX */
+    amark_slot_t base;                      /* kind = AMARK_SLOT_BLOCK_SYNTAX */
     const char *name;                       /* 診断用。例："atx_heading" */
     uint32_t flags;
     int32_t priority;                       /* 小さいほど先に試す。同じ値は構文セットの順 */
@@ -701,7 +701,7 @@ typedef enum amark_consume_result_kind {
 } amark_consume_result_kind_t;
 
 typedef struct amark_paragraph_consumer {
-    amark_slot_header_t header;   /* kind = AMARK_SLOT_PARAGRAPH_CONSUMER */
+    amark_slot_t base;            /* kind = AMARK_SLOT_PARAGRAPH_CONSUMER */
     size_t state_size;            /* 段落ごとの再開の状態。0 で始まり、CONSUME_LINES と NONE でやり直される */
     /* 段落の行 [0, line_count) を先頭から見る。scanned_lines 行までは以前の呼び出しで調べてある。
        CONSUME_LINES のとき *out_lines に消費した行の数を入れ、段落の前に作ったノードにトークンを記録済みであること */
@@ -745,7 +745,7 @@ AMARK_API amark_error_t amark_block_record_line_range(amark_block_context_t *ctx
 ```c
 /* include/amark/parser.h（続き） */
 typedef struct amark_parse_state_slot {
-    amark_slot_header_t header;     /* kind = AMARK_SLOT_PARSE_STATE */
+    amark_slot_t base;              /* kind = AMARK_SLOT_PARSE_STATE */
     size_t size;
     amark_error_t (*init)(amark_parse_context_t *ctx, void *state, void *user_data);  /* 任意 */
     void (*deinit)(amark_parse_context_t *ctx, void *state, void *user_data);        /* 任意。失敗時も呼ぶ */
@@ -757,7 +757,7 @@ typedef enum amark_postprocess_phase {
 } amark_postprocess_phase_t;
 
 typedef struct amark_postprocess {
-    amark_slot_header_t header;     /* kind = AMARK_SLOT_POSTPROCESS */
+    amark_slot_t base;              /* kind = AMARK_SLOT_POSTPROCESS */
     amark_postprocess_phase_t phase;
     amark_error_t (*run)(amark_parse_context_t *ctx, amark_node_t *root, void *user_data);
     void *user_data;
@@ -942,7 +942,7 @@ AMARK_API amark_error_t amark_parse_fragment(amark_node_t *parent, amark_node_t 
 **Responsibilities & Constraints**
 - `amark_syntax_set_add_commonmark`：凍結していない構文セットの末尾に、次の順で拡張を加える。(1) 組み込みのノード型の出力の core 拡張：`amark_html_core_extension()`（`amark.core.html`）、その直後に `amark_markdown_core_extension()`（`amark.core.markdown`）。構築関数の中の「出力の core 拡張の一覧」は取得関数の静的な配列で、要素の数は配列から求める（追加でループや失敗時の取り除きの処理を変えない）。この spec のタスク 8.1 は `amark.core.html` だけの配列で実装し、`amark.core.markdown` の 1 行と、拡張の順（`amark.core`、`amark.core.html`、`amark.core.markdown`、構文の拡張）を確かめるテストは `markdown-renderer` のタスク 3.7 が足す（`markdown-renderer` の登録の規則 4）。この spec の側に追加のタスクは要らない。構文セットは `amark.core` を先頭に持つので、出力の core 拡張は `amark.core` の直後になる。(2) ブロックの構文の拡張：`commonmark.block_quote`、`commonmark.list_item`、`commonmark.atx_heading`、`commonmark.setext_heading`、`commonmark.thematic_break`、`commonmark.fenced_code`、`commonmark.indented_code`、`commonmark.html_block`、`commonmark.link_reference_definition`、`commonmark.paragraph`。(3) `inline-parser` はこの後に自分のインラインの拡張を足す。途中で失敗したら加えたものを取り除く。利用者の構文セットにすでに同じ名前の拡張があれば `AMARK_ERROR_INVALID_ARGUMENT`（構文セットは変えない）。
 - 便宜の関数は、構文セットを作って加えて凍結し、非 `const` の構文セットを保持したまま `amark_parser_create_take_syntax_set` でパーサに渡す（所有権の受け渡しは、非 `const` の構文セットを持つこの経路だけで起こる）。パーサの生成が失敗したら所有権は便宜の関数に残るので、それを解放して失敗を返す。`amark_parse_commonmark` は `amark_parser_create_commonmark`、feed、finish、free の組み合わせで、feed か finish が失敗したら、構文セットはすでに文書のものなので、パーサの解放が文書ごと解放する。生成が成功した後は文書が構文セットを所有し、返した文書はそれを保持し続ける（1.2。ParserAPI）。
-- 各構文のファイルは、`static const amark_slot_header_t *const slots[]` と `static const amark_extension_t` を持ち、取得の関数で返す。組み込みのノード型の出力は構文ではなくノード型に従うので、構文の拡張は出力のスロットを持たない（出力は `amark.core.html` などが持つ）。特定の構文だけが独自の出力を必要とする場合は、そのファイルの `slots[]` に足せば、構文セットの順で core の出力を上書きする（7.6）。
+- 各構文のファイルは、`static const amark_slot_t *const slots[]` と `static const amark_extension_t` を持ち、取得の関数で返す。組み込みのノード型の出力は構文ではなくノード型に従うので、構文の拡張は出力のスロットを持たない（出力は `amark.core.html` などが持つ）。特定の構文だけが独自の出力を必要とする場合は、そのファイルの `slots[]` に足せば、構文セットの順で core の出力を上書きする（7.6）。
 
 **Contracts**: Service [x]
 ```c

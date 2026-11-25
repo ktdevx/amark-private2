@@ -329,7 +329,7 @@ graph TB
 | MdTests / MdFuzz | Test / Fuzz | 要件の検証 | 全要件, 11.5 | MdTestSupport (P0) | Batch |
 
 ### 共通の規約
-- `foundation` の規約に従う：失敗しうる関数は `amark_error_t` を返す。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。問い合わせの関数は値を直接返す。公開の構造体は先頭に `size_t struct_size`（スロットは `amark_slot_header_t`）を持ち、ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
+- `foundation` の規約に従う：失敗しうる関数は `amark_error_t` を返す。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。問い合わせの関数は値を直接返す。公開の構造体は先頭に `size_t struct_size`（スロットは `amark_slot_t`）を持ち、ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
 - 文脈の関数は、出力の処理・接頭辞の処理・`can_follow`・フックの呼び出しの間だけ使える。外での呼び出し、使えない場面での呼び出しは `AMARK_ERROR_INVALID_STATE`（void の関数は何もしない、問い合わせは「なし」を返す）。
 - 表現できないことは、エンジンの検査か `amark_markdown_fail` で記録し、最初の 1 つを報告する。以後の書き出しは何もせずにその失敗を返す。
 
@@ -599,7 +599,7 @@ typedef bool (*amark_markdown_follow_fn_t)(amark_markdown_context_t *ctx, const 
                                            const amark_node_t *previous, void *user_data);
 
 typedef struct amark_markdown_node_slot {
-    amark_slot_header_t header;             /* kind = AMARK_SLOT_MARKDOWN_NODE */
+    amark_slot_t base;                      /* kind = AMARK_SLOT_MARKDOWN_NODE */
     const char *node_type;
     amark_markdown_node_fn_t render;       /* 必須。入るときと出るとき（葉も両方） */
     amark_markdown_prefix_fn_t prefix;     /* 任意。あれば子孫の行に接頭辞を付けるコンテナ */
@@ -620,7 +620,7 @@ typedef struct amark_markdown_run {
 typedef struct amark_markdown_run_match { size_t opener, closer, count; } amark_markdown_run_match_t;
 
 typedef struct amark_markdown_hooks_slot {
-    amark_slot_header_t header;             /* kind = AMARK_SLOT_MARKDOWN_HOOKS */
+    amark_slot_t base;                      /* kind = AMARK_SLOT_MARKDOWN_HOOKS */
     size_t state_size;
     amark_error_t (*begin)(amark_markdown_context_t *ctx, void *state, void *user_data);  /* 任意 */
     amark_error_t (*end)(amark_markdown_context_t *ctx, void *state, void *user_data);    /* 任意 */

@@ -244,6 +244,11 @@
 - **変更**：この spec のスロットの種類の番号を、一覧で割り当てた 1–4 に置き換えた。範囲の注記は削除した。種類の名前と構造体は変えない。
 - **Implications**：番号の値と記述だけの変更で、この spec の要件・API の形・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-25：スロットの基底の型の改名（`syntax-tree`）に合わせる
+- **Context**：スロットの基底の型 `amark_slot_header_t`（メンバー名 `header`）は、API の上で受け渡すもの（拡張の `slots`、`amark_syntax_set_slot_at` の戻り値）が「スロットそのもの」なのに「スロットのヘッダ」と読める名前だった。また日本語の文書では「スロットの見出し」と訳しており、ノード型の heading の「見出し」やヘッダファイルと紛れた。`syntax-tree` が型を `amark_slot_t` に改名した。
+- **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
+- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — ブロック構造、タブ、不正な文字、リンク参照定義、付録の parsing strategy
 - [cmark](https://github.com/commonmark/cmark) — `blocks.c`、`inlines.c`、`utf8.c`（case fold）、`houdini_html_u.c`（文字参照）

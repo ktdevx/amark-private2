@@ -49,7 +49,7 @@
 - 組み込みの出力の表の変更（cmark との対応）、エスケープの規則、危険な URL の規則の変更 → `inline-parser` の準拠テスト
 - `amark.core.html` の名前・取得関数・登録の規則の変更 → `block-parser`（構文セットの構築関数）
 - `render.h` の型の変更 → `markdown-renderer`
-- `syntax-tree` のスロットの見出し、構文セットの列挙、ソース上の範囲の API の変更 → この spec
+- `syntax-tree` のスロットの基底（`amark_slot_t`）、構文セットの列挙、ソース上の範囲の API の変更 → この spec
 - `gen_html_cases.cmake` のケースの形式（見出し・区切りの行、オプションの語の扱い）、引数（`CHECK=`、`INCLUDE=`）、生成するテストが呼ぶ検査関数の形の変更 → `markdown-renderer`（同じスクリプトで `tests/markdown/data/*_cases.txt` を生成する）
 - `amark_test_html_gfm` の依存（Naos に依存しないこと）の変更 → `inline-parser`（`inline_parse`）と `markdown-renderer`（`md_roundtrip`、`md_edit`）のファジングターゲット（中間のライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_gfm`（`inline-parser`）を通して間接にリンクする）
 - `foundation` の `amark.h` の正規の include の順の変更 → この spec（`amark.h` への追加の位置）
@@ -101,7 +101,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（汎用）と組み込みの出力（個別のノード型）をレイヤーで分ける。エンジンの中は「書き出し」「スロットの解決」「たどりと文脈」に分ける。
-- Existing patterns preserved：`foundation` のエラーコード・出力引数・アロケータ・`struct_size`、`syntax-tree` のスロットの見出しと構文セットの順、`amark.core` が組み込みのノード型をまとめる形。
+- Existing patterns preserved：`foundation` のエラーコード・出力引数・アロケータ・`struct_size`、`syntax-tree` のスロットの基底（`amark_slot_t`）と構文セットの順、`amark.core` が組み込みのノード型をまとめる形。
 - Steering compliance：C99、`amark_` / `AMARK_`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ、組み込みも公開 API だけを使う。
 
 ### 組み込みの HTML 出力の登録の規則
@@ -284,7 +284,7 @@ graph TB
 
 **Responsibilities & Constraints**
 - `render.h` は `error.h` と `<stddef.h>` だけを include する。`html.h` は `node.h`、`buffer.h`、`extension.h`、`render.h` を include する。どちらも `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS` で囲み、ガードは `AMARK_RENDER_H`、`AMARK_HTML_H`。
-- 公開の構造体（`amark_html_options_t`、`amark_html_node_slot_t`、`amark_html_hooks_slot_t`）は先頭に大きさのフィールドを持つ（スロットは `amark_slot_header_t` の `struct_size`）。ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
+- 公開の構造体（`amark_html_options_t`、`amark_html_node_slot_t`、`amark_html_hooks_slot_t`）は先頭に大きさのフィールドを持つ（スロットは `amark_slot_t` の `struct_size`）。ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
 
 **Contracts**: Service [x]
 ```c
@@ -397,7 +397,7 @@ typedef amark_error_t (*amark_html_node_fn_t)(amark_html_context_t *ctx, const a
 typedef amark_error_t (*amark_html_plain_fn_t)(amark_html_context_t *ctx, const amark_node_t *node, void *user_data);
 
 typedef struct amark_html_node_slot {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_HTML_NODE、struct_size = sizeof(amark_html_node_slot_t) */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_HTML_NODE、struct_size = sizeof(amark_html_node_slot_t) */
     const char *node_type;                /* ノード型の名前（"heading"、"test.table" など） */
     amark_html_node_fn_t render;          /* 必須。入るときと出るときに呼ぶ（葉も両方） */
     amark_html_plain_fn_t render_plain;   /* 任意。テキストだけのモードで入るときに呼ぶ */
@@ -407,7 +407,7 @@ typedef struct amark_html_node_slot {
 #define AMARK_HTML_MAX_STATE_SIZE 65536u
 
 typedef struct amark_html_hooks_slot {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_HTML_HOOKS */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_HTML_HOOKS */
     size_t state_size;                    /* 1 回の出力の間の状態の大きさ。0 なら状態なし */
     amark_error_t (*begin)(amark_html_context_t *ctx, void *state, void *user_data);  /* 任意 */
     amark_error_t (*end)(amark_html_context_t *ctx, void *state, void *user_data);    /* 任意 */
