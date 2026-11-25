@@ -39,11 +39,13 @@
 #include <naos/naos.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 /* A test allocator: its settings and counters. */
-typedef struct amark_test_allocator {
+typedef struct amark_test_allocator
+{
     size_t fail_at;     /* fail the allocation (malloc_fn, calloc_fn, realloc_fn) with
                            this 1-based number; 0 fails none */
     size_t calls;       /* the allocation calls (malloc_fn, calloc_fn, realloc_fn) */
@@ -76,7 +78,8 @@ typedef amark_error_t (*amark_test_oom_scenario_t)(void *context);
 /* amark_allocator_set, passed by the caller. */
 typedef amark_error_t (*amark_test_set_allocator_t)(const amark_allocator_t *allocator);
 
-typedef struct amark_test_oom_result {
+typedef struct amark_test_oom_result
+{
     size_t iterations;         /* the runs with a failure injected */
     size_t wrong_error_at;     /* the first run (its fail_at) that returned another
                                   error than OOM; 0 if none */

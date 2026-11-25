@@ -25,7 +25,8 @@ NAOS_TEARDOWN(restore)
 }
 
 /* An internal structure that embeds two buffers by value. */
-typedef struct holder {
+typedef struct holder
+{
     int tag;
     amark_buffer_t first;
     amark_buffer_t second;

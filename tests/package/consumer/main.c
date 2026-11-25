@@ -23,7 +23,8 @@ static int failures = 0;
 
 static void check(int condition, const char *what)
 {
-    if (!condition) {
+    if (!condition)
+    {
         fprintf(stderr, "amark_consumer: check failed: %s\n", what);
         failures = 1;
     }
@@ -41,7 +42,8 @@ int main(void)
     check(amark_version_number() == AMARK_VERSION_NUMBER,
           "amark_version_number() equals AMARK_VERSION_NUMBER");
 
-    if (amark_buffer_create(&buffer) != AMARK_ERROR_NONE || buffer == NULL) {
+    if (amark_buffer_create(&buffer) != AMARK_ERROR_NONE || buffer == NULL)
+    {
         fprintf(stderr, "amark_consumer: amark_buffer_create failed\n");
         return 1;
     }
@@ -55,7 +57,8 @@ int main(void)
           "the buffer holds the appended text and its NUL terminator");
     amark_buffer_destroy(buffer);
 
-    if (failures == 0) {
+    if (failures == 0)
+    {
         printf("amark_consumer: Amark %s works\n", amark_version_string());
     }
     return failures;

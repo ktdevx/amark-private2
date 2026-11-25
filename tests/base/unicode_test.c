@@ -35,8 +35,10 @@ static int is_ascii_punctuation_char(uint32_t c)
 {
     size_t i;
 
-    for (i = 0; ascii_punctuation[i] != '\0'; i++) {
-        if ((uint32_t)(unsigned char)ascii_punctuation[i] == c) {
+    for (i = 0; ascii_punctuation[i] != '\0'; i++)
+    {
+        if ((uint32_t)(unsigned char)ascii_punctuation[i] == c)
+        {
             return 1;
         }
     }
@@ -58,7 +60,8 @@ NAOS_TEST(every_zs_character_is_whitespace)
 {
     size_t i;
 
-    for (i = 0; i < COUNT_OF(zs_chars); i++) {
+    for (i = 0; i < COUNT_OF(zs_chars); i++)
+    {
         NAOS_CHECK_TRUE(amark_unicode_is_whitespace(zs_chars[i]));
     }
 }
@@ -67,7 +70,8 @@ NAOS_TEST(tab_lf_ff_cr_are_whitespace)
 {
     size_t i;
 
-    for (i = 0; i < COUNT_OF(whitespace_controls); i++) {
+    for (i = 0; i < COUNT_OF(whitespace_controls); i++)
+    {
         NAOS_CHECK_TRUE(amark_unicode_is_whitespace(whitespace_controls[i]));
     }
 }
@@ -85,7 +89,8 @@ NAOS_TEST(other_characters_are_not_whitespace)
     };
     size_t i;
 
-    for (i = 0; i < COUNT_OF(others); i++) {
+    for (i = 0; i < COUNT_OF(others); i++)
+    {
         NAOS_CHECK_FALSE(amark_unicode_is_whitespace(others[i]));
     }
 }
@@ -96,8 +101,10 @@ NAOS_TEST(whitespace_has_exactly_21_code_points)
     uint32_t c;
     unsigned long count = 0;
 
-    for (c = 0; c <= 0x10FFFF; c++) {
-        if (amark_unicode_is_whitespace(c)) {
+    for (c = 0; c <= 0x10FFFF; c++)
+    {
+        if (amark_unicode_is_whitespace(c))
+        {
             count++;
         }
     }
@@ -132,7 +139,8 @@ NAOS_TEST(representative_p_and_s_are_punctuation)
     };
     size_t i;
 
-    for (i = 0; i < COUNT_OF(punct); i++) {
+    for (i = 0; i < COUNT_OF(punct); i++)
+    {
         NAOS_CHECK_TRUE(amark_unicode_is_punctuation(punct[i]));
     }
 }
@@ -158,7 +166,8 @@ NAOS_TEST(letters_digits_and_marks_are_not_punctuation)
     };
     size_t i;
 
-    for (i = 0; i < COUNT_OF(others); i++) {
+    for (i = 0; i < COUNT_OF(others); i++)
+    {
         NAOS_CHECK_FALSE(amark_unicode_is_punctuation(others[i]));
     }
 }
@@ -170,8 +179,10 @@ NAOS_TEST(punctuation_has_exactly_9473_code_points)
     uint32_t c;
     unsigned long count = 0;
 
-    for (c = 0; c <= 0x10FFFF; c++) {
-        if (amark_unicode_is_punctuation(c)) {
+    for (c = 0; c <= 0x10FFFF; c++)
+    {
+        if (amark_unicode_is_punctuation(c))
+        {
             count++;
         }
     }
@@ -183,7 +194,8 @@ NAOS_TEST(ascii_part_of_unicode_punctuation)
 {
     uint32_t c;
 
-    for (c = 0; c < 0x80; c++) {
+    for (c = 0; c < 0x80; c++)
+    {
         NAOS_CHECK_INT_EQ(is_ascii_punctuation_char(c), amark_unicode_is_punctuation(c) ? 1 : 0);
     }
 }
@@ -195,7 +207,8 @@ NAOS_TEST(all_32_ascii_punctuation_characters)
     size_t i;
 
     NAOS_CHECK_UINT_EQ(32, sizeof(ascii_punctuation) - 1);
-    for (i = 0; ascii_punctuation[i] != '\0'; i++) {
+    for (i = 0; ascii_punctuation[i] != '\0'; i++)
+    {
         NAOS_CHECK_TRUE(amark_ascii_is_punctuation((uint32_t)(unsigned char)ascii_punctuation[i]));
     }
 }
@@ -219,7 +232,8 @@ NAOS_TEST(values_next_to_ascii_punctuation_are_not)
     };
     size_t i;
 
-    for (i = 0; i < COUNT_OF(adjacent); i++) {
+    for (i = 0; i < COUNT_OF(adjacent); i++)
+    {
         NAOS_CHECK_FALSE(amark_ascii_is_punctuation(adjacent[i]));
     }
 }
@@ -229,11 +243,14 @@ NAOS_TEST(ascii_punctuation_over_the_whole_code_space)
     uint32_t c;
     unsigned long count = 0;
 
-    for (c = 0; c < 0x80; c++) {
+    for (c = 0; c < 0x80; c++)
+    {
         NAOS_CHECK_INT_EQ(is_ascii_punctuation_char(c), amark_ascii_is_punctuation(c) ? 1 : 0);
     }
-    for (c = 0; c <= 0x10FFFF; c++) {
-        if (amark_ascii_is_punctuation(c)) {
+    for (c = 0; c <= 0x10FFFF; c++)
+    {
+        if (amark_ascii_is_punctuation(c))
+        {
             count++;
         }
     }
@@ -246,7 +263,8 @@ NAOS_TEST(surrogates_and_values_above_10ffff_have_no_class)
 {
     size_t i;
 
-    for (i = 0; i < COUNT_OF(out_of_range); i++) {
+    for (i = 0; i < COUNT_OF(out_of_range); i++)
+    {
         NAOS_CHECK_FALSE(amark_unicode_is_whitespace(out_of_range[i]));
         NAOS_CHECK_FALSE(amark_unicode_is_punctuation(out_of_range[i]));
         NAOS_CHECK_FALSE(amark_ascii_is_punctuation(out_of_range[i]));
@@ -261,8 +279,10 @@ NAOS_TEST(large_values_do_not_alias_small_ones)
     size_t i;
     size_t j;
 
-    for (i = 0; i < COUNT_OF(bases); i++) {
-        for (j = 0; j < COUNT_OF(lows); j++) {
+    for (i = 0; i < COUNT_OF(bases); i++)
+    {
+        for (j = 0; j < COUNT_OF(lows); j++)
+        {
             uint32_t c = bases[i] + lows[j];
 
             NAOS_CHECK_FALSE(amark_unicode_is_whitespace(c));

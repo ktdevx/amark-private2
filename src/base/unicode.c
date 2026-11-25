@@ -8,7 +8,8 @@
 
 /* The element type of the generated tables, which unicode_tables.inc does not
  * define: an inclusive range of code points. */
-typedef struct {
+typedef struct
+{
     uint32_t first;
     uint32_t last;
 } amark_unicode_range_t;
@@ -27,14 +28,20 @@ static bool in_ranges(const amark_unicode_range_t *table, size_t count, uint32_t
     size_t low = 0;
     size_t high = count;
 
-    while (low < high) {
+    while (low < high)
+    {
         size_t mid = low + (high - low) / 2;
 
-        if (codepoint < table[mid].first) {
+        if (codepoint < table[mid].first)
+        {
             high = mid;
-        } else if (codepoint > table[mid].last) {
+        }
+        else if (codepoint > table[mid].last)
+        {
             low = mid + 1;
-        } else {
+        }
+        else
+        {
             return true;
         }
     }
@@ -55,12 +62,14 @@ bool amark_ascii_is_punctuation(uint32_t codepoint)
 
 bool amark_unicode_is_whitespace(uint32_t codepoint)
 {
-    if (codepoint < 0x80u) {
+    if (codepoint < 0x80u)
+    {
         /* Zs in ASCII is only U+0020. */
         return codepoint == 0x20u || codepoint == 0x09u || codepoint == 0x0Au || codepoint == 0x0Cu
             || codepoint == 0x0Du;
     }
-    if (is_out_of_range(codepoint)) {
+    if (is_out_of_range(codepoint))
+    {
         return false;
     }
     return in_ranges(amark_unicode_zs, AMARK_UNICODE_COUNT_OF(amark_unicode_zs), codepoint);
@@ -68,11 +77,13 @@ bool amark_unicode_is_whitespace(uint32_t codepoint)
 
 bool amark_unicode_is_punctuation(uint32_t codepoint)
 {
-    if (codepoint < 0x80u) {
+    if (codepoint < 0x80u)
+    {
         /* P and S in ASCII are exactly the ASCII punctuation characters. */
         return amark_ascii_is_punctuation(codepoint);
     }
-    if (is_out_of_range(codepoint)) {
+    if (is_out_of_range(codepoint))
+    {
         return false;
     }
     return in_ranges(amark_unicode_punct, AMARK_UNICODE_COUNT_OF(amark_unicode_punct), codepoint);

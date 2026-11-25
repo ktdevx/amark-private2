@@ -67,7 +67,8 @@
 AMARK_BEGIN_DECLS
 
 /* The error codes. The values follow the order of AMARK_ERROR_LIST. */
-typedef enum amark_error {
+typedef enum amark_error
+{
 #define AMARK_ERROR_ENUM(name, text) name,
     AMARK_ERROR_LIST(AMARK_ERROR_ENUM)
 #undef AMARK_ERROR_ENUM

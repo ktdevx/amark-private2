@@ -72,7 +72,8 @@ static long read_component(const char **p)
     char *end;
     long value;
 
-    if (**p < '0' || **p > '9') {
+    if (**p < '0' || **p > '9')
+    {
         return -1;
     }
     value = strtol(*p, &end, 10);

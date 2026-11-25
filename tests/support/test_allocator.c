@@ -26,7 +26,8 @@
 
 typedef union block block_t;
 
-typedef struct block_header {
+typedef struct block_header
+{
     size_t magic;
     size_t size;                   /* the size requested by the caller */
     amark_test_allocator_t *owner; /* the test allocator the block is counted in */
@@ -36,7 +37,8 @@ typedef struct block_header {
 
 /* The header, padded so that the memory after it is aligned for any type, as the
  * memory from malloc is. */
-union block {
+union block
+{
     block_header_t h;
     long double ld;
     long long ll;
@@ -52,7 +54,8 @@ static void link_block(block_t *b)
 {
     b->h.prev = NULL;
     b->h.next = newest;
-    if (newest != NULL) {
+    if (newest != NULL)
+    {
         newest->h.prev = b;
     }
     newest = b;
@@ -60,12 +63,16 @@ static void link_block(block_t *b)
 
 static void unlink_block(block_t *b)
 {
-    if (b->h.prev != NULL) {
+    if (b->h.prev != NULL)
+    {
         b->h.prev->h.next = b->h.next;
-    } else {
+    }
+    else
+    {
         newest = b->h.next;
     }
-    if (b->h.next != NULL) {
+    if (b->h.next != NULL)
+    {
         b->h.next->h.prev = b->h.prev;
     }
 }
@@ -73,7 +80,8 @@ static void unlink_block(block_t *b)
 static void add_bytes(amark_test_allocator_t *t, size_t size)
 {
     t->live_bytes += size;
-    if (t->live_bytes > t->peak_bytes) {
+    if (t->live_bytes > t->peak_bytes)
+    {
         t->peak_bytes = t->live_bytes;
     }
 }
@@ -83,9 +91,12 @@ static block_t *find_block(void *ptr, const char *operation)
 {
     block_t *b;
 
-    for (b = newest; b != NULL; b = b->h.next) {
-        if ((void *)(b + 1) == ptr) {
-            if (b->h.magic != BLOCK_MAGIC) {
+    for (b = newest; b != NULL; b = b->h.next)
+    {
+        if ((void *)(b + 1) == ptr)
+        {
+            if (b->h.magic != BLOCK_MAGIC)
+            {
                 NAOS_NOTE("%s of %p", operation, ptr);
                 NAOS_FAIL("test allocator: the header of a live block is corrupted");
             }
@@ -102,11 +113,13 @@ static block_t *find_block(void *ptr, const char *operation)
 /* Counts an allocation call; returns 1 when it must fail. */
 static int inject_failure(void)
 {
-    if (current == NULL) {
+    if (current == NULL)
+    {
         NAOS_FAIL("test allocator: used without amark_test_allocator_activate");
     }
     current->calls++;
-    if (current->fail_at != 0 && current->calls == current->fail_at) {
+    if (current->fail_at != 0 && current->calls == current->fail_at)
+    {
         current->failures++;
         return 1;
     }
@@ -117,11 +130,13 @@ static void *new_block(size_t size, int zero)
 {
     block_t *b;
 
-    if (size > SIZE_MAX - sizeof(block_t)) {
+    if (size > SIZE_MAX - sizeof(block_t))
+    {
         return NULL;
     }
     b = zero ? calloc(1, sizeof(block_t) + size) : malloc(sizeof(block_t) + size);
-    if (b == NULL) {
+    if (b == NULL)
+    {
         return NULL;
     }
     b->h.magic = BLOCK_MAGIC;
@@ -135,7 +150,8 @@ static void *new_block(size_t size, int zero)
 
 static void *test_malloc(size_t size)
 {
-    if (inject_failure()) {
+    if (inject_failure())
+    {
         return NULL;
     }
     return new_block(size, 0);
@@ -143,10 +159,12 @@ static void *test_malloc(size_t size)
 
 static void *test_calloc(size_t count, size_t size)
 {
-    if (inject_failure()) {
+    if (inject_failure())
+    {
         return NULL;
     }
-    if (size != 0 && count > SIZE_MAX / size) {
+    if (size != 0 && count > SIZE_MAX / size)
+    {
         return NULL;
     }
     return new_block(count * size, 1);
@@ -159,16 +177,19 @@ static void *test_realloc(void *ptr, size_t new_size)
     amark_test_allocator_t *owner = b->h.owner;
     size_t old_size = b->h.size;
 
-    if (inject_failure()) {
+    if (inject_failure())
+    {
         return NULL;
     }
-    if (new_size > SIZE_MAX - sizeof(block_t)) {
+    if (new_size > SIZE_MAX - sizeof(block_t))
+    {
         return NULL;
     }
     /* The neighbors point to b, which realloc may move: unlink it first. */
     unlink_block(b);
     moved = realloc(b, sizeof(block_t) + new_size);
-    if (moved == NULL) {
+    if (moved == NULL)
+    {
         link_block(b);
         return NULL;
     }
@@ -217,9 +238,11 @@ static void release_blocks(amark_test_allocator_t *t)
 {
     block_t *b = newest;
 
-    while (b != NULL) {
+    while (b != NULL)
+    {
         block_t *next = b->h.next;
-        if (b->h.owner == t) {
+        if (b->h.owner == t)
+        {
             unlink_block(b);
             b->h.magic = 0;
             free(b);
@@ -244,36 +267,43 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
     memset(&result, 0, sizeof(result));
     result.final_error = AMARK_ERROR_NONE;
 
-    for (fail_at = 1;; fail_at++) {
+    for (fail_at = 1;; fail_at++)
+    {
         amark_error_t error;
         int injected;
 
-        if (fail_at > max_iterations) {
+        if (fail_at > max_iterations)
+        {
             result.truncated = 1;
             break;
         }
         amark_test_allocator_init(&sweep_allocator);
         sweep_allocator.fail_at = fail_at;
         error = set_allocator(amark_test_allocator_activate(&sweep_allocator));
-        if (error != AMARK_ERROR_NONE) {
+        if (error != AMARK_ERROR_NONE)
+        {
             result.final_error = error;
             break;
         }
         error = scenario(context);
         injected = sweep_allocator.failures != 0;
 
-        if (sweep_allocator.live_blocks != 0) {
-            if (result.leak_at == 0) {
+        if (sweep_allocator.live_blocks != 0)
+        {
+            if (result.leak_at == 0)
+            {
                 result.leak_at = fail_at;
             }
             release_blocks(&sweep_allocator);
         }
-        if (!injected) {
+        if (!injected)
+        {
             result.final_error = error;
             break;
         }
         result.iterations++;
-        if (error != AMARK_ERROR_OUT_OF_MEMORY && result.wrong_error_at == 0) {
+        if (error != AMARK_ERROR_OUT_OF_MEMORY && result.wrong_error_at == 0)
+        {
             result.wrong_error_at = fail_at;
         }
     }

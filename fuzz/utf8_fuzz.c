@@ -75,7 +75,8 @@ static void check_decoding(const char *text, size_t size)
     CHECK(amark_utf8_decode(text, 0, NULL) == 0);
     CHECK(amark_utf8_decode_before(text, 0, NULL) == 0);
 
-    while (position < size) {
+    while (position < size)
+    {
         uint32_t codepoint = 0xFFFFFFFFu;
         uint32_t before_codepoint = 0xFFFFFFFFu;
         char encoded[AMARK_UTF8_MAX_LENGTH];
@@ -101,14 +102,18 @@ static void check_decoding(const char *text, size_t size)
 
         encoded_length = amark_utf8_encode(codepoint, encoded);
         CHECK(encoded_length >= 1 && encoded_length <= AMARK_UTF8_MAX_LENGTH);
-        if (is_invalid) {
+        if (is_invalid)
+        {
             CHECK(encoded_length == 3 && memcmp(encoded, replacement_bytes, 3) == 0);
-            if (first_invalid == size) {
+            if (first_invalid == size)
+            {
                 first_invalid = position;
             }
             /* The invalid sequence alone is not valid either. */
             CHECK(!amark_utf8_validate(text + position, length, NULL));
-        } else {
+        }
+        else
+        {
             /* The encoding of a valid character gives back its bytes. */
             CHECK(encoded_length == length);
             CHECK(memcmp(encoded, text + position, length) == 0);
@@ -137,7 +142,8 @@ static void check_decoding(const char *text, size_t size)
     error_offset = 0;
     CHECK(amark_utf8_validate(replaced, replaced_length, &error_offset));
     CHECK(error_offset == replaced_length);
-    if (valid) {
+    if (valid)
+    {
         CHECK(replaced_length == size && memcmp(replaced, text, size) == 0);
     }
     free(replaced);
@@ -149,7 +155,8 @@ static void check_encoding(const uint8_t *data, size_t size)
 {
     size_t i;
 
-    for (i = 0; i + 4 <= size; i += 4) {
+    for (i = 0; i + 4 <= size; i += 4)
+    {
         uint32_t codepoint = (uint32_t)data[i] | ((uint32_t)data[i + 1] << 8) |
                              ((uint32_t)data[i + 2] << 16) | ((uint32_t)data[i + 3] << 24);
         /* Also try the low 21 bits, which hit the Unicode range far more often. */
@@ -158,7 +165,8 @@ static void check_encoding(const uint8_t *data, size_t size)
 
         candidates[0] = codepoint;
         candidates[1] = codepoint & 0x1FFFFFu;
-        for (c = 0; c < 2; c++) {
+        for (c = 0; c < 2; c++)
+        {
             char encoded[AMARK_UTF8_MAX_LENGTH];
             uint32_t decoded = 0xFFFFFFFFu;
             uint32_t expected = is_scalar_value(candidates[c]) ? candidates[c]
@@ -187,7 +195,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     char *original = (char *)malloc(size > 0 ? size : 1);
 
     CHECK(text != NULL && original != NULL);
-    if (size > 0) {
+    if (size > 0)
+    {
         memcpy(text, data, size);
         memcpy(original, data, size);
     }
@@ -195,7 +204,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     CHECK(amark_utf8_decode(NULL, size, NULL) == 0);
     CHECK(amark_utf8_decode_before(NULL, size, NULL) == 0);
     CHECK(amark_utf8_validate(NULL, 0, NULL));
-    if (size > 0) {
+    if (size > 0)
+    {
         size_t error_offset = size;
         CHECK(!amark_utf8_validate(NULL, size, &error_offset));
         CHECK(error_offset == 0);

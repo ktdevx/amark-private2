@@ -17,7 +17,8 @@
 
 #include <naos/naos.h>
 
-typedef struct recorder {
+typedef struct recorder
+{
     int malloc_calls;
     int calloc_calls;
     int realloc_calls;
@@ -99,7 +100,8 @@ NAOS_TEST(default_allocator_works_without_setting)
     NAOS_REQUIRE_NOT_NULL(p);
     NAOS_REQUIRE_NOT_NULL(z);
     memset(p, 0xAB, 16);
-    for (i = 0; i < 32; i++) {
+    for (i = 0; i < 32; i++)
+    {
         NAOS_CHECK_UINT_EQ(0, z[i]);
     }
     p = amark_realloc(p, 64);
@@ -162,7 +164,8 @@ NAOS_TEST(calloc_uses_calloc_fn_and_returns_zeroed_memory)
     NAOS_REQUIRE_NOT_NULL(z);
     NAOS_CHECK_INT_EQ(1, rec.calloc_calls);
     NAOS_CHECK_INT_EQ(0, rec.malloc_calls);
-    for (i = 0; i < 63; i++) {
+    for (i = 0; i < 63; i++)
+    {
         NAOS_CHECK_UINT_EQ(0, z[i]);
     }
     amark_free(z);
@@ -227,10 +230,12 @@ NAOS_TEST(incomplete_allocator_is_rejected)
     void *p;
 
     SET_RECORDING();
-    for (missing = 0; missing < 4; missing++) {
+    for (missing = 0; missing < 4; missing++)
+    {
         amark_allocator_t partial = recording;
 
-        switch (missing) {
+        switch (missing)
+        {
         case 0: partial.malloc_fn = NULL; break;
         case 1: partial.calloc_fn = NULL; break;
         case 2: partial.realloc_fn = NULL; break;

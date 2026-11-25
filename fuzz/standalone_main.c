@@ -26,21 +26,26 @@ static uint8_t *read_file(const char *path, size_t *out_size)
     size_t size = 0;
     size_t capacity = 0;
 
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return NULL;
     }
-    for (;;) {
+    for (;;)
+    {
         size_t count;
-        if (size == capacity) {
+        if (size == capacity)
+        {
             size_t new_capacity = capacity == 0 ? 4096 : capacity * 2;
             uint8_t *grown;
-            if (new_capacity < capacity) {
+            if (new_capacity < capacity)
+            {
                 free(data);
                 fclose(file);
                 return NULL;
             }
             grown = (uint8_t *)realloc(data, new_capacity);
-            if (grown == NULL) {
+            if (grown == NULL)
+            {
                 free(data);
                 fclose(file);
                 return NULL;
@@ -50,9 +55,11 @@ static uint8_t *read_file(const char *path, size_t *out_size)
         }
         count = fread(data + size, 1, capacity - size, file);
         size += count;
-        if (size < capacity) {
+        if (size < capacity)
+        {
             /* A short read: the end of the file or an error. */
-            if (ferror(file)) {
+            if (ferror(file))
+            {
                 free(data);
                 fclose(file);
                 return NULL;
@@ -69,14 +76,17 @@ int main(int argc, char **argv)
 {
     int i;
 
-    if (argc < 2) {
+    if (argc < 2)
+    {
         fprintf(stderr, "usage: %s <input file>...\n", argc > 0 ? argv[0] : "fuzzer");
         return 2;
     }
-    for (i = 1; i < argc; i++) {
+    for (i = 1; i < argc; i++)
+    {
         size_t size = 0;
         uint8_t *data = read_file(argv[i], &size);
-        if (data == NULL) {
+        if (data == NULL)
+        {
             fprintf(stderr, "error: cannot read '%s'\n", argv[i]);
             return 1;
         }
