@@ -194,7 +194,7 @@
   - _Boundary: PublicHeaders, HeaderChecks_
   - _Requirements: 4.9, 9.1, 9.2, 9.3, 9.7_
 
-- [ ] 4.2 CI のワークフローを作る
+- [x] 4.2 CI のワークフローを作る
   - 既定のブランチへの push とプルリクエストで実行し、同じ参照の古い実行を取り消し、読み取りの権限だけを持たせる
   - Linux（GCC、Clang）、macOS（Clang）、Windows（MSVC、MSYS2 UCRT64 の MinGW-w64）× 静的/動的のマトリクス（Linux の GCC は Release も）で、構成・ビルド・全テスト（package ラベルを含む）を行う
   - Linux の Clang と GCC で AddressSanitizer と UndefinedBehaviorSanitizer のジョブと、Linux の Clang でファジングの短時間実行のジョブ（テストを無効にしてファジングだけの構成が Naos なしに通ることも確かめる）を作る
@@ -235,3 +235,4 @@
 - 3.3: パッケージは `lib/cmake/Amark/`（AmarkConfig、AmarkConfigVersion、AmarkTargets）、`lib/pkgconfig/amark.pc`、`share/licenses/amark/LICENSE`。必須のコンポーネントが一致しないときの理由のメッセージは「the requested kind of Amark (components: …) is not installed in <prefix> … the installed kind is "static"」で、3.4 はこれを照合できる
 - 3.5: ファジングターゲットは `amark_add_fuzzer(<name> SOURCES … CORPUS <dir> [LIBRARIES …])`。再生のテスト名は末尾の `_fuzz` を除いた `fuzz.<name>.corpus`（ラベル fuzz）。空のコーパスは構成時のエラー。libFuzzer の実行はこのコンテナでは確かめられない（compiler-rt がない）ので、CI のファジングのジョブで確かめる
 - 4.1: 公開の名前の接頭辞と amark.h の include の順は `lint.public_headers`（cmake/scripts/check_public_headers.cmake、ラベル lint）で検査する。正規の順の一覧は design の PublicHeaders の表とこのスクリプトの 2 か所にあるので、後続の spec が公開ヘッダを加えるときは両方を直す
+- 4.2: CI（.github/workflows/ci.yml）は GitHub で一度も実行していない。macOS、Windows（MSVC、MSYS2）、Clang のサニタイザ、libFuzzer の短時間実行は、最初の実行で確かめる。macOS の brew の pkgconf の競合と、windows-latest の Strawberry Perl の pkg-config に注意する
