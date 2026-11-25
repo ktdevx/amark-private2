@@ -33,9 +33,11 @@
     "." AMARK_VERSION_STRINGIFY(AMARK_VERSION_MINOR) \
     "." AMARK_VERSION_STRINGIFY(AMARK_VERSION_PATCH)
 
-/* Encodes a version as a comparable number: major * 1000000 + minor * 1000 + patch. */
+/* Encodes a version as a comparable number: major * 1000000 + minor * 1000 + patch.
+ * The result has type long. It has no cast, so it can be used in #if, e.g.
+ * #if AMARK_VERSION_NUMBER >= AMARK_VERSION_ENCODE(0, 2, 0). */
 #define AMARK_VERSION_ENCODE(major, minor, patch) \
-    ((long)(major) * 1000000L + (long)(minor) * 1000L + (long)(patch))
+    ((major) * 1000000L + (minor) * 1000L + (patch))
 
 /* The version of these headers as a comparable number, e.g. 1000 for 0.1.0. */
 #define AMARK_VERSION_NUMBER \

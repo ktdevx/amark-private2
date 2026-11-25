@@ -16,6 +16,23 @@
 
 #include "test_check.h"
 
+/* The version macros can be used in #if (no casts in AMARK_VERSION_ENCODE). */
+#if AMARK_VERSION_NUMBER != AMARK_VERSION_ENCODE(AMARK_VERSION_MAJOR, AMARK_VERSION_MINOR, AMARK_VERSION_PATCH)
+#error "AMARK_VERSION_NUMBER does not match AMARK_VERSION_ENCODE in #if"
+#endif
+#if AMARK_VERSION_ENCODE(0, 999, 999) >= AMARK_VERSION_ENCODE(1, 0, 0)
+#error "AMARK_VERSION_ENCODE does not order versions in #if"
+#endif
+
+NAOS_TEST(number_is_usable_in_preprocessor)
+{
+#if AMARK_VERSION_NUMBER >= AMARK_VERSION_ENCODE(0, 1, 0)
+    NAOS_PASS();
+#else
+    NAOS_FAIL("AMARK_VERSION_NUMBER is below 0.1.0 in #if");
+#endif
+}
+
 NAOS_TEST(number_matches_header)
 {
     NAOS_CHECK_INT_EQ(AMARK_VERSION_NUMBER, amark_version_number());
@@ -76,6 +93,7 @@ NAOS_TEST(string_is_built_from_components)
 }
 
 NAOS_SUITE(version,
+    NAOS_ADD_TEST(number_is_usable_in_preprocessor),
     NAOS_ADD_TEST(number_matches_header),
     NAOS_ADD_TEST(string_matches_header),
     NAOS_ADD_TEST(number_is_built_from_components),

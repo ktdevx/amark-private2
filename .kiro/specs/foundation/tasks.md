@@ -223,7 +223,7 @@
 ## Implementation Notes
 - 1.2: 版の読み取りは `cmake/AmarkVersion.cmake` の `amark_read_version(<header>)`。出力は `AMARK_VERSION{,_MAJOR,_MINOR,_PATCH}`、`AMARK_SOVERSION`、`AMARK_PACKAGE_COMPATIBILITY`（SameMinorVersion/SameMajorVersion）。後続（1.4、3.3）はこの名前を使う
 - 1.2: `version.h` の `amark_version_number`/`amark_version_string` の宣言、`export.h` の include、宣言の囲みは 1.4 で追加する
-- 1.2: 設計どおりの `(long)` キャストのため、`AMARK_VERSION_NUMBER` は `#if` では使えない（C の定数式としては使える）。設計の改訂の要否は人の判断に委ねる
+- 1.2: `AMARK_VERSION_ENCODE` は `(long)` のキャストをやめ、`L` 接尾辞だけで long にした（設計も改訂）。`AMARK_VERSION_NUMBER` は `#if` でも使える
 - 1.3: `cmake/AmarkCompilerOptions.cmake` は `project()` とオプションの宣言の後、ターゲットを作る前に include する（サニタイザはディレクトリ単位で、include 以降のターゲットにだけ効く）。ターゲットには `amark_target_defaults(<target>)` を呼ぶ
 - 1.3: このコンテナの clang にはサニタイザのランタイムがない。サニタイザの成功経路は gcc で確かめる
 - 1.4: 最上位の CMakeLists.txt の `include(AmarkTesting OPTIONAL)` と `if(EXISTS tests/CMakeLists.txt)` の囲みは暫定。1.5 で外す。`include(AmarkFuzz OPTIONAL)` と `if(EXISTS fuzz/CMakeLists.txt)` は 3.5 で外す。この目的に限り、1.5 と 3.5 は最上位の CMakeLists.txt を編集してよい
