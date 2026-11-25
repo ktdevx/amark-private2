@@ -51,6 +51,8 @@
 - ソースの扱い（追加、取り込み時の複製）の変更 → `block-parser`、`markdown-renderer`
 - 構文セットの所有の受け渡しの規則（受け付ける条件、解放の順序）、子をまとめた取り込みの規則（検査の順、全か無か、編集の記録）の変更 → `block-parser`（便宜の関数と断片のパース）と、同じ関数を使う上位の spec
 - ダンプの形式の変更 → ダンプで期待値を書くすべての spec のテスト
+- 下流の spec のスロットの種類の追加・番号の変更 → この spec の範囲の表（右の列）と `extension.h` の注記
+- `foundation` の `amark.h` の正規の include の順の変更 → この spec（`amark.h` への追加の位置）
 
 ## Architecture
 
@@ -176,7 +178,7 @@ fuzz/
 ```
 
 ### Modified Files
-- `include/amark/amark.h` — `unicode.h` の後に `node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h` をこの順で追加する。
+- `include/amark/amark.h` — `foundation` の design が定める `amark.h` の正規の include の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）の「木のヘッダ」の位置に、`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h` をこの順で追加する。
 - `src/CMakeLists.txt` — `amark_objects` に `src/tree/*.c` を追加する。
 - `tests/CMakeLists.txt` — INTERFACE ライブラリ `amark_test_tree`（INTERFACE のソース `support/tree_builder.c`、インクルード `support/`）を定義し、`add_subdirectory(tree)` を追加する。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(tree_edit SOURCES tree_edit_fuzz.c CORPUS corpus/tree_edit)` を追加する。
@@ -290,7 +292,7 @@ graph TB
 - ノードを受け取る関数で、ノードが別の文書のもの、または型が合わないときは `AMARK_ERROR_INVALID_ARGUMENT`。
 
 ### 公開ヘッダの構成
-- 依存の順（左は右を include しない）：`node.h` → `document.h` → `token.h` → `iterator.h` → `dump.h` → `extension.h`。`amark.h` はこの順に include する。
+- 依存の順（左は右を include しない）：`node.h` → `document.h` → `token.h` → `iterator.h` → `dump.h` → `extension.h`。`amark.h` は、`foundation` の design が定める正規の include の順の「木のヘッダ」の位置で、この順に include する（他の spec のヘッダとの前後は `foundation` の順に従い、この spec では定めない）。
 - `node.h` は `status.h`、`<stddef.h>`、`<stdint.h>`、`<stdbool.h>` を include し、次の前方宣言を 1 か所で持つ（C99 は同じ typedef の重複を許さないため、他のヘッダは繰り返さない）。
   ```c
   typedef struct amark_document amark_document;
@@ -319,15 +321,15 @@ graph TB
 - 凍結：すべての型の名前の重複を検査し（重複は `AMARK_ERROR_INVALID_ARGUMENT`、構文セットは凍結されないまま）、拡張の型に 256 から順に識別子を割り当て、名前の索引とスロットの索引（種類ごとに構文セットの順）を作る。凍結後の変更は `AMARK_ERROR_INVALID_STATE`。
 - 記述子と拡張は構文セットより長く生きること（通常は静的な記憶域）。構文セットはそれを使うすべての文書より長く生きること。凍結した構文セットは読み取りだけなので、複数のスレッドから同時に使える。
 - `amark_syntax_set_core()` は、凍結済みで `amark.core` だけを持つ静的な `const` の構文セットを返す。解放しても何もしない。内部の印（`is_static`）を持ち、`amark_document_take_syntax_set` はこの印で静的な構文セットを拒否する（1.11）。
-- スロットの種類の番号の範囲（8.9、8.13）：0 は不正。`0x0001`–`0xFFFF` は Amark の spec が使い、spec ごとに次の表の範囲を割り当てる。各 spec は自分の範囲の中で、種類の名前と値を `extension.h` に追記する。表にない Amark の範囲（`0x0500`–`0xFFFF`）は将来の spec のために予約し、割り当てるときはこの spec を更新する。`0x10000` 以上は利用者の独自のスロット。レジストリは表を強制しない（`kind` が 0 でなければ受け付ける）。表は番号の衝突を spec の間で防ぐための約束である。
+- スロットの種類の番号の範囲（8.9、8.13）：0 は不正。`0x0001`–`0xFFFF` は Amark の spec が使い、spec ごとに次の表の範囲を割り当てる。各 spec は自分の範囲の中で、種類の名前と値を `extension.h` に追記する。表にない Amark の範囲（`0x0500`–`0xFFFF`）は将来の spec のために予約し、割り当てるときはこの spec を更新する。`0x10000` 以上は利用者の独自のスロット。レジストリは表を強制しない（`kind` が 0 でなければ受け付ける）。表は番号の衝突を spec の間で防ぐための約束である。表の右の列は、各 spec の承認済みの design が定める種類の名前と値の写しである（定義の正本は各 spec の design。種類を足す・変える spec は、この表と `extension.h` の注記も合わせて更新する）。
 
 | 範囲 | 割り当て先 | この時点で定義されている種類 |
 |------|------------|------------------------------|
 | `0x0001`–`0x00FF` | `syntax-tree`（`amark.core` とレジストリ） | なし（予約） |
-| `0x0100`–`0x01FF` | `block-parser` | `block-parser` の design が定める |
-| `0x0200`–`0x02FF` | `inline-parser` | `inline-parser` の design が定める |
+| `0x0100`–`0x01FF` | `block-parser` | `AMARK_SLOT_BLOCK_SYNTAX`（`0x0100`）、`AMARK_SLOT_PARAGRAPH_CONSUMER`（`0x0101`）、`AMARK_SLOT_POSTPROCESS`（`0x0102`）、`AMARK_SLOT_PARSE_STATE`（`0x0103`） |
+| `0x0200`–`0x02FF` | `inline-parser` | `AMARK_SLOT_INLINE_SYNTAX`（`0x0201`）、`AMARK_SLOT_INLINE_DELIMITER`（`0x0202`）、`AMARK_SLOT_INLINE_BRACKET`（`0x0203`）、`AMARK_SLOT_INLINE_TEXT_SCANNER`（`0x0204`）、`AMARK_SLOT_INLINE_NODE_TRAITS`（`0x0205`）、`AMARK_SLOT_INLINE_SPECIAL`（`0x0206`） |
 | `0x0300`–`0x03FF` | `html-renderer` | `AMARK_SLOT_HTML_NODE`（`0x0301`）、`AMARK_SLOT_HTML_HOOKS`（`0x0302`） |
-| `0x0400`–`0x04FF` | `markdown-renderer` | `markdown-renderer` の design が定める |
+| `0x0400`–`0x04FF` | `markdown-renderer` | `AMARK_SLOT_MARKDOWN_NODE`（`0x0401`）、`AMARK_SLOT_MARKDOWN_HOOKS`（`0x0402`） |
 | `0x0500`–`0xFFFF` | 将来の Amark の spec（予約） | — |
 | `0x10000` 以上 | 利用者 | — |
 
@@ -396,10 +398,16 @@ typedef struct amark_slot_header {
 #define AMARK_SLOT_KIND_HTML_RENDERER_LAST      0x03FFu
 #define AMARK_SLOT_KIND_MARKDOWN_RENDERER_FIRST 0x0400u   /* markdown-renderer */
 #define AMARK_SLOT_KIND_MARKDOWN_RENDERER_LAST  0x04FFu
-/* 0x0100–0x01FF：block-parser（block-parser が追記する） */
-/* 0x0200–0x02FF：inline-parser（inline-parser が追記する） */
-/* 0x0300–0x03FF：html-renderer（html-renderer が追記する） */
-/* 0x0400–0x04FF：markdown-renderer（markdown-renderer が追記する） */
+/* 0x0100–0x01FF：block-parser（block-parser が追記する）
+     AMARK_SLOT_BLOCK_SYNTAX 0x0100、AMARK_SLOT_PARAGRAPH_CONSUMER 0x0101、
+     AMARK_SLOT_POSTPROCESS 0x0102、AMARK_SLOT_PARSE_STATE 0x0103 */
+/* 0x0200–0x02FF：inline-parser（inline-parser が追記する）
+     AMARK_SLOT_INLINE_SYNTAX 0x0201、AMARK_SLOT_INLINE_DELIMITER 0x0202、AMARK_SLOT_INLINE_BRACKET 0x0203、
+     AMARK_SLOT_INLINE_TEXT_SCANNER 0x0204、AMARK_SLOT_INLINE_NODE_TRAITS 0x0205、AMARK_SLOT_INLINE_SPECIAL 0x0206 */
+/* 0x0300–0x03FF：html-renderer（html-renderer が追記する）
+     AMARK_SLOT_HTML_NODE 0x0301、AMARK_SLOT_HTML_HOOKS 0x0302 */
+/* 0x0400–0x04FF：markdown-renderer（markdown-renderer が追記する）
+     AMARK_SLOT_MARKDOWN_NODE 0x0401、AMARK_SLOT_MARKDOWN_HOOKS 0x0402 */
 
 typedef struct amark_extension {
     size_t struct_size;
@@ -522,6 +530,7 @@ enum {
   - 成功の後：構文セットは文書のものになる。呼び出し側は `amark_syntax_set_free` を呼んではならない。凍結済みなので内容は変わらない。
   - 共有：同じ構文セットを使う他の文書があってよいが、それらを所有する文書より先に解放する（構文セットは使うすべての文書より長く生きる、という既存の規則の言い換え。破ったときの振る舞いは規定しない）。
   - 確保をしないので、メモリ不足で失敗しない。編集の記録とは無関係。
+  - `set` の引数は `const` でない（所有権の受け渡しで解放の責任が移るため。`const` にはしない）。`amark_document_syntax_set` の戻り値や `const amark_syntax_set *` の引数など、`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストで渡さない）。渡せるのは、構文セットを自分で作り `const` でないポインタを持ち続けている呼び出し側（例：`block-parser` の便宜の関数）だけである。
 - ソース：識別子は 0 から登録の順。`add_source` は複製して登録する（長さ 0 も可）。`append_source` は末尾に追加し、既存のバイトの位置を変えない（返したポインタは無効になりうる）。各ソースは行の先頭のオフセットの索引を持ち、追加のたびに更新する（チャンクの境目の CRLF を 1 つの改行として扱う）。
 - 位置：`offset`（0 ≤ offset ≤ 長さ）を 1 から数える行と列（バイト単位）に変換する。行の区切りは LF、CR、CRLF。範囲外は `AMARK_ERROR_INVALID_ARGUMENT`。
 
@@ -549,7 +558,8 @@ AMARK_API void amark_document_set_edit_tracking(amark_document *document, bool e
 AMARK_API bool amark_document_edit_tracking(const amark_document *document);
 
 /* 文書が使っている、ヒープに作られた構文セットの所有権を受け取る。成功したら、amark_document_free が
-   ノードとソースの後でこの構文セットを解放する。失敗したら所有権は呼び出し側に残る */
+   ノードとソースの後でこの構文セットを解放する。失敗したら所有権は呼び出し側に残る。
+   const のポインタしか持たない呼び出し側は渡さない（const を外すキャストをしない） */
 AMARK_API amark_status amark_document_take_syntax_set(amark_document *document, amark_syntax_set *set);
 ```
 - `data` が NULL で `length` が 0 なら空のソースとして扱う。`data` が NULL で `length` が 0 でなければ `AMARK_ERROR_INVALID_ARGUMENT`。

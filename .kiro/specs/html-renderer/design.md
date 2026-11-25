@@ -28,6 +28,7 @@
 - 組み込みの HTML 出力の構文拡張 `amark.core.html`（名前、19 のノード型のスロット、公開の取得関数）と、その実装 `src/syntax/html_core.c`、`html_blocks.c`、`html_inlines.c`
 - 組み込みの HTML 出力の登録の規則（下記「組み込みの HTML 出力の登録の規則」）
 - `tests/html/` のテスト、テスト専用の HTML の検証用拡張 `tests/html/support/gfm_html_ext.{h,c}`（INTERFACE ライブラリ `amark_test_html_gfm`）、`fuzz/html_render_fuzz.c`
+- ケースのデータからテストを生成する共有のスクリプト `tests/html/gen_html_cases.cmake` と、そのケースの形式・引数・検査関数の形の契約（下記「HtmlTests / HtmlFuzz」）。`markdown-renderer` が同じスクリプトを再利用する
 
 ### Out of Boundary
 - `src/syntax/` の構文のファイル（`atx_heading.c` など）と、CommonMark の構文セットの構築関数。それらの作成と、構築関数への `amark.core.html` の追加は、それを所有する spec（`block-parser`）が行う
@@ -49,6 +50,9 @@
 - `amark.core.html` の名前・取得関数・登録の規則の変更 → `block-parser`（構文セットの構築関数）
 - `render.h` の型の変更 → `markdown-renderer`
 - `syntax-tree` のスロットの見出し、構文セットの列挙、ソース上の範囲の API の変更 → この spec
+- `gen_html_cases.cmake` のケースの形式（見出し・区切りの行、オプションの語の扱い）、引数（`CHECK=`、`INCLUDE=`）、生成するテストが呼ぶ検査関数の形の変更 → `markdown-renderer`（同じスクリプトで `tests/markdown/data/*_cases.txt` を生成する）
+- `amark_test_html_gfm` の依存（Naos に依存しないこと）の変更 → `block-parser`、`inline-parser`、`markdown-renderer` のファジングターゲット（`amark_test_gfm` を通して間接にリンクする）
+- `foundation` の `amark.h` の正規の include の順の変更 → この spec（`amark.h` への追加の位置）
 
 ## Architecture
 
@@ -144,7 +148,7 @@ tests/html/
 │   ├── html_test_support.c
 │   ├── gfm_html_ext.h        # 検証用のノード型の記述子と HTML のスロット（表、取り消し線、タスク項目、脚注、タグフィルタ）
 │   └── gfm_html_ext.c
-├── gen_html_cases.cmake      # data/*_cases.txt から Naos のテストを生成する
+├── gen_html_cases.cmake      # data/*_cases.txt から Naos のテストを生成する（共有。markdown-renderer も使う。形式は契約）
 ├── data/block_cases.txt      # ブロックの組み込みの型の S 式と期待する HTML の組（cmark の html.c の各分岐）
 ├── data/inline_cases.txt     # インラインの組み込みの型の S 式と期待する HTML の組
 ├── render_entry_test.c       # 入口、出力先、失敗の扱い、決定性、部分木と切り離したノード
@@ -163,7 +167,7 @@ fuzz/
 ```
 
 ### Modified Files
-- `include/amark/amark.h` — `extension.h` の後に `render.h`、`html.h` をこの順で追加する。
+- `include/amark/amark.h` — `foundation` の design が定める `amark.h` の正規の include の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）の「`render.h`、`html.h`」の位置に、この 2 つをこの順で追加する。
 - `include/amark/extension.h` — スロットの種類の番号の節に `AMARK_SLOT_HTML_NODE`（0x0301）、`AMARK_SLOT_HTML_HOOKS`（0x0302）と、この spec の範囲（0x0300–0x03FF）の注記を追記する。
 - `src/CMakeLists.txt` — `amark_objects` に `src/render/html_*.c` と `src/syntax/html_*.c` を追加する。
 - `tests/CMakeLists.txt` — `add_subdirectory(html)` を追加する。
@@ -565,6 +569,7 @@ extern const amark_html_node_slot amark__html_slot_document;   /* … 19 の型�
 
 **Responsibilities & Constraints**
 - INTERFACE ライブラリ `amark_test_html_gfm`（INTERFACE のソース `support/gfm_html_ext.c`、インクルード `support/`）。公開 API（`html.h`、`node.h`、`extension.h`）だけを使い、`src/` を include しない。
+- `amark_test_html_gfm` は Naos に依存しない（Naos のヘッダを include せず、Naos をリンクしない）。`amark_test_parse_gfm` と `amark_test_gfm` を通してファジングターゲットに間接にリンクされるため、`foundation` の規則（ファジングターゲットが使うテストの補助ライブラリは Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON のとき定義する）に従い、`tests/html/CMakeLists.txt` はこのライブラリを `AMARK_FUZZ` だけが ON の構成でも定義する。Naos を使う照合の補助（`html_test_support`、`AMARK_CHECK_HTML`）は別のファイルに置き、このライブラリに含めない。
 - ノード型（名前は `test.` で始まる）と型のデータ、HTML のスロット、拡張の記述子を、部品ごとに公開する（`inline-parser` がパースのスロットと組み合わせて再利用できる）。
 
 | 部品 | ノード型（データ） | 出力 |
@@ -581,6 +586,11 @@ extern const amark_html_node_slot amark__html_slot_document;   /* … 19 の型�
 #### HtmlTests / HtmlFuzz
 - 内容は Testing Strategy を参照する。`tests/html/CMakeLists.txt` は `amark_add_test` でテストごとの実行ファイルを、`amark_add_generated_tests(html_builtin GENERATOR gen_html_cases.cmake DATA data/block_cases.txt data/inline_cases.txt SOURCES support/html_test_support.c …)` で生成テストを登録する（すべて公開 API だけを使い、`INTERNAL` を要さない）。
 - `data/*_cases.txt` の形式：`### <name> [<flag>...]` の行、S 式の行、`---` の行、期待する HTML の行、`===` の行。フラグは `unsafe`、`hardbreaks`、`nobreaks`。CommonMark の spec.txt の文章は写さず、この spec の表から作る。
+- **共有のケースの生成スクリプト（契約）**：`gen_html_cases.cmake` は HTML に固有の知識を持たない汎用のスクリプトとして作り、`markdown-renderer` が `${PROJECT_SOURCE_DIR}/tests/html/gen_html_cases.cmake` をそのまま `GENERATOR` に指定して再利用する（`gen_md_cases.cmake` のような別の実装は作らない）。次をこのスクリプトの契約とし、変更は Revalidation Triggers に従う。
+  - 形式：ケースは `### <name> [<option>...]` の見出しの行で始まり、S 式の行（1 行以上）、`---` の行、期待する出力の行（0 行以上）、`===` の行で終わる。見出しより前の行と、ケースの間の空行は読み飛ばす。`<name>` は `[A-Za-z0-9_]+` で、ファイルの中で重複しない（重複と形の崩れは生成の失敗にする）。期待する出力は、区切りの間の行を LF でつないだバイト列（最後の行の後にも LF）で、`AmarkTestGen.cmake` の 16 進の扱いでバイトを失わない。
+  - オプション：見出しの `<name>` の後の語は、スクリプトが解釈せず、空白 1 つでつないだ文字列として検査関数に渡す（HTML のフラグ `unsafe` や Markdown の `bullet=*` のような `key=value` のどちらも同じに扱う）。未知の語の拒否は検査関数の責任。
+  - 引数（`amark_add_generated_tests` の `ARGS`）：`CHECK=<C の関数名>`（必須ではなく、既定は `html_test_check_case`）、`INCLUDE=<ヘッダ名>`（既定は `html_test_support.h`）。
+  - 生成するテスト：ケースごとに 1 つの Naos のテスト `<name>` を作り、`#include "<INCLUDE>"` の後で `CHECK(name, options, sexpr, sexpr_length, expected, expected_length)`（すべて `const char *` と `size_t`、文字列は NUL 終端でもある）を呼ぶ。照合と失敗の報告は検査関数が行う。この spec の検査関数 `html_test_check_case` は `html_test_support.c` に置き、オプションを `AMARK_HTML_*` のフラグに変換して `AMARK_CHECK_HTML` と同じ照合をする。
 
 ## Data Models
 

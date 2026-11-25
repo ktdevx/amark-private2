@@ -134,6 +134,15 @@
 - 手で組み立てた木を既定の構文セットで出力すると何も出ない — 要件 9.4 と API の文書で明示し、テストでも確かめる。
 - CommonMark spec 全体との一致はこの spec では確かめられない — 組み込みの出力の表を cmark の `html.c` と 1 対 1 で照合する手で組み立てた木のテストを持ち、残りは `inline-parser` の準拠テストで確かめる（不具合はこの spec に戻して直す）。
 
+## Revision Notes
+
+### 2026-11-25：spec 横断のレビュー r1（cross-spec review r1）
+- **Context**：全 spec を横断したレビューの指摘のうち、この spec に関わるもの（#7、#10、#1 の間接の影響）を反映した。承認済みの要件の受け入れ基準は変えず、設計とタスクの記述を補う。
+- **#7 `amark.h` の include の順**：`amark.h` は `foundation` が所有し、正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）を定める。「`extension.h` の後に追加する」という書き方をやめ、正規の順の「`render.h`、`html.h`」の位置に置く、という参照に改めた（Modified Files、タスク 1.1）。正規の順の変更を Revalidation Triggers に加えた。
+- **#10 ケースの生成スクリプトの共有**：`markdown-renderer` は、`data/*_cases.txt`（S 式と期待する出力の組）を同じ形式で持ち、別の生成スクリプト（`gen_md_cases.cmake`）を書く予定だった。重複を避けるため、`gen_html_cases.cmake` を HTML に固有の知識を持たない共有のスクリプトとし、`markdown-renderer` がそのまま再利用する。再利用のため、(1) 見出しのオプションの語をスクリプトで解釈せず文字列として検査関数に渡す、(2) 検査関数とヘッダを `CHECK=`、`INCLUDE=` で選べる、(3) 生成するテストが呼ぶ検査関数の形を固定する、を設計に契約として書き、変更は `markdown-renderer` の再検証の契機とした（Boundary の This Spec Owns、Revalidation Triggers、HtmlTests、タスク 1.2）。検討した代替：`tests/support/` へ移す案は、この spec が先に実装され、置き場所の変更が他の spec の Modified Files にも波及するため採らなかった（場所は `tests/html/` のまま、契約で共有する）。
+- **#1 ファジングとテストの補助ライブラリ（間接）**：`amark_test_html_gfm` は `amark_test_parse_gfm`・`amark_test_gfm` を通してファジングターゲットに間接にリンクされる。`foundation` が定める規則（ファジングが使うテストの補助ライブラリは Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON のとき定義する）に合わせ、`amark_test_html_gfm` が Naos に依存しないことと、`AMARK_FUZZ` だけが ON の構成でも定義することを明記した（GfmHtmlExt、タスク 4.1）。
+- **Implications**：公開 API・要件・タスクの範囲は変わらない。承認は維持する。`syntax-tree` のスロットの種類の範囲の表（#9）は、この spec の `0x0301`、`0x0302` と一致する。
+
 ## References
 - cmark 0.31.1 `src/html.c`、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re` — 出力とエスケープと危険な URL の規則
 - CommonMark Spec 0.31.2 — 準拠の対象

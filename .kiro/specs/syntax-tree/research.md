@@ -195,6 +195,13 @@
 - **スロットの種類の番号の範囲の表（8.13）**：`html-renderer` は `0x0301`、`0x0302`、`block-parser` は `0x0100` 台を使う。各 spec が独立に番号を選ぶと衝突しうるため、Amark の範囲（`0x0001`–`0xFFFF`）を spec ごとに 256 ずつ割り当てる表を `extension.h` に置いた。この spec 自身はスロットの種類を定義しないが、レジストリが将来使う可能性のために `0x0001`–`0x00FF` を予約する。レジストリは表を強制しない（利用者の範囲 `0x10000` 以上と同じく、`kind` が 0 でなければ受け付ける）。表は spec の間の約束であり、範囲の重なりはテストで確かめる。
 - **Implications**：Revalidation Triggers に、所有の受け渡しと子をまとめた取り込みの規則の変更、範囲の表の変更を加えた。下流の spec は、この時点の `block-parser` と `html-renderer` の design の記述（関数の形、エラーの規則、番号の範囲）と一致する。
 
+### 2026-11-25：spec 横断のレビュー r1（cross-spec review r1）
+- **Context**：全 spec を横断したレビューで、この spec に関わる指摘が 3 つあった（#7、#8、#9）。承認済みの要件・設計・タスクの意味は変えず、記述をそろえる修正だけを行う。
+- **#9 スロットの種類の範囲の表が古い**：表の右の列が「各 spec の design が定める」のままだった。承認済みの下流の design に合わせ、具体的な種類を記した：`block-parser` 0x0100–0x0103（`BLOCK_SYNTAX`、`PARAGRAPH_CONSUMER`、`POSTPROCESS`、`PARSE_STATE`）、`inline-parser` 0x0201–0x0206（`INLINE_SYNTAX`、`INLINE_DELIMITER`、`INLINE_BRACKET`、`INLINE_TEXT_SCANNER`、`INLINE_NODE_TRAITS`、`INLINE_SPECIAL`）、`html-renderer` 0x0301–0x0302（`HTML_NODE`、`HTML_HOOKS`）、`markdown-renderer` 0x0401–0x0402（`MARKDOWN_NODE`、`MARKDOWN_HOOKS`）。`extension.h` の範囲の節の注記にも同じ一覧を置き、タスク 1.1 に反映した。定義の正本は各 spec の design のままとし、種類を足す・変える spec が表と注記を更新することを Revalidation Triggers に加えた。要件 8.13 の文言は変えない（表を公開ヘッダに置く、という要件のまま）。
+- **#7 `amark.h` の include の順**：`amark.h` は `foundation` が所有し、正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）を定める。この spec の「`unicode.h` の後に追加する」という書き方をやめ、`foundation` の正規の順の「木のヘッダ」の位置に 6 つのヘッダを置く、という参照に改めた（File Structure Plan、公開ヘッダの構成、タスク 1.1）。正規の順の変更を Revalidation Triggers に加えた。
+- **#8 `amark_document_take_syntax_set` の `const`**：`block-parser` の `amark_parser_new(const amark_syntax_set *)` から非 `const` の `take` を呼ぶと `const` を外すキャストが要る、という指摘。所有権の受け渡し（解放の責任の移動）は `const` のポインタでは表せないため、この関数の引数は非 `const` のままとする。設計に「`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストをしない）」と明記した。`const` でないポインタを持つ経路だけで受け渡すよう直すのは `block-parser` の側で行う。
+- **Implications**：API・要件の受け入れ基準・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則
