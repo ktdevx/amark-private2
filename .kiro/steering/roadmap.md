@@ -1,0 +1,75 @@
+# Roadmap
+
+## Overview
+Amark は、Markdown テキストと構文木を相互変換する C99 ライブラリである。CommonMark に完全準拠したパース、構文木の参照と編集、HTML へのレンダリング、Markdown への書き戻しを提供する。MIT ライセンスで、copyright は The Amark Authors とする。静的ライブラリと動的ライブラリの両方を、Windows・Linux・macOS 向けに提供する。
+
+中核となる設計判断は 2 つある。
+
+1. **構文定義駆動エンジン**：パーサは汎用的なブロック/インラインのエンジンとして作る。CommonMark の各構文（見出し、リスト、強調、リンクなど）も「組み込み拡張」として、利用者向けと同じ公開構文定義 API の上に実装する。こうすることで、GFM などの方言を利用者が拡張の組み合わせだけで完全に表現できることを構造的に保証する。
+2. **ロスレス構文情報を持つ AST**：木は意味を表す AST（段落・強調・リンクなど）とし、編集 API はこの AST に対して素直に使えるようにする。各ノードには元の表記（マーカー文字、空白・改行・インデント、コンテナの接頭辞、エスケープ表記、ソース上の位置）を構文トークンとして持たせ、編集を追跡する。Markdown への書き戻しでは、編集していない部分は元の表記を出し、編集した部分は、編集後の木と同じ意味の正しい Markdown として出力する。これにより「無編集の往復ではバイト単位で同じ出力」と「翻訳などで置換した部分だけが変わる」を両立させる。追跡の粒度、エスケープの方式、区切りの選び直しなどの具体的な仕組みは、各 spec の design で決める。
+
+## Approach Decision
+- **Chosen**：構文定義駆動エンジン ＋ ロスレス構文情報付き AST ＋ 編集の追跡による局所的な Markdown 書き戻し
+- **Why**：
+  - CommonMark も拡張 API の上に乗せるため、拡張 API が中核の構文と同じ表現力を持つ。後付けのフックで方言を足す方式で起きがちな歪みを避けられる。
+  - 主な用途として、組み込み側での翻訳のためのテキスト置換を想定している。この用途には「意味単位で編集でき、触っていない部分は元の表記を保つ」ことが必要で、ロスレス構文情報付き AST が最も適している。
+- **Rejected alternatives**：
+  - 固定パーサ＋フック（cmark-gfm 方式）：実績はあるが、表や脚注のように中核の処理に割り込む構文を後付けすると歪みが出る。「方言を拡張の組み合わせだけで完全に表現する」という要件と相性が悪い。
+  - 正規化のみの AST（cmark 方式）：往復で同じ出力が得られない。
+  - 完全ロスレス CST：往復の保証は最も強いが、編集 API が具象構文を意識しなければならず、置換の用途で扱いにくい。実装量もおよそ 2 倍になる。
+  - GFM を配布する参照拡張として実装する案：配布物としての GFM は不要とする。拡張 API の表現力は、テスト内にだけ置く検証用拡張で担保する（後述）。
+
+## Scope
+- **In**：
+  - CommonMark の全構文のパース（CommonMark spec テストで 100% 準拠）
+  - 公開の構文定義 API（ブロック、インライン、文書の後処理、レンダラのフック）と、構文セットを組み合わせる仕組み（組み込み構文の無効化や置き換えを含む）
+  - 構文木の参照・走査・編集 API
+  - HTML レンダラ（CommonMark 互換の出力、安全モード）
+  - Markdown レンダラ（無編集なら元とバイト単位で同じ出力、編集した部分は意味を保った正しい Markdown として出力、編集していない部分の表記は変えない）
+  - CMake ビルド（静的/動的ライブラリ、install、find_package、pkg-config）、Naos によるテスト、3 OS の CI/CD、サニタイザ、ファジング
+- **Out**：
+  - GFM などの方言そのものを配布物として実装すること（拡張 API で実現できることの検証にとどめる）
+  - CLI ツール（必要になれば後のフェーズで追加する）
+  - Markdown と HTML 以外の出力形式（拡張のレンダラ API で利用者が実装できるようにはする）
+  - C 以外の言語へのバインディング
+
+## Constraints
+- **言語**：C99。コンパイラ固有の拡張は使わない（GCC、Clang、MSVC、MinGW-w64 でビルドできること）。
+- **ビルド**：CMake。Naos が 3.21 以上を要求するため、最低バージョンは 3.21 とする。
+- **成果物**：静的ライブラリと動的ライブラリ。公開シンボルはエクスポートマクロで管理し、ABI を安定させるため公開型は不透明型を基本とする。
+- **テスト**：[Naos](https://github.com/vabelorg/naos)。v0.x は破壊的変更がありうるため、FetchContent で特定のタグ（現時点では v0.4.0）に固定する。CTest に統合する。
+- **ライセンス**：MIT、Copyright (c) The Amark Authors。CommonMark の spec.txt（CC-BY-SA 4.0）はテストデータとしてだけ使い、ライブラリ本体には含めない。
+- **CI/CD**：GitHub Actions。Linux（GCC、Clang）、macOS（Clang）、Windows（MSVC、MinGW）でビルドとテストを行う。サニタイザ（ASan/UBSan）ジョブを持つ。タグを付けたときにリリース成果物を作る。
+- **API 規約**：シンボル接頭辞は `amark_` / `AMARK_`、公開ヘッダは `include/amark/` に置く。メモリ確保は差し替え可能なアロケータを経由させる。入力は UTF-8 とする。
+
+## Boundary Strategy
+- **Why this split**：
+  - 最終的な姿は「構文拡張」を中心に組み立てる。1 つの構文拡張は「ノード型の定義」「パースの規則」「HTML 出力の処理」「Markdown 出力の処理」をまとめた単位であり、CommonMark の各構文もこの単位で実装する。
+  - spec は、この拡張単位の**各スロット（パース、HTML 出力、Markdown 出力）の実行エンジンとインタフェース**ごとに分ける。各 spec は、CommonMark の構文のうち自分のスロットに当たる部分を実装する責任を持つ。
+  - ブロックとインラインの分割は、CommonMark 自体の 2 段階のパース（ブロック構造を確定してから、インラインを解析する）に沿っている。この分割は不自然な境界ではない。
+  - 拡張の登録の仕組み（レジストリ、ノード型の ID、構文セット）は、すべてのスロットが共有する土台なので `syntax-tree` が持つ。各スロットのインタフェースは、それを実行する spec が定義する。
+- **Shared seams to watch**：
+  - **構文トークンのモデル**（`syntax-tree` が定義し、パーサが作り、`markdown-renderer` が使う）：ソース範囲の参照、コンテナの接頭辞（`> `、リストのインデント）の持ち方、遅延継続行（lazy continuation）、タブの展開、CRLF、NUL 文字の置換、BOM。パーサの spec を設計するとき、`markdown-renderer` が要求することを必ず確認する。
+  - **編集済みの追跡**：どの粒度で編集済みとみなすか（ノード単位か、テキスト範囲単位か）と、親への伝播の仕方。`syntax-tree` で決め、`markdown-renderer` で検証する。
+  - **拡張レジストリと各スロットのインタフェース**：パーサとレンダラの spec がスロットを足すとき、レジストリの API を勝手に変えない。変更が必要になったら `syntax-tree` の spec を更新する（spec 境界を守るために不自然な回避策をとらない）。
+  - **拡張 API の表現力**：GFM 相当の構文が要求する次のフックを、パーサとレンダラの spec で必ず提供する。それぞれについて、テストにだけ置く検証用拡張で受け入れテストを行う。
+    - 表（段落を後から別のブロックとして解釈し直す）
+    - 脚注（文書全体の後処理と出力の並べ替え）
+    - 取り消し線（新しい区切り文字）
+    - タスクリスト（既存の構文の結果を書き換える）
+    - 拡張オートリンク（きっかけの文字がないインライン構文）
+    - タグフィルタ（レンダラ側での出力の差し替え）
+  - **エラー処理とメモリ管理の規約**（`foundation`）：すべての spec が同じ規約に従う。
+- **spec 間の依存の理由**（spec の作成と整合性レビューで判明したもの）：
+  - block-parser → html-renderer：CommonMark の構文セットに `amark.core.html` を含め、GFM 相当のテストで HTML 側のテスト用拡張（`amark_test_html_gfm`）を使う。
+  - markdown-renderer → block-parser / html-renderer：`render.h` の出力 API を共有し、block-parser の `commonmark.c`（`amark.core.markdown` の追加）と inline-parser の `gfm_set.c`（Markdown 側の部品）に追記する。
+  - 出力はノード型に結び付け、組み込みのノード型の出力はコア出力拡張（`amark.core.html`、`amark.core.markdown`）が持つ。
+- **Revisiting boundaries**：spec の境界は作業を分けるための手段であり、設計の制約ではない。後の spec で前の spec の API に問題が見つかったら、その spec に戻って直す。
+
+## Specs (dependency order)
+- [x] foundation -- CMake ビルド（静的/動的ライブラリ、install、パッケージ設定）、Naos によるテスト基盤、3 OS の CI/CD、ライセンス、共通ランタイム（アロケータ、バッファ、エラー、バージョン、UTF-8 ユーティリティ）。Dependencies: none
+- [x] syntax-tree -- ノードモデル、ロスレス構文トークン、走査と編集の API、編集済みの追跡、拡張レジストリ（ノード型の登録と構文セット）。Dependencies: foundation
+- [x] html-renderer -- 構文木から HTML への出力、CommonMark 互換、安全モード、ノード型ごとの HTML 出力のスロット。Dependencies: syntax-tree
+- [x] block-parser -- パーサの入口、ブロック構文エンジンと公開ブロック構文 API、文書の後処理フック、CommonMark の全ブロック構文とリンク参照定義、構文トークンの記録。Dependencies: syntax-tree, html-renderer
+- [x] inline-parser -- インライン構文エンジン（区切り文字の処理を含む）と公開インライン構文 API、CommonMark の全インライン構文、CommonMark spec 100% の準拠テスト、拡張 API の表現力を検証するテスト専用拡張。Dependencies: block-parser, html-renderer
+- [x] markdown-renderer -- ロスレスな Markdown への書き戻し、編集した部分の局所的な出力（意味を保つ。方式は design で決める）、新しいノードの出力、ノード型ごとの Markdown 出力のスロット、往復と意味の保存のプロパティテスト。Dependencies: inline-parser, block-parser, html-renderer
