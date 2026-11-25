@@ -56,6 +56,7 @@ int main(void)
           "the buffer length is that of the appended text");
     check(memcmp(amark_buffer_data(buffer), text, sizeof text) == 0,
           "the buffer holds the appended text and its NUL terminator");
+
     amark_buffer_destroy(buffer);
 
     if (failures == 0)

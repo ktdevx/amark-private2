@@ -45,6 +45,7 @@ NAOS_TEST(string_matches_header)
     NAOS_REQUIRE_NOT_NULL(version);
     NAOS_CHECK_STR_EQ(AMARK_VERSION_STRING, version);
     AMARK_CHECK_BYTES_EQ(version, strlen(version), AMARK_VERSION_STRING);
+
     /* The string is static: every call returns the same one. */
     NAOS_CHECK_PTR_EQ(version, amark_version_string());
 }

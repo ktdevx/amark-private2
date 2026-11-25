@@ -210,6 +210,7 @@ NAOS_TEST(all_32_ascii_punctuation_characters)
     size_t i;
 
     NAOS_CHECK_UINT_EQ(32, sizeof(ascii_punctuation) - 1);
+
     for (i = 0; ascii_punctuation[i] != '\0'; i++)
     {
         NAOS_CHECK_TRUE(amark_ascii_is_punctuation((uint32_t)(unsigned char)ascii_punctuation[i]));

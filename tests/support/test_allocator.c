@@ -150,6 +150,7 @@ static void *new_block(size_t size, int zero)
     b->h.magic = BLOCK_MAGIC;
     b->h.size = size;
     b->h.owner = current;
+
     link_block(b);
     current->live_blocks++;
     add_bytes(current, size);
@@ -209,6 +210,7 @@ static void *test_realloc(void *ptr, size_t new_size)
 
     moved->h.size = new_size;
     link_block(moved);
+
     owner->live_bytes -= old_size;
     add_bytes(owner, new_size);
     return moved + 1;
@@ -222,6 +224,7 @@ static void test_free(void *ptr)
     unlink_block(b);
     owner->live_blocks--;
     owner->live_bytes -= b->h.size;
+
     b->h.magic = 0;
     free(b);
 }
@@ -255,6 +258,7 @@ static void release_blocks(amark_test_allocator_t *t)
     while (b != NULL)
     {
         block_t *next = b->h.next;
+
         if (b->h.owner == t)
         {
             unlink_block(b);
@@ -296,6 +300,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 
         amark_test_allocator_init(&sweep_allocator);
         sweep_allocator.fail_at = fail_at;
+
         error = set_allocator(amark_test_allocator_activate(&sweep_allocator));
         if (error != AMARK_ERROR_NONE)
         {
@@ -323,6 +328,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
         }
 
         result.iterations++;
+
         if ((error != AMARK_ERROR_OUT_OF_MEMORY) && (result.wrong_error_at == 0))
         {
             result.wrong_error_at = fail_at;
@@ -330,6 +336,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
     }
 
     set_allocator(NULL);
+
     return result;
 }
 

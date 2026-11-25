@@ -16,10 +16,13 @@ NAOS_TEST(add_in_range)
 
     NAOS_CHECK_TRUE(amark_size_add(0, 0, &out));
     NAOS_CHECK_UINT_EQ(0, out);
+
     NAOS_CHECK_TRUE(amark_size_add(3, 4, &out));
     NAOS_CHECK_UINT_EQ(7, out);
+
     NAOS_CHECK_TRUE(amark_size_add(SIZE_MAX, 0, &out));
     NAOS_CHECK_UINT_EQ(SIZE_MAX, out);
+
     NAOS_CHECK_TRUE(amark_size_add(SIZE_MAX - 1, 1, &out));
     NAOS_CHECK_UINT_EQ(SIZE_MAX, out);
 }
@@ -32,6 +35,7 @@ NAOS_TEST(add_overflow_leaves_out_unchanged)
     NAOS_CHECK_FALSE(amark_size_add(1, SIZE_MAX, &out));
     NAOS_CHECK_FALSE(amark_size_add(SIZE_MAX, SIZE_MAX, &out));
     NAOS_CHECK_FALSE(amark_size_add(SIZE_MAX / 2 + 1, SIZE_MAX / 2 + 1, &out));
+
     NAOS_CHECK_UINT_EQ(42, out);
 }
 
@@ -41,12 +45,16 @@ NAOS_TEST(mul_in_range)
 
     NAOS_CHECK_TRUE(amark_size_mul(0, SIZE_MAX, &out));
     NAOS_CHECK_UINT_EQ(0, out);
+
     NAOS_CHECK_TRUE(amark_size_mul(SIZE_MAX, 0, &out));
     NAOS_CHECK_UINT_EQ(0, out);
+
     NAOS_CHECK_TRUE(amark_size_mul(6, 7, &out));
     NAOS_CHECK_UINT_EQ(42, out);
+
     NAOS_CHECK_TRUE(amark_size_mul(SIZE_MAX, 1, &out));
     NAOS_CHECK_UINT_EQ(SIZE_MAX, out);
+
     NAOS_CHECK_TRUE(amark_size_mul(SIZE_MAX / 2, 2, &out));
     NAOS_CHECK_UINT_EQ(SIZE_MAX - 1, out);
 }
@@ -60,6 +68,7 @@ NAOS_TEST(mul_overflow_leaves_out_unchanged)
     NAOS_CHECK_FALSE(amark_size_mul(2, SIZE_MAX, &out));
     NAOS_CHECK_FALSE(amark_size_mul(SIZE_MAX / 2 + 1, 2, &out));
     NAOS_CHECK_FALSE(amark_size_mul(half, half, &out));
+
     NAOS_CHECK_UINT_EQ(42, out);
 }
 
