@@ -109,6 +109,7 @@ static void check_decoding(const char *text, size_t size)
             {
                 first_invalid = position;
             }
+
             /* The invalid sequence alone is not valid either. */
             CHECK(!amark_utf8_validate(text + position, length, NULL));
         }
@@ -120,11 +121,13 @@ static void check_decoding(const char *text, size_t size)
             /* The valid character alone is valid. */
             CHECK(amark_utf8_validate(text + position, length, NULL));
         }
+
         CHECK((replaced_length + encoded_length) < replaced_capacity);
         memcpy(replaced + replaced_length, encoded, encoded_length);
         replaced_length += encoded_length;
         position += length;
     }
+
     CHECK(position == size);
 
     /* The validation agrees with the positions of the replacements. */
@@ -146,6 +149,7 @@ static void check_decoding(const char *text, size_t size)
     {
         CHECK((replaced_length == size) && (memcmp(replaced, text, size) == 0));
     }
+
     free(replaced);
 }
 
@@ -183,6 +187,7 @@ static void check_encoding(const uint8_t *data, size_t size)
             CHECK(decoded == expected);
         }
     }
+
     CHECK(amark_utf8_encode(0x41u, NULL) == 0);
 }
 

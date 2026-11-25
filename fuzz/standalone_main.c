@@ -30,6 +30,7 @@ static uint8_t *read_file(const char *path, size_t *out_size)
     {
         return NULL;
     }
+
     for (;;)
     {
         size_t count;
@@ -43,6 +44,7 @@ static uint8_t *read_file(const char *path, size_t *out_size)
                 fclose(file);
                 return NULL;
             }
+
             grown = (uint8_t *)realloc(data, new_capacity);
             if (grown == NULL)
             {
@@ -50,9 +52,11 @@ static uint8_t *read_file(const char *path, size_t *out_size)
                 fclose(file);
                 return NULL;
             }
+
             data = grown;
             capacity = new_capacity;
         }
+
         count = fread(data + size, 1, capacity - size, file);
         size += count;
         if (size < capacity)
@@ -64,9 +68,11 @@ static uint8_t *read_file(const char *path, size_t *out_size)
                 fclose(file);
                 return NULL;
             }
+
             break;
         }
     }
+
     fclose(file);
     *out_size = size;
     return data;
@@ -81,6 +87,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s <input file>...\n", argc > 0 ? argv[0] : "fuzzer");
         return 2;
     }
+
     for (i = 1; i < argc; i++)
     {
         size_t size = 0;
@@ -90,10 +97,12 @@ int main(int argc, char **argv)
             fprintf(stderr, "error: cannot read '%s'\n", argv[i]);
             return 1;
         }
+
         fprintf(stderr, "Running: %s (%lu bytes)\n", argv[i], (unsigned long)size);
         (void)LLVMFuzzerTestOneInput(data, size);
         free(data);
     }
+
     fprintf(stderr, "Executed %d inputs\n", argc - 1);
     return 0;
 }

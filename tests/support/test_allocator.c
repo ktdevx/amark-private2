@@ -58,6 +58,7 @@ static void link_block(block_t *b)
     {
         newest->h.prev = b;
     }
+
     newest = b;
 }
 
@@ -71,6 +72,7 @@ static void unlink_block(block_t *b)
     {
         newest = b->h.next;
     }
+
     if (b->h.next != NULL)
     {
         b->h.next->h.prev = b->h.prev;
@@ -100,9 +102,11 @@ static block_t *find_block(void *ptr, const char *operation)
                 NAOS_NOTE("%s of %p", operation, ptr);
                 NAOS_FAIL("test allocator: the header of a live block is corrupted");
             }
+
             return b;
         }
     }
+
     NAOS_NOTE("%s of %p", operation, ptr);
     /* naos_fail does not return (NAOS_NORETURN), so no return statement follows:
      * one would be unreachable code, which MSVC reports (C4702). */
@@ -117,12 +121,14 @@ static int inject_failure(void)
     {
         NAOS_FAIL("test allocator: used without amark_test_allocator_activate");
     }
+
     current->calls++;
     if ((current->fail_at != 0) && (current->calls == current->fail_at))
     {
         current->failures++;
         return 1;
     }
+
     return 0;
 }
 
@@ -134,11 +140,13 @@ static void *new_block(size_t size, int zero)
     {
         return NULL;
     }
+
     b = zero ? calloc(1, sizeof(block_t) + size) : malloc(sizeof(block_t) + size);
     if (b == NULL)
     {
         return NULL;
     }
+
     b->h.magic = BLOCK_MAGIC;
     b->h.size = size;
     b->h.owner = current;
@@ -154,6 +162,7 @@ static void *test_malloc(size_t size)
     {
         return NULL;
     }
+
     return new_block(size, 0);
 }
 
@@ -163,10 +172,12 @@ static void *test_calloc(size_t count, size_t size)
     {
         return NULL;
     }
+
     if ((size != 0) && (count > (SIZE_MAX / size)))
     {
         return NULL;
     }
+
     return new_block(count * size, 1);
 }
 
@@ -181,10 +192,12 @@ static void *test_realloc(void *ptr, size_t new_size)
     {
         return NULL;
     }
+
     if (new_size > (SIZE_MAX - sizeof(block_t)))
     {
         return NULL;
     }
+
     /* The neighbors point to b, which realloc may move: unlink it first. */
     unlink_block(b);
     moved = realloc(b, sizeof(block_t) + new_size);
@@ -193,6 +206,7 @@ static void *test_realloc(void *ptr, size_t new_size)
         link_block(b);
         return NULL;
     }
+
     moved->h.size = new_size;
     link_block(moved);
     owner->live_bytes -= old_size;
@@ -247,8 +261,10 @@ static void release_blocks(amark_test_allocator_t *t)
             b->h.magic = 0;
             free(b);
         }
+
         b = next;
     }
+
     t->live_blocks = 0;
     t->live_bytes = 0;
 }
@@ -277,6 +293,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
             result.truncated = 1;
             break;
         }
+
         amark_test_allocator_init(&sweep_allocator);
         sweep_allocator.fail_at = fail_at;
         error = set_allocator(amark_test_allocator_activate(&sweep_allocator));
@@ -285,6 +302,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
             result.final_error = error;
             break;
         }
+
         error = scenario(context);
         injected = sweep_allocator.failures != 0;
 
@@ -294,13 +312,16 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
             {
                 result.leak_at = fail_at;
             }
+
             release_blocks(&sweep_allocator);
         }
+
         if (!injected)
         {
             result.final_error = error;
             break;
         }
+
         result.iterations++;
         if ((error != AMARK_ERROR_OUT_OF_MEMORY) && (result.wrong_error_at == 0))
         {

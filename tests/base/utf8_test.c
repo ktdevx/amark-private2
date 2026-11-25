@@ -46,8 +46,10 @@ static exact_t exact_copy(const char *bytes, size_t size)
         {
             memcpy(e.block, bytes, size);
         }
+
         e.text = e.block;
     }
+
     e.size = size;
     return e;
 }
@@ -101,15 +103,18 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
             failures++;
             break;
         }
+
         if ((i >= count) || (expected[i].codepoint != cp) || (expected[i].length != n))
         {
             NAOS_CHECK_UINT_EQ(i < count ? expected[i].codepoint : 0xFFFFFFFFu, cp);
             NAOS_CHECK_UINT_EQ(i < count ? expected[i].length : 0, n);
             failures++;
         }
+
         offset += n;
         i++;
     }
+
     if (i != count)
     {
         NAOS_CHECK_UINT_EQ(count, i);
@@ -132,13 +137,16 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
             failures++;
             break;
         }
+
         if (amark_utf8_decode_before(e.text, offset, NULL) != n)
         {
             NAOS_CHECK_UINT_EQ(n, amark_utf8_decode_before(e.text, offset, NULL));
             failures++;
         }
+
         offset -= n;
     }
+
     if ((offset != 0) || (i != 0))
     {
         NAOS_CHECK_UINT_EQ(0, offset);
@@ -149,6 +157,7 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
     {
         NAOS_FAIL("the input was changed");
     }
+
     return failures;
 }
 
@@ -166,11 +175,13 @@ static bool validate_exact(const char *bytes, size_t size, size_t *out_offset)
     {
         return false;
     }
+
     valid = amark_utf8_validate(e.text, size, out_offset);
     if (exact_release(&e, bytes))
     {
         NAOS_FAIL("the input was changed");
     }
+
     return valid;
 }
 
@@ -458,6 +469,7 @@ static int check_properties(const char *text, size_t size)
         {
             return 1;
         }
+
         m = amark_utf8_encode(cp, encoded);
         if ((first_invalid == size) && ((m != n) || (memcmp(encoded, text + offset, n) != 0)))
         {
@@ -465,12 +477,15 @@ static int check_properties(const char *text, size_t size)
             {
                 return 2; /* a valid code point that does not round-trip */
             }
+
             first_invalid = offset;
         }
+
         codepoints[count] = cp;
         offset += n;
         boundaries[count++] = offset;
     }
+
     for (i = count; i > 0; i--)
     {
         uint32_t cp = 0;
@@ -482,11 +497,13 @@ static int check_properties(const char *text, size_t size)
             return 3;
         }
     }
+
     valid = amark_utf8_validate(text, size, &validate_offset);
     if ((valid != (first_invalid == size)) || (validate_offset != first_invalid))
     {
         return 4;
     }
+
     return 0;
 }
 
@@ -528,6 +545,7 @@ NAOS_TEST(short_inputs_keep_every_property)
             }
         }
     }
+
     free(block);
     NAOS_CHECK_INT_EQ(0, failures);
 }
@@ -549,6 +567,7 @@ NAOS_TEST(all_two_byte_inputs_keep_every_property)
             failures += check_properties(block, 2) != 0;
         }
     }
+
     free(block);
     NAOS_CHECK_INT_EQ(0, failures);
 }
@@ -643,11 +662,13 @@ NAOS_TEST(every_code_point_round_trips)
             failures += (n != 3) || (memcmp(out, "\xEF\xBF\xBD", 3) != 0);
             continue;
         }
+
         failures += n != expected;
         failures += (amark_utf8_decode(out, n, &decoded) != n) || (decoded != cp);
         failures += (amark_utf8_decode_before(out, n, &before) != n) || (before != cp);
         failures += !amark_utf8_validate(out, n, NULL);
     }
+
     NAOS_CHECK_INT_EQ(0, failures);
 }
 

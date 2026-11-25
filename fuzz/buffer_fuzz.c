@@ -81,11 +81,13 @@ static void *fuzz_malloc(size_t size)
     {
         return NULL;
     }
+
     block = malloc(size);
     if (block != NULL)
     {
         fuzz_allocator.live++;
     }
+
     return block;
 }
 
@@ -98,11 +100,13 @@ static void *fuzz_calloc(size_t count, size_t size)
     {
         return NULL;
     }
+
     block = calloc(count, size);
     if (block != NULL)
     {
         fuzz_allocator.live++;
     }
+
     return block;
 }
 
@@ -113,6 +117,7 @@ static void *fuzz_realloc(void *ptr, size_t new_size)
     {
         return NULL;
     }
+
     return realloc(ptr, new_size);
 }
 
@@ -139,6 +144,7 @@ static uint8_t read_byte(reader_t *reader)
     {
         return 0;
     }
+
     return reader->data[reader->position++];
 }
 
@@ -158,6 +164,7 @@ static uint32_t read_u32(reader_t *reader)
     {
         value |= (uint32_t)read_byte(reader) << (8 * i);
     }
+
     return value;
 }
 
@@ -186,6 +193,7 @@ static void model_append(model_t *model, const char *bytes, size_t size)
     {
         return; /* bytes may be NULL */
     }
+
     memmove(model->bytes + model->length, bytes, size);
     model->length += size;
     model->bytes[model->length] = '\0';
@@ -219,23 +227,27 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
     {
         return expected;
     }
+
     if ((additional > (SIZE_MAX - model->length)) || ((model->length + additional) == SIZE_MAX))
     {
         expected.error = AMARK_ERROR_OVERFLOW;
         return expected;
     }
+
     required = model->length + additional + 1;
     if (required <= model->capacity)
     {
         expected.too_large = (model->length + additional) > MAX_CONTENT;
         return expected;
     }
+
     expected.calls = 1;
     if (inject)
     {
         expected.error = AMARK_ERROR_OUT_OF_MEMORY;
         return expected;
     }
+
     if ((model->capacity <= (SIZE_MAX / 2)) && ((model->capacity * 2) >= required))
     {
         expected.capacity = model->capacity * 2;
@@ -244,6 +256,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
     {
         expected.capacity = required;
     }
+
     expected.too_large = (model->length + additional) > MAX_CONTENT;
     return expected;
 }
@@ -320,6 +333,7 @@ static void run_append(amark_buffer_t *buffer, model_t *model, const char *bytes
     {
         return;
     }
+
     RUN(expected, amark_buffer_append(buffer, bytes, size));
     if (expected.error == AMARK_ERROR_NONE)
     {
@@ -349,18 +363,22 @@ static void run_operation(state_t *state, reader_t *reader)
              * failure lets run. */
             additional = SIZE_MAX - (size_t)(variant >> 1);
         }
+
         expected = expect_room(model, additional, inject);
         if (expected.too_large)
         {
             break;
         }
+
         RUN(expected, amark_buffer_reserve(buffer, additional));
         if (expected.error == AMARK_ERROR_NONE)
         {
             model->capacity = expected.capacity;
         }
+
         break;
     }
+
     case OP_APPEND:
     {
         size_t size = read_byte(reader);
@@ -370,11 +388,13 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             size = available;
         }
+
         bytes = size == 0 ? NULL : (const char *)reader->data + reader->position;
         reader->position += size;
         run_append(buffer, model, bytes, size, inject);
         break;
     }
+
     case OP_APPEND_BYTE:
     {
         char byte = (char)read_byte(reader);
@@ -383,14 +403,17 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             break;
         }
+
         RUN(expected, amark_buffer_append_byte(buffer, (unsigned char)byte));
         if (expected.error == AMARK_ERROR_NONE)
         {
             model->capacity = expected.capacity;
             model_append(model, &byte, 1);
         }
+
         break;
     }
+
     case OP_APPEND_REPEAT:
     {
         uint8_t byte = read_byte(reader);
@@ -400,6 +423,7 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             break;
         }
+
         RUN(expected, amark_buffer_append_repeat(buffer, byte, count));
         if (expected.error == AMARK_ERROR_NONE)
         {
@@ -408,8 +432,10 @@ static void run_operation(state_t *state, reader_t *reader)
             memset(model->bytes + model->length, byte, count);
             model_truncate(model, model->length + count);
         }
+
         break;
     }
+
     case OP_APPEND_CSTR:
     {
         /* The next bytes, up to the first NUL, as a C string of its own. */
@@ -420,20 +446,24 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             text[i] = (char)read_byte(reader);
         }
+
         text[i] = '\0';
         expected = expect_room(model, strlen(text), inject);
         if (expected.too_large)
         {
             break;
         }
+
         RUN(expected, amark_buffer_append_cstr(buffer, text));
         if (expected.error == AMARK_ERROR_NONE)
         {
             model->capacity = expected.capacity;
             model_append(model, text, strlen(text));
         }
+
         break;
     }
+
     case OP_APPEND_CODEPOINT:
     {
         uint32_t codepoint = read_u32(reader);
@@ -444,20 +474,24 @@ static void run_operation(state_t *state, reader_t *reader)
             /* Mostly in the Unicode range, sometimes beyond it. */
             codepoint &= 0x1FFFFFu;
         }
+
         size = amark_utf8_encode(codepoint, encoded);
         expected = expect_room(model, size, inject);
         if (expected.too_large)
         {
             break;
         }
+
         RUN(expected, amark_buffer_append_codepoint(buffer, codepoint));
         if (expected.error == AMARK_ERROR_NONE)
         {
             model->capacity = expected.capacity;
             model_append(model, encoded, size);
         }
+
         break;
     }
+
     case OP_TRUNCATE:
     {
         uint8_t variant = read_byte(reader);
@@ -466,6 +500,7 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             length %= model->length + 1;
         }
+
         expected.error =
             length > model->length ? AMARK_ERROR_INVALID_ARGUMENT : AMARK_ERROR_NONE;
         expected.calls = 0;
@@ -474,8 +509,10 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             model_truncate(model, length);
         }
+
         break;
     }
+
     case OP_CLEAR:
         fuzz_allocator.calls = 0;
         fuzz_allocator.fail = inject;
@@ -507,8 +544,10 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             CHECK((detached == NULL) && (detached_length == 0));
         }
+
         break;
     }
+
     case OP_APPEND_SELF:
     {
         /* A part of the buffer's own content, which may move when it grows. */
@@ -519,14 +558,17 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             break;
         }
+
         RUN(expected, amark_buffer_append(buffer, amark_buffer_data(buffer) + offset, size));
         if (expected.error == AMARK_ERROR_NONE)
         {
             model->capacity = expected.capacity;
             model_append(model, model->bytes + offset, size);
         }
+
         break;
     }
+
     case OP_APPEND_CSTR_SELF:
     {
         /* The buffer's own content from an offset, as a C string: up to the first
@@ -538,14 +580,17 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             break;
         }
+
         RUN(expected, amark_buffer_append_cstr(buffer, amark_buffer_data(buffer) + offset));
         if (expected.error == AMARK_ERROR_NONE)
         {
             model->capacity = expected.capacity;
             model_append(model, model->bytes + offset, size);
         }
+
         break;
     }
+
     case OP_OVERFLOW:
     {
         /* A count near SIZE_MAX: an overflow, or a huge request that only an
@@ -557,6 +602,7 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             break;
         }
+
         if (variant & 1u)
         {
             RUN(expected, amark_buffer_reserve(buffer, count));
@@ -565,9 +611,11 @@ static void run_operation(state_t *state, reader_t *reader)
         {
             RUN(expected, amark_buffer_append_repeat(buffer, 'x', count));
         }
+
         CHECK(expected.error != AMARK_ERROR_NONE);
         break;
     }
+
     case OP_INVALID_ARGUMENT:
     {
         char sentinel = 'x';
@@ -611,8 +659,10 @@ static void run_operation(state_t *state, reader_t *reader)
             RUN(expected, amark_buffer_create(NULL));
             break;
         }
+
         break;
     }
+
     case OP_RECREATE:
     default:
         if (which == 0)
@@ -629,6 +679,7 @@ static void run_operation(state_t *state, reader_t *reader)
                 CHECK(created == NULL);
                 CHECK(amark_buffer_create(&created) == AMARK_ERROR_NONE);
             }
+
             CHECK(created != NULL);
             state->created = created;
         }
@@ -637,6 +688,7 @@ static void run_operation(state_t *state, reader_t *reader)
             amark_buffer_deinit(&state->embedded);
             amark_buffer_init(&state->embedded);
         }
+
         model_truncate(model, 0);
         model->capacity = 0;
         break;

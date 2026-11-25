@@ -47,6 +47,7 @@ int main(void)
         fprintf(stderr, "amark_consumer: amark_buffer_create failed\n");
         return 1;
     }
+
     check(amark_buffer_append_cstr(buffer, "Hello, ") == AMARK_ERROR_NONE,
           "amark_buffer_append_cstr succeeds");
     check(amark_buffer_append(buffer, "Amark", 5) == AMARK_ERROR_NONE,
@@ -61,5 +62,6 @@ int main(void)
     {
         printf("amark_consumer: Amark %s works\n", amark_version_string());
     }
+
     return failures;
 }

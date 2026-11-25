@@ -76,6 +76,7 @@ static long read_component(const char **p)
     {
         return -1;
     }
+
     value = strtol(*p, &end, 10);
     *p = end;
     return value;

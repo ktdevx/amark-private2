@@ -14,5 +14,6 @@ const char *amark_error_string(amark_error_t error)
         AMARK_ERROR_LIST(AMARK_ERROR_CASE)
 #undef AMARK_ERROR_CASE
     }
+
     return "unknown error";
 }

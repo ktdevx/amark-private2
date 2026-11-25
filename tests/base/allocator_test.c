@@ -104,6 +104,7 @@ NAOS_TEST(default_allocator_works_without_setting)
     {
         NAOS_CHECK_UINT_EQ(0, z[i]);
     }
+
     p = amark_realloc(p, 64);
     NAOS_REQUIRE_NOT_NULL(p);
     NAOS_CHECK_UINT_EQ(0xAB, p[15]);
@@ -168,6 +169,7 @@ NAOS_TEST(calloc_uses_calloc_fn_and_returns_zeroed_memory)
     {
         NAOS_CHECK_UINT_EQ(0, z[i]);
     }
+
     amark_free(z);
 }
 
@@ -241,8 +243,10 @@ NAOS_TEST(incomplete_allocator_is_rejected)
         case 2: partial.realloc_fn = NULL; break;
         default: partial.free_fn = NULL; break;
         }
+
         NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_allocator_set(&partial));
     }
+
     {
         amark_allocator_t empty;
 

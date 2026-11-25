@@ -20,6 +20,7 @@ static inline bool amark_size_add(size_t a, size_t b, size_t *out)
     {
         return false;
     }
+
     *out = a + b;
     return true;
 }
@@ -32,6 +33,7 @@ static inline bool amark_size_mul(size_t a, size_t b, size_t *out)
     {
         return false;
     }
+
     *out = a * b;
     return true;
 }

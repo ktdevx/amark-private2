@@ -42,6 +42,7 @@ static int is_ascii_punctuation_char(uint32_t c)
             return 1;
         }
     }
+
     return 0;
 }
 
@@ -108,6 +109,7 @@ NAOS_TEST(whitespace_has_exactly_21_code_points)
             count++;
         }
     }
+
     NAOS_CHECK_UINT_EQ(21, count);
 }
 
@@ -186,6 +188,7 @@ NAOS_TEST(punctuation_has_exactly_9473_code_points)
             count++;
         }
     }
+
     NAOS_CHECK_UINT_EQ(9473, count);
 }
 
@@ -247,6 +250,7 @@ NAOS_TEST(ascii_punctuation_over_the_whole_code_space)
     {
         NAOS_CHECK_INT_EQ(is_ascii_punctuation_char(c), amark_ascii_is_punctuation(c) ? 1 : 0);
     }
+
     for (c = 0; c <= 0x10FFFF; c++)
     {
         if (amark_ascii_is_punctuation(c))
@@ -254,6 +258,7 @@ NAOS_TEST(ascii_punctuation_over_the_whole_code_space)
             count++;
         }
     }
+
     NAOS_CHECK_UINT_EQ(32, count);
 }
 

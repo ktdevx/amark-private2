@@ -30,10 +30,12 @@ void amark_buffer_deinit(amark_buffer_t *buffer)
     {
         return;
     }
+
     if (buffer->capacity > 0)
     {
         amark_free(buffer->data);
     }
+
     amark_buffer_init(buffer);
 }
 
@@ -53,19 +55,23 @@ static amark_error_t ensure_room(amark_buffer_t *buffer, size_t additional)
     {
         return AMARK_ERROR_NONE;
     }
+
     if (!amark_size_add(buffer->length, additional, &required) ||
         !amark_size_add(required, 1, &required))
     {
         return AMARK_ERROR_OVERFLOW;
     }
+
     if (required <= buffer->capacity)
     {
         return AMARK_ERROR_NONE;
     }
+
     if (!amark_size_mul(buffer->capacity, 2, &new_capacity) || (new_capacity < required))
     {
         new_capacity = required;
     }
+
     if (buffer->capacity == 0)
     {
         new_data = amark_malloc(new_capacity);
@@ -73,6 +79,7 @@ static amark_error_t ensure_room(amark_buffer_t *buffer, size_t additional)
         {
             return AMARK_ERROR_OUT_OF_MEMORY;
         }
+
         new_data[0] = '\0';
     }
     else
@@ -83,6 +90,7 @@ static amark_error_t ensure_room(amark_buffer_t *buffer, size_t additional)
             return AMARK_ERROR_OUT_OF_MEMORY;
         }
     }
+
     buffer->data = new_data;
     buffer->capacity = new_capacity;
     return AMARK_ERROR_NONE;
@@ -107,12 +115,14 @@ amark_error_t amark_buffer_create(amark_buffer_t **out_buffer)
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     buffer = amark_malloc(sizeof(*buffer));
     if (buffer == NULL)
     {
         *out_buffer = NULL;
         return AMARK_ERROR_OUT_OF_MEMORY;
     }
+
     amark_buffer_init(buffer);
     *out_buffer = buffer;
     return AMARK_ERROR_NONE;
@@ -124,6 +134,7 @@ void amark_buffer_destroy(amark_buffer_t *buffer)
     {
         return;
     }
+
     amark_buffer_deinit(buffer);
     amark_free(buffer);
 }
@@ -134,6 +145,7 @@ const char *amark_buffer_data(const amark_buffer_t *buffer)
     {
         return empty_content;
     }
+
     return buffer->data;
 }
 
@@ -143,6 +155,7 @@ size_t amark_buffer_length(const amark_buffer_t *buffer)
     {
         return 0;
     }
+
     return buffer->length;
 }
 
@@ -152,6 +165,7 @@ amark_error_t amark_buffer_reserve(amark_buffer_t *buffer, size_t additional)
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     return ensure_room(buffer, additional);
 }
 
@@ -164,10 +178,12 @@ amark_error_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     if (size == 0)
     {
         return AMARK_ERROR_NONE;
     }
+
     if (points_into(buffer, data))
     {
         /* The source is the buffer's own memory: find it again after growing. */
@@ -178,6 +194,7 @@ amark_error_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size
         {
             return err;
         }
+
         source = buffer->data + offset;
     }
     else
@@ -188,6 +205,7 @@ amark_error_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size
             return err;
         }
     }
+
     /* memmove: a source inside the buffer may extend past the current length. */
     memmove(buffer->data + buffer->length, source, size);
     buffer->length += size;
@@ -209,15 +227,18 @@ amark_error_t amark_buffer_append_repeat(amark_buffer_t *buffer, unsigned char b
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     if (count == 0)
     {
         return AMARK_ERROR_NONE;
     }
+
     err = ensure_room(buffer, count);
     if (err != AMARK_ERROR_NONE)
     {
         return err;
     }
+
     memset(buffer->data + buffer->length, byte, count);
     buffer->length += count;
     buffer->data[buffer->length] = '\0';
@@ -230,6 +251,7 @@ amark_error_t amark_buffer_append_cstr(amark_buffer_t *buffer, const char *text)
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     return amark_buffer_append(buffer, text, strlen(text));
 }
 
@@ -242,6 +264,7 @@ amark_error_t amark_buffer_append_codepoint(amark_buffer_t *buffer, uint32_t cod
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     size = amark_utf8_encode(codepoint, encoded);
     return amark_buffer_append(buffer, encoded, size);
 }
@@ -252,11 +275,13 @@ amark_error_t amark_buffer_truncate(amark_buffer_t *buffer, size_t length)
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     if (buffer->capacity > 0)
     {
         buffer->length = length;
         buffer->data[length] = '\0';
     }
+
     return AMARK_ERROR_NONE;
 }
 
@@ -266,6 +291,7 @@ void amark_buffer_clear(amark_buffer_t *buffer)
     {
         return;
     }
+
     (void)amark_buffer_truncate(buffer, 0);
 }
 
@@ -279,12 +305,15 @@ amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_
         {
             *out_data = NULL;
         }
+
         if (out_length != NULL)
         {
             *out_length = 0;
         }
+
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     if (buffer->capacity == 0)
     {
         data = amark_malloc(1);
@@ -294,12 +323,14 @@ amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_
             *out_length = 0;
             return AMARK_ERROR_OUT_OF_MEMORY;
         }
+
         data[0] = '\0';
     }
     else
     {
         data = buffer->data;
     }
+
     *out_data = data;
     *out_length = buffer->length;
     amark_buffer_init(buffer);

@@ -225,6 +225,7 @@ NAOS_TEST(append_many_bytes_one_by_one)
     {
         NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(b, (unsigned char)i));
     }
+
     NAOS_CHECK_UINT_EQ(10000, amark_buffer_length(b));
     data = (const unsigned char *)amark_buffer_data(b);
     for (i = 0; i < 10000; i++)
@@ -235,6 +236,7 @@ NAOS_TEST(append_many_bytes_one_by_one)
             break;
         }
     }
+
     NAOS_CHECK_UINT_EQ(0, data[10000]);
     amark_buffer_destroy(b);
 }
@@ -309,11 +311,13 @@ NAOS_TEST(append_own_content_while_growing)
         NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
                             amark_buffer_append(b, amark_buffer_data(b), amark_buffer_length(b)));
     }
+
     NAOS_REQUIRE_UINT_EQ(4u << 6, amark_buffer_length(b));
     for (i = 0; i < (4 << 6); i += 4)
     {
         NAOS_CHECK_MEM_EQ(amark_buffer_data(b) + i, 4, "ab\0c", 4);
     }
+
     NAOS_CHECK_INT_EQ(0, amark_buffer_data(b)[4 << 6]);
     amark_buffer_destroy(b);
 }
@@ -354,6 +358,7 @@ NAOS_TEST(append_cstr_of_own_content)
     {
         NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(b, amark_buffer_data(b)));
     }
+
     NAOS_CHECK_UINT_EQ(64, amark_buffer_length(b));
     NAOS_CHECK_STR_EQ("hahahahahahahahahahahahahahahahahahahahahahahahahahahahahahahaha",
                       amark_buffer_data(b));
@@ -490,6 +495,7 @@ NAOS_TEST(detach_returns_the_content_freed_with_amark_free)
         AMARK_CHECK_BYTES_EQ(data, length, "ab\0cd");
         NAOS_CHECK_INT_EQ(0, data[length]);
     }
+
     AMARK_CHECK_BUFFER_EQ(b, "");
     NAOS_CHECK_UINT_EQ(2, counting.live_blocks);
 
@@ -500,6 +506,7 @@ NAOS_TEST(detach_returns_the_content_freed_with_amark_free)
     {
         AMARK_CHECK_BYTES_EQ(data, length, "ab\0cd");
     }
+
     amark_buffer_destroy(b);
 
     amark_free(data);
@@ -651,6 +658,7 @@ static size_t log2_floor(size_t n)
         n >>= 1;
         log++;
     }
+
     return log;
 }
 
@@ -686,12 +694,14 @@ NAOS_TEST(appending_byte_by_byte_allocates_logarithmically)
         {
             break;
         }
+
         if ((worst_at == 0) && (counting.calls > growth_bound(i)))
         {
             worst_at = i;
             calls = counting.calls;
         }
     }
+
     NAOS_CHECK_UINT_EQ(GROWTH_TOTAL, amark_buffer_length(b));
     NAOS_NOTE("first length over the bound: %lu (%lu calls)", (unsigned long)worst_at,
               (unsigned long)calls);
@@ -739,6 +749,7 @@ NAOS_TEST(appending_mixed_small_pieces_allocates_logarithmically)
             total += 4;
             break;
         }
+
         step++;
         if ((worst_at == 0) && (counting.calls > growth_bound(total)))
         {
@@ -746,6 +757,7 @@ NAOS_TEST(appending_mixed_small_pieces_allocates_logarithmically)
             calls = counting.calls;
         }
     }
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, err);
     NAOS_CHECK_UINT_EQ(total, amark_buffer_length(b));
     NAOS_NOTE("first length over the bound: %lu (%lu calls)", (unsigned long)worst_at,
@@ -773,6 +785,7 @@ NAOS_TEST(reserving_a_little_more_each_time_allocates_logarithmically)
             worst_at = i;
         }
     }
+
     NAOS_CHECK_UINT_EQ(0, worst_at);
     AMARK_CHECK_BUFFER_EQ(b, "");
 
@@ -787,6 +800,7 @@ NAOS_TEST(reserving_a_little_more_each_time_allocates_logarithmically)
             break;
         }
     }
+
     NAOS_CHECK_UINT_EQ(2 * GROWTH_TOTAL, amark_buffer_length(b));
     /* The capacity of the first loop holds GROWTH_TOTAL bytes: one doubling is
      * enough for twice as many. */
@@ -868,12 +882,14 @@ static amark_error_t grow_scenario(void *context)
     {
         return err;
     }
+
     err = amark_buffer_append(b, c->prefix, c->prefix_length);
     if (err != AMARK_ERROR_NONE)
     {
         amark_buffer_destroy(b);
         return err;
     }
+
     length_before = amark_buffer_length(b);
     data_before = amark_buffer_data(b);
     memcpy(before, data_before, length_before + 1);
@@ -893,6 +909,7 @@ static amark_error_t grow_scenario(void *context)
         NAOS_CHECK_MEM_EQ(amark_buffer_data(b), length_before, before, length_before);
         NAOS_CHECK_INT_EQ(0, amark_buffer_data(b)[amark_buffer_length(b)]);
     }
+
     amark_buffer_destroy(b);
     return err;
 }
@@ -924,6 +941,7 @@ static void sweep_every_operation(const char *prefix, size_t prefix_length)
         {
             continue; /* appends nothing, so cannot fail */
         }
+
         c.op = ops[i].op;
         c.name = ops[i].name;
         c.prefix = prefix;
@@ -968,6 +986,7 @@ static amark_error_t sequence_scenario(void *context)
     {
         return err;
     }
+
     for (op = GROW_RESERVE; (op <= GROW_APPEND_CODEPOINT) && (err == AMARK_ERROR_NONE);
          op = (grow_op_t)(op + 1))
     {
@@ -981,6 +1000,7 @@ static amark_error_t sequence_scenario(void *context)
                 (void)amark_buffer_truncate(b, SNAPSHOT_SIZE / 4);
                 length_before = amark_buffer_length(b);
             }
+
             memcpy(before, amark_buffer_data(b), length_before + 1);
             err = run_grow_op(b, op);
             if (err == AMARK_ERROR_OUT_OF_MEMORY)
@@ -992,6 +1012,7 @@ static amark_error_t sequence_scenario(void *context)
             }
         }
     }
+
     amark_buffer_destroy(b);
     return err;
 }
@@ -1021,6 +1042,7 @@ static amark_error_t create_scenario(void *context)
         NAOS_CHECK_NOT_NULL(b);
         NAOS_CHECK_UINT_EQ(0, amark_buffer_length(b));
     }
+
     amark_buffer_destroy(b);
     return err;
 }
@@ -1045,6 +1067,7 @@ static amark_error_t detach_scenario(void *context)
     {
         return err;
     }
+
     err = amark_buffer_detach(b, &data, &length);
     if (err == AMARK_ERROR_OUT_OF_MEMORY)
     {
@@ -1055,6 +1078,7 @@ static amark_error_t detach_scenario(void *context)
         amark_buffer_destroy(b);
         return err;
     }
+
     amark_free(data);
     if (err == AMARK_ERROR_NONE)
     {
@@ -1071,6 +1095,7 @@ static amark_error_t detach_scenario(void *context)
             }
         }
     }
+
     amark_buffer_destroy(b);
     return err;
 }
@@ -1220,6 +1245,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
         NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
                           amark_buffer_append_repeat(b, (unsigned char)(255 - i % 256), 2));
     }
+
     NAOS_CHECK_FALSE(contents_overlap(a, b));
     NAOS_CHECK_UINT_EQ(3000, amark_buffer_length(a));
     NAOS_CHECK_UINT_EQ(6000, amark_buffer_length(b));
@@ -1231,6 +1257,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
             a_bad++;
         }
     }
+
     data = (const unsigned char *)amark_buffer_data(b);
     for (i = 0; (i < 6000) && (i < amark_buffer_length(b)); i++)
     {
@@ -1239,6 +1266,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
             b_bad++;
         }
     }
+
     NAOS_CHECK_UINT_EQ(0, a_bad);
     NAOS_CHECK_UINT_EQ(0, b_bad);
     NAOS_CHECK_UINT_EQ(4, counting.live_blocks);
@@ -1266,6 +1294,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
     {
         AMARK_CHECK_BYTES_EQ(detached, detached_length, "own");
     }
+
     amark_free(detached);
     amark_buffer_destroy(b);
     NAOS_CHECK_UINT_EQ(0, counting.live_blocks);

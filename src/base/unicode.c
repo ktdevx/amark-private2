@@ -45,6 +45,7 @@ static bool in_ranges(const amark_unicode_range_t *table, size_t count, uint32_t
             return true;
         }
     }
+
     return false;
 }
 
@@ -68,10 +69,12 @@ bool amark_unicode_is_whitespace(uint32_t codepoint)
         return (codepoint == 0x20u) || (codepoint == 0x09u) || (codepoint == 0x0Au) || (codepoint == 0x0Cu)
             || (codepoint == 0x0Du);
     }
+
     if (is_out_of_range(codepoint))
     {
         return false;
     }
+
     return in_ranges(amark_unicode_zs, AMARK_UNICODE_COUNT_OF(amark_unicode_zs), codepoint);
 }
 
@@ -82,9 +85,11 @@ bool amark_unicode_is_punctuation(uint32_t codepoint)
         /* P and S in ASCII are exactly the ASCII punctuation characters. */
         return amark_ascii_is_punctuation(codepoint);
     }
+
     if (is_out_of_range(codepoint))
     {
         return false;
     }
+
     return in_ranges(amark_unicode_punct, AMARK_UNICODE_COUNT_OF(amark_unicode_punct), codepoint);
 }

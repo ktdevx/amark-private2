@@ -29,6 +29,7 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
         *out_valid = true;
         return 1;
     }
+
     if ((lead >= 0xC2) && (lead <= 0xDF))
     {
         needed = 2;
@@ -76,10 +77,12 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
             *out_valid = false;
             return i;
         }
+
         cp = (cp << 6) | (uint32_t)(s[i] & 0x3Fu);
         low = 0x80;
         high = 0xBF;
     }
+
     *out_codepoint = cp;
     *out_valid = true;
     return needed;
@@ -100,11 +103,13 @@ size_t amark_utf8_decode(const char *text, size_t length, uint32_t *out_codepoin
     {
         return 0;
     }
+
     n = decode_one((const unsigned char *)text, length, &cp, &valid);
     if (out_codepoint != NULL)
     {
         *out_codepoint = cp;
     }
+
     return n;
 }
 
@@ -127,11 +132,13 @@ size_t amark_utf8_decode_before(const char *text, size_t position, uint32_t *out
     {
         return 0;
     }
+
     start = position - 1;
     while ((start > 0) && ((position - start) < AMARK_UTF8_MAX_LENGTH) && is_continuation(s[start]))
     {
         start--;
     }
+
     if (!is_continuation(s[start]))
     {
         uint32_t lead_cp;
@@ -144,10 +151,12 @@ size_t amark_utf8_decode_before(const char *text, size_t position, uint32_t *out
             n = lead_n;
         }
     }
+
     if (out_codepoint != NULL)
     {
         *out_codepoint = cp;
     }
+
     return n;
 }
 
@@ -162,6 +171,7 @@ bool amark_utf8_validate(const char *text, size_t length, size_t *out_error_offs
         {
             *out_error_offset = 0;
         }
+
         return false;
     }
     while (offset < length)
@@ -175,6 +185,7 @@ bool amark_utf8_validate(const char *text, size_t length, size_t *out_error_offs
             offset++;
             continue;
         }
+
         n = decode_one(s + offset, length - offset, &cp, &valid);
         if (!valid)
         {
@@ -182,14 +193,18 @@ bool amark_utf8_validate(const char *text, size_t length, size_t *out_error_offs
             {
                 *out_error_offset = offset;
             }
+
             return false;
         }
+
         offset += n;
     }
+
     if (out_error_offset != NULL)
     {
         *out_error_offset = length;
     }
+
     return true;
 }
 
@@ -199,21 +214,25 @@ size_t amark_utf8_encode(uint32_t codepoint, char out[AMARK_UTF8_MAX_LENGTH])
     {
         return 0;
     }
+
     if (((codepoint >= 0xD800u) && (codepoint <= 0xDFFFu)) || (codepoint > 0x10FFFFu))
     {
         codepoint = AMARK_UTF8_REPLACEMENT;
     }
+
     if (codepoint < 0x80u)
     {
         out[0] = (char)codepoint;
         return 1;
     }
+
     if (codepoint < 0x800u)
     {
         out[0] = (char)(0xC0u | (codepoint >> 6));
         out[1] = (char)(0x80u | (codepoint & 0x3Fu));
         return 2;
     }
+
     if (codepoint < 0x10000u)
     {
         out[0] = (char)(0xE0u | (codepoint >> 12));
@@ -221,6 +240,7 @@ size_t amark_utf8_encode(uint32_t codepoint, char out[AMARK_UTF8_MAX_LENGTH])
         out[2] = (char)(0x80u | (codepoint & 0x3Fu));
         return 3;
     }
+
     out[0] = (char)(0xF0u | (codepoint >> 18));
     out[1] = (char)(0x80u | ((codepoint >> 12) & 0x3Fu));
     out[2] = (char)(0x80u | ((codepoint >> 6) & 0x3Fu));
