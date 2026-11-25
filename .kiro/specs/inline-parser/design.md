@@ -28,14 +28,15 @@
 - `src/syntax/` のインラインの組み込み拡張（構文ごとに 1 ファイル）と、`amark_syntax_set_add_commonmark` に加えるインラインの拡張の一覧と順
 - インラインの構文トークンの役割の番号（`AMARK_CM_ROLE_*` の 0x0100–0x01FF）と、インラインのエンジンの役割の値（`block-parser` が割り当てた 0xFF10–0xFF1F の中で定める）、インラインの優先度（`AMARK_CM_INLINE_PRIORITY_*`）
 - 区切り文字の flanking の判定と process emphasis の唯一の実装（`src/parse/inline_delims.c`。エンジンと公開の関数が共有する）と、生の HTML のコメント・処理命令・宣言・CDATA の規則の唯一の実装（`src/syntax/raw_html.c`。構文と公開の関数が共有する）
-- テスト：`tests/inline/`、`tests/spec/`（spec.txt、版の固定、準拠テスト）、`tests/extensions/`（GFM 相当のインラインの検証用拡張と組み合わせ）、`tests/support/inline_check.{h,c}`（INTERFACE ライブラリ `amark_test_inline`）、`tests/support/gen_examples.cmake` への拡張（`EXPECT=`・`FACTORY=`・`CHECK=` の引数。スクリプト自体は `block-parser` が先に作る）、`tests/spec/spec_version.cmake`（`markdown-renderer` などが include して再利用できる版の固定の唯一の場所）、`fuzz/inline_parse_fuzz.c`、`bench/inline_pathological.c` への追記
+- テスト：`tests/inline/`、`tests/spec/`（spec.txt、版の固定、準拠テスト）、`tests/extensions/`（GFM 相当のインラインの検証用拡張と組み合わせ）、`tests/support/inline_check.{h,c}`（INTERFACE ライブラリ `amark_test_inline`）、`tests/support/gen_examples.cmake` への追加の拡張（`EXPECT=html`・`FACTORY=`・`CHECK=`。ファイルと基本の契約は `block-parser`）、`tests/spec/spec_version.cmake`（`markdown-renderer` などが include して再利用できる版の固定の唯一の場所）、`fuzz/inline_parse_fuzz.c`、`bench/inline_pathological.c` への追記
 - `.gitattributes` の spec.txt の `export-ignore` と、CI の準拠テストを必須にする設定
 - `tests/extensions/gfm_set.{h,c}`、`tests/extensions/gfm_inline_ext.{h,c}`（検証用のトークンの役割の番号 `AMARK_TEST_GFM_ROLE_*` の 0x0E40–0x0E61 を含む）と `amark_test_gfm` の作成（`amark_test_gfm` は Naos に依存しない。部品の並びの一覧は、`markdown-renderer` のタスク 4.2 が Markdown の検証用部品 `amark_test_md_gfm` を HTML の部品の後に足し、`amark_test_gfm` に依存を足す。その編集は `markdown-renderer` が行い、この spec のタスクは行わない）
 
 ### Out of Boundary
 - ブロック構造、委譲の取り決めそのもの、区間の並びのテキスト、走査と解読の関数、ラベルの正規化と表、断片のパースの仕組み（`block-parser`。必要な変更は Upstream Changes に示す）
 - `block-parser` が実装するもの（この spec は確かめて使うだけで、同じものを実装しない）：宛先の括弧の入れ子の上限 `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`（32）とその走査、エンジンの役割の範囲の分け方（`block.h` の注記）、INTERFACE ライブラリ `amark_test_parse_gfm`（表・脚注の定義・タスクリストの検証用の構文、`amark_test_gfm_footnote_definitions`、セルの中の `\|` の扱い）、関数の形の `amark_test_parse_check`、HTML の開始タグと終了タグの走査（区間の並びの版と、バイト列の版 `amark_scan_html_open_tag_bytes` / `amark_scan_html_closing_tag_bytes`）
-- `tests/support/gen_examples.cmake` の作成と、spec.txt と同じ例の区切りの形式の読み取り（区切り、`→`、節の名前、例の番号、テストの名前、NUL と CR の 16 進の埋め込み、`EXPECT=` などの引数がないときの既定の動作）。`block-parser`（タスク 1.4）が spec.txt の形式の唯一の読み手として作り、この spec は引数を足して拡張するだけで、別の読み手を作らない
+- `tests/support/gen_examples.cmake` の作成と、その基本の契約（データの形式、テストの名前 `ex<4 桁の番号>_<節の名前の C の識別子>`、開始の行の `n=<N>`、構成時の誤り、基本の ARGS `EXPECT=dump`・`DUMP_FLAGS=` と基本の検査の経路）。`block-parser`（タスク 1.4。design の SyntaxTests の「`gen_examples.cmake` の契約」）が spec.txt の形式の唯一のパーサとして作る。この spec は追加だけで拡張し、別のパーサを作らない
+- `bench/CMakeLists.txt`、オプション `AMARK_BUILD_BENCH`、登録関数 `amark_add_bench(<name> SOURCES ... [INTERNAL])`（`block-parser`）。この spec は `amark_add_bench(...)` の行を 1 つ追記するだけ
 - `markdown-renderer` の検証用部品（`amark_test_md_gfm`）と、それを `gfm_set.c` に加える編集、`CHECK=` で指定する検査の関数（`amark_test_md_check_example`）
 - ノード、トークンの種類、編集の追跡、レジストリ（`syntax-tree`）
 - HTML の出力の表と GFM 相当の HTML の部品（`html-renderer`）。準拠テストで出力の不具合が見つかったら `html-renderer` を直す
@@ -66,8 +67,8 @@
 
 **B. 準拠ゲート（`tests/spec/`、`tests/support/inline_check.{h,c}`、`gen_examples.cmake` の拡張の引数）**
 - 固定する spec の版と SHA-256（`spec_version.cmake`）の変更 → この spec の準拠テスト、`spec_version.cmake` を include する `markdown-renderer` のテスト
-- `gen_examples.cmake` の引数（`EXPECT=`・`FACTORY=`・`CHECK=`、`CHECK=` の関数の引数の形 `amark_test_example_check_fn`）の変更 → `markdown-renderer` のテスト
-- `block-parser` が作る `gen_examples.cmake` の基の部分（区切りの読み取り、テストの名前、引数がないときの既定の動作）と `amark_test_parse_check` の契約の変更 → この spec（InlineCheck、SpecTests）
+- `gen_examples.cmake` のこの spec の引数（`EXPECT=html`・`FACTORY=`・`CHECK=`、`DUMP_FLAGS=` との組み合わせの規則、`CHECK=` の関数の引数の形 `amark_test_example_check_fn`）の変更 → `markdown-renderer` のテスト
+- `block-parser` の `gen_examples.cmake` の基本の契約（データの形式、テストの名前、`n=`、基本の ARGS と経路、予約した名前）と `amark_test_parse_check` の契約の変更 → この spec（InlineCheck、SpecTests）
 - `html-renderer` の組み込みの出力の表の変更 → 準拠テスト
 - `AMARK_REQUIRE_SPEC_TESTS`、スキップの報告、`.gitattributes` の `export-ignore` の変更 → CI、`foundation`
 
@@ -171,7 +172,7 @@ src/syntax/
 tests/support/
 ├── inline_check.h               # 例の照合の補助（構文セットの生成関数、ダンプか HTML の比較、被覆、逐次の一致）
 ├── inline_check.c               # INTERFACE ライブラリ amark_test_inline のソース
-└── gen_examples.cmake           # block-parser が作る spec.txt の形式の唯一の読み手。この spec は EXPECT=・FACTORY=・CHECK= を足して拡張する
+└── gen_examples.cmake           # block-parser が作る spec.txt の形式の唯一のパーサ。この spec は EXPECT=html・FACTORY=・CHECK= を追加で足す
 tests/inline/
 ├── CMakeLists.txt
 ├── test_inline_syntaxes.h       # エンジンのテスト用の最小の構文（各スロットの種類、失敗、副作用のある NONE）
@@ -229,9 +230,9 @@ bench/
 - `src/syntax/commonmark.c` — 構築関数の「構文の拡張の一覧」の末尾にインラインの拡張を加える（順は CommonMarkSet）。
 - `src/CMakeLists.txt` — `amark_objects` に `src/parse/inline_*.c` と `src/syntax/` のインラインのファイルを追加する。
 - `tests/CMakeLists.txt` — INTERFACE ライブラリ `amark_test_inline`（`support/inline_check.c`。Naos を使う）を定義し、`add_subdirectory(inline)`、`add_subdirectory(spec)`、`add_subdirectory(extensions)` を追加する。`foundation` の規則どおり `tests/` とその下は `AMARK_FUZZ` だけが ON の構成でも入るので、Naos を使う `amark_test_inline` と `inline`・`spec` のテストは `if(AMARK_BUILD_TESTS)` の中に置き、`extensions` は常に加える（`tests/extensions/CMakeLists.txt` の中で、Naos を使わない `amark_test_gfm` は常に定義し、Naos を使う生成テストと組み合わせのテストは `if(AMARK_BUILD_TESTS)` の中に置く）。
-- `tests/support/gen_examples.cmake` — `block-parser` が作ったスクリプトに `EXPECT=`・`FACTORY=`・`CHECK=` の引数を足す（InlineCheck）。引数がないときの既定の動作と、区切りの読み取り・テストの名前は変えない（`block-parser` の生成テストの結果を変えない）。
+- `tests/support/gen_examples.cmake` — `block-parser` が作ったファイルに、予約済みの `EXPECT=html`、`FACTORY=`、`CHECK=` を追加で足す（InlineCheck）。`FACTORY=` も `CHECK=` もないときに生成するソースは `block-parser` の版とバイト単位で同じに保つ。データの形式、テストの名前、`n=`、基本の ARGS の意味は変えない。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(inline_parse SOURCES inline_parse_fuzz.c CORPUS corpus/inline_parse LIBRARIES amark_test_gfm)`。`amark_test_gfm` は Naos に依存しない（`-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF` でも構成できる。`LIBRARIES` のターゲットがなければ `amark_add_fuzzer` が構成を失敗させる）。
-- `bench/CMakeLists.txt` — `inline_pathological` を追加する（ファイルは `block-parser` が所有し、この spec は追記する側）。
+- `bench/CMakeLists.txt` — `amark_add_bench(inline_pathological SOURCES inline_pathological.c)` の 1 行を追記する（ファイル、`AMARK_BUILD_BENCH`、`amark_add_bench` は `block-parser` が所有し、この spec は関数と構成を変えない）。
 - `.gitattributes` — `tests/spec/data/spec.txt export-ignore`、`tests/spec/data/NOTICE.txt export-ignore`。
 - `.github/workflows/ci.yml` — 構成に `-DAMARK_REQUIRE_SPEC_TESTS=ON` を加える（全ジョブ）。
 
@@ -906,8 +907,13 @@ typedef void (*amark_test_example_check_fn)(amark_test_set_factory factory, cons
                                             size_t expected_length);
 ```
 - `amark_test_check_example` は `amark_test_parse_check`（`block-parser` が関数の形で提供。検査の後に一括の文書を返す）を呼び、返った文書のダンプか HTML を比べて解放する。検査の補助をこの spec で作り直さない。
-- `tests/support/gen_examples.cmake` の所有の分担：スクリプトは `block-parser`（タスク 1.4）が先に作り、spec.txt と同じ例の区切りの形式の唯一の読み手とする（32 個のバッククォートと ` example` の行、`.` の行、閉じの行、`→` はタブ、見出しの行が節の名前、例の番号とテストの名前、`AmarkTestGen.cmake` の 16 進の補助で NUL と CR を失わないこと、引数がないときに `amark_test_parse_check` でダンプと照合する既定の動作）。この spec は別の読み手を作らず、同じスクリプトに引数を足して拡張する。
-- この spec が足す引数（ARGS）：`EXPECT=dump|html`、`FACTORY=<C の関数名>`、`CHECK=<C の関数名>`（任意）。`EXPECT=` か `FACTORY=` があれば各テストは `amark_test_check_example(FACTORY, input, len, EXPECT, expected, len)` を呼ぶ（`FACTORY=` を省けば構文セットの生成関数の既定は `block-parser` の版の既定に従う）。`CHECK=` があれば、生成するソースに `amark_test_example_check_fn` の形の関数の宣言を出し、各テストは `<CHECK>(FACTORY, input, len, expected, len)` を呼ぶ（`EXPECT=` は使わない。両方を指定したら構成の失敗）。関数の定義は呼び出し側が `LIBRARIES` でリンクする（`markdown-renderer` は `CHECK=amark_test_md_check_example` で `tests/spec/data/spec.txt` と自分のコーパスを登録する）。どの引数もないときは `block-parser` の版の既定の動作のまま（`block-parser` の生成テストを変えない）。テストの名前と節の扱いは `block-parser` の版に従う（例の番号が名前に入るので、12.1 の章と例の番号で追える）。
+- `tests/support/gen_examples.cmake` の所有の分担：ファイルと基本の契約は `block-parser`（タスク 1.4。design の SyntaxTests の「`gen_examples.cmake` の契約」）が持つ。spec.txt の例の形式の唯一のパーサで、データの形式（32 個のバッククォートと ` example` の行、`.` の行、閉じの行、`→` はタブ、CR と NUL を保つ）、テストの名前 `ex<4 桁の番号>_<節の名前の C の識別子>`、開始の行の `n=<N>`、閉じのない例・名前の重複・未知の語と ARGS の構成時の誤り、基本の ARGS（`EXPECT=dump`、`DUMP_FLAGS=<C の式>`）と基本の検査の経路（`AMARK_CHECK_PARSE` をテスト用の構文セットと単純な委譲先で呼ぶ）を定める。`FACTORY`、`CHECK`、`EXPECT=html` は `inline-parser` のために予約されている。この spec は別のパーサを作らず、同じファイルに追加だけで拡張する。
+- この spec が足すもの（ARGS）：`EXPECT=html`、`FACTORY=<C の関数名>`、`CHECK=<C の関数名>`。
+  - `FACTORY=` があるとき：各テストは `amark_test_check_example(FACTORY, input, len, EXPECT, expected, len)` を呼ぶ（`EXPECT=dump` は `AMARK_DUMP_TOKENS` つきのダンプ、`EXPECT=html` は `AMARK_HTML_UNSAFE` の HTML）。生成するソースは `inline_check.h` を include するので、呼び出し側は `LIBRARIES amark_test_inline amark_test_parse` をリンクする。
+  - `CHECK=` があるとき：生成するソースに `amark_test_example_check_fn` の形の関数の宣言を出し、各テストは `<CHECK>(FACTORY, input, len, expected, len)` を呼ぶ（`FACTORY=` も必須）。関数の定義は呼び出し側が `LIBRARIES` でリンクする（`markdown-renderer` は `CHECK=amark_test_md_check_example` で `tests/spec/data/spec.txt` と自分のコーパスを登録する）。
+  - `DUMP_FLAGS=` の意味（この spec が決める）：`FACTORY=` か `CHECK=` があるときは使わず、指定すれば `FATAL_ERROR`（`FACTORY=` の経路のダンプは常に `AMARK_DUMP_TOKENS`）。
+  - 構成時の誤り（`FATAL_ERROR`）：`EXPECT=html` で `FACTORY=` がない、`CHECK=` と `EXPECT=` を両方指定、`CHECK=` で `FACTORY=` がない。
+  - `FACTORY=` も `CHECK=` もないとき（基本の経路）に生成するソースは、`block-parser` の版とバイト単位で同じに保つ。データの形式、テストの名前の規則、`n=`、`EXPECT=dump` と `DUMP_FLAGS=` の基本の経路の意味は変えない。`block-parser` の自己テスト（`tests/support/data/gen_examples_selftest.txt`）は拡張の後も通る。テストの名前に例の番号が入るので、12.1 の章と例の番号で追える。
 
 #### SpecTests
 - `tests/spec/spec_version.cmake`：`set(AMARK_COMMONMARK_SPEC_VERSION 0.31.2)`、`set(AMARK_COMMONMARK_SPEC_SHA256 257c41ad946f7a1414a499aca402a1aa8fdac3678532266611348c1cf54f4b80)`（12.3）。この spec が所有し、変数の定義だけを置いて副作用を持たない（`include()` で読める）。`markdown-renderer` は同じ spec.txt を使うとき、版と SHA-256 を複製せずにこのファイルを include して再利用する。
@@ -1087,9 +1093,9 @@ struct amark_inline_context {
   1. `inline.h` に `amark_inline_delimiter_flanks` と `amark_inline_match_delimiters`（`amark_inline_run`、`amark_inline_run_match`）を公開し、InlineDelimiters が内部でも同じ実装（`amark__inline_match_runs`）を使う（5.7）。→ この spec のタスク 2.5、3.3。
   2. 生の HTML の判定の関数を公開する（依頼の時点の名前は `amark_scan_raw_html`。cross-spec review r1 で `inline.h` の名前の空間に揃えて `amark_inline_scan_raw_html` に改名。引数と規則は変えない）。所有の判断：タグの規則は `block-parser`（`scan_html.c` の 1 つの実装。バイト列の版と区間の並びの版）、コメント・処理命令・宣言・CDATA の規則と振り分けはこの spec の `raw_html.c` が持ち、構文と公開の関数が同じ実装を使う（7.7、RawHtml）。`markdown-renderer` は HTML ブロックの開始と終わりの条件を `block-parser` の `amark_scan_html_block_start` / `_end` から、インラインの生の HTML をこの関数から得る。→ この spec のタスク 1.2（前提の確認）、4.5。
   3. テキストの走査の一致の範囲に `ESCAPE` か `CHAR_REF` のトークンの文字が含まれるなら採らない規則を InlineText に加える（4.5）。→ この spec のタスク 2.7、3.4、7.2。
-  4. `gen_examples.cmake` に `CHECK=` を足す（14.4、InlineCheck）。スクリプトは `block-parser` のタスク 1.4 が先に作り、この spec のタスク 1.4 が `EXPECT=`・`FACTORY=`・`CHECK=` を足す。→ この spec のタスク 1.4。`tests/extensions/gfm_set.c` に `amark_test_md_gfm` を加える編集と `amark_test_gfm` の依存の追加は、`markdown-renderer` のタスク 4.2 が行う（この spec は部品の並びを 1 か所の配列にしておくだけ）。
+  4. `gen_examples.cmake` に `CHECK=` を足す（14.4、InlineCheck）。ファイルは `block-parser` のタスク 1.4 が先に作り、この spec のタスク 1.4 が予約済みの `EXPECT=html`・`FACTORY=`・`CHECK=` を追加で足す。→ この spec のタスク 1.4。`tests/extensions/gfm_set.c` に `amark_test_md_gfm` を加える編集と `amark_test_gfm` の依存の追加は、`markdown-renderer` のタスク 4.2 が行う（この spec は部品の並びを 1 か所の配列にしておくだけ）。
 - **`syntax-tree`**：並行して追加中の `amark_document_take_syntax_set`、`amark_node_import_children`、スロットの範囲の表に依存する。範囲の表の `inline-parser` の行（0x0200–0x02FF、0x0201–0x0206 の名前）をこの spec が `extension.h` に追記する。それ以外の変更は要らない。
 - **`html-renderer`**：変更は要らない。`gfm_html_ext.h` が公開する記述子（`test.strikethrough`、`test.footnote_ref` とそのラベルの設定）と部品の拡張をそのまま使う。準拠テストで出力の差が見つかったら、`html-renderer` の出力の表を直す。
 - **`foundation`**：予定どおり、`.gitattributes` に spec.txt の `export-ignore` を加える。CI の構成に `AMARK_REQUIRE_SPEC_TESTS=ON` を加える。`amark.h` の `inline.h` の位置は `foundation` の正規の順に従う。ファジングのターゲットがリンクするテスト支援ライブラリの規則（Naos に依存しない、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` で定義される、`LIBRARIES` のターゲットがなければ `amark_add_fuzzer` が構成を失敗させる）に `amark_test_gfm` を合わせる。
-- **`block-parser`（例の生成の手順）**：`tests/support/gen_examples.cmake` は `block-parser` のタスク 1.4 が spec.txt の形式の唯一の読み手として先に作る。この spec は引数を足して拡張し、別の読み手を作らない。`bench/CMakeLists.txt` も `block-parser` が所有し、この spec は `inline_pathological` を追記する。
+- **`block-parser`（例の生成の手順とベンチマーク）**：`tests/support/gen_examples.cmake` は `block-parser` のタスク 1.4 が spec.txt の形式の唯一のパーサとして先に作る（基本の契約は `block-parser` の design）。この spec は予約済みの名前を追加で足して拡張し、基本の経路の出力を変えない。`bench/CMakeLists.txt`（`AMARK_BUILD_BENCH`、`amark_add_bench`）も `block-parser` が所有し、この spec は `amark_add_bench(inline_pathological ...)` の 1 行を追記する。`amark_parser_new` は構文セットを借りるだけで、所有権を渡すのは `amark_parser_new_take_syntax_set`（`AMARK_PARSE_TAKE_SYNTAX_SET` の印はない）。この spec のテストと補助は、構文セットを渡すとき `block-parser` のこの取り決めに従う。
 - **`markdown-renderer` への提供**：インラインの役割の番号、トークンの所有の規則（区切り文字は作ったノード、リンクの表記はリンク、改行の前の空白は改行のノード、残りの区切り文字とブラケットは text の `UNMATCHED`）、エスケープに関わる文字の問い合わせ、`amark_inline_delimiter_flanks`・`amark_inline_match_delimiters`・`amark_inline_scan_raw_html`（旧名 `amark_scan_raw_html`）、テキストの走査の採否の規則（4.5）、`gen_examples.cmake` の `CHECK=`、`tests/spec/spec_version.cmake`（include して再利用する）、拡張が定義するリンクの見分け方（`LINK_OPEN`・`LINK_REF_*` を持たない link。`AMARK_TEST_GFM_ROLE_EXT_AUTOLINK`）、Naos に依存しない `amark_test_gfm`。エスケープの方式はこの spec では決めない。
