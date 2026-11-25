@@ -4,9 +4,9 @@
 Amark は、Markdown テキストと構文木を相互変換する C99 ライブラリである。`foundation` は、後続のすべての spec（`syntax-tree`、`html-renderer`、`block-parser`、`inline-parser`、`markdown-renderer`）が依存する土台を用意する。土台は 2 つの部分からなる。
 
 - **インフラ**：Windows・Linux・macOS で静的/動的ライブラリとしてビルド・インストールでき、利用者が 4 つの方法（`find_package`、`add_subdirectory`、FetchContent、pkg-config）で取り込めるビルド構成。Naos によるテスト基盤、GitHub Actions による CI とリリース、ファジングの基盤、ライセンスとソースの規約。
-- **共通ランタイム**：公開ヘッダの規約とバージョン API、エラーコードの規約、差し替え可能なグローバルのアロケータ、伸長できるバイトバッファ、UTF-8 のデコードと検証、CommonMark が要求する文字の分類。
+- **共通基盤**：公開ヘッダの規約とバージョン API、エラーコードの規約、差し替え可能なグローバルのアロケータ、伸長できるバイトバッファ、UTF-8 のデコードと検証、CommonMark が要求する文字の分類。
 
-組み込みの構文も公開 API だけを使って実装する方針（steering）のため、共通ランタイムのうち拡張の実装者が必要とするもの（アロケータ、バッファ、UTF-8、文字の分類）は公開 API として提供する。
+組み込みの構文も公開 API だけを使って実装する方針（steering）のため、共通基盤のうち拡張の実装者が必要とするもの（アロケータ、バッファ、UTF-8、文字の分類）は公開 API として提供する。
 
 現在のリポジトリにはコード・ビルド構成・CI がない（greenfield）。
 
@@ -19,7 +19,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
   - LICENSE、README の骨子、ソースのライセンスヘッダの規約とその検査
   - 公開ヘッダの配置、全体をまとめるヘッダ、バージョン API
   - エラーコード、アロケータ、バイトバッファ、UTF-8、文字の分類（Unicode の空白・句読点、ASCII の句読点）
-  - ファジングの基盤と、共通ランタイムのファジングターゲット
+  - ファジングの基盤と、共通基盤のファジングターゲット
 - **Out of scope**：
   - ノード型、構文トークン、構文木、パーサ、レンダラの実装
   - CommonMark の spec.txt の取り込みと準拠テストのランナー（`inline-parser` が持つ）
@@ -118,7 +118,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 3. Where 開発者がファジングを有効にし、コンパイラが libFuzzer に対応していない, the Amark Build shall 同じファジングターゲットを、コーパスの各ファイルを入力として 1 回ずつ実行する通常の実行ファイルとしてビルドする
 4. While テストがビルドされている, the Amark Build shall 各ファジングターゲットのコーパスの再生を CTest のテストとして登録し、ファジングの有効・無効にかかわらず実行できるようにする
 5. The Amark Build shall 後続の spec が、ファジングの入口となるソースとコーパスのディレクトリを指定するだけで新しいファジングターゲットを追加できるようにする
-6. The Amark Build shall 共通ランタイムの UTF-8 の処理とバイトバッファを対象とするファジングターゲットを提供する
+6. The Amark Build shall 共通基盤の UTF-8 の処理とバイトバッファを対象とするファジングターゲットを提供する
 7. Where 開発者がファジングかテストのどちらかを有効にする, the Amark Build shall ファジングターゲットがリンクするテスト用の補助ライブラリを Naos に依存しない形で定義し、テストを無効にしてファジングだけを有効にした構成でも Naos を取得せずに構成とビルドを成功させる
 8. If ファジングターゲットの追加でリンク対象に指定されたライブラリが定義されていないか Naos に直接依存している, the Amark Build shall 構成の段階で、ファジングターゲットとライブラリの名前を示して失敗する
 
@@ -136,75 +136,75 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 **Objective:** As a Amark の利用者, I want 1 つのヘッダで全 API を使え、コンパイル時と実行時の両方で版を確かめられること, so that 取り込みが簡単で、ヘッダと異なる版のライブラリが読み込まれたことを検出できる
 
 #### Acceptance Criteria
-1. The Amark Runtime shall すべての公開ヘッダを `amark/` 以下に置き、`amark/amark.h` を include するだけで全公開 API を使えるようにする
-2. The Amark Runtime shall 公開ヘッダを C++ のソースから include しても、関数を C の名前でリンクできるようにする
-3. The Amark Runtime shall 公開 API のすべての関数と型に `amark_`、マクロに `AMARK_` の接頭辞を付ける
-4. The Amark Runtime shall コンパイル時に参照できる版（メジャー、マイナー、パッチ、版の文字列、大小を比較できる版の数値）を提供する
-5. When 利用者が実行時に版を問い合わせる, the Amark Runtime shall 実際にリンクされたライブラリの版の数値と版の文字列を返す
+1. The Amark Base shall すべての公開ヘッダを `amark/` 以下に置き、`amark/amark.h` を include するだけで全公開 API を使えるようにする
+2. The Amark Base shall 公開ヘッダを C++ のソースから include しても、関数を C の名前でリンクできるようにする
+3. The Amark Base shall 公開 API のすべての関数と型に `amark_`、マクロに `AMARK_` の接頭辞を付ける
+4. The Amark Base shall コンパイル時に参照できる版（メジャー、マイナー、パッチ、版の文字列、大小を比較できる版の数値）を提供する
+5. When 利用者が実行時に版を問い合わせる, the Amark Base shall 実際にリンクされたライブラリの版の数値と版の文字列を返す
 6. The Amark Build shall 版を 1 か所で定義し、ヘッダの版、実行時の版、CMake のパッケージの版、pkg-config の版、動的ライブラリの互換性番号をすべてその値から決める
-7. The Amark Runtime shall 全体をまとめるヘッダが公開ヘッダを include する順を 1 つの正規の順として定め、すべての spec の公開ヘッダをその順に並べる
+7. The Amark Base shall 全体をまとめるヘッダが公開ヘッダを include する順を 1 つの正規の順として定め、すべての spec の公開ヘッダをその順に並べる
 
 ### Requirement 10: エラーの規約
 **Objective:** As a 後続の spec の開発者と Amark の利用者, I want 失敗の伝え方と失敗後の状態がライブラリ全体で同じであること, so that エラー処理を一貫した方法で書ける
 
 #### Acceptance Criteria
-1. The Amark Runtime shall 失敗しうる公開関数がエラーコードを返し、成功のときは成功を表すコードを、結果は出力引数で返すという規約を定める
-2. The Amark Runtime shall メモリ不足、不正な引数、サイズの桁あふれ、上限の超過、不正な状態を、互いに区別できるエラーコードとして定義する
-3. When 利用者がエラーコードの説明を問い合わせる, the Amark Runtime shall 解放の不要な静的な文字列を返し、未知のコードに対しても NULL でない文字列を返す
-4. If 公開関数が失敗する, the Amark Runtime shall 操作の対象のオブジェクトを呼び出し前の有効な状態のまま保ち、オブジェクトを返す出力引数には NULL を設定する
-5. If 必須のポインタ引数に NULL が渡される, the Amark Runtime shall 不正な引数を表すコードを返し、異常終了しない
-6. When 解放の関数に NULL が渡される, the Amark Runtime shall 何もせずに戻る
-7. The Amark Runtime shall 既存のエラーコードの値を将来の版で変えず、新しいコードは追加だけで増やす
-8. The Amark Runtime shall アロケータの設定（要件 11）のほかにグローバルな可変状態を持たず、別々のオブジェクトを別々のスレッドから同時に使えるようにする
-9. The Amark Runtime shall 対象（構文木など）を要求された出力の形式で意味を変えずに表せないことを表すエラーコードを、2 のエラーコードと区別できるコードとして、既存のコードの値を変えずに末尾に追加して定義する
+1. The Amark Base shall 失敗しうる公開関数がエラーコードを返し、成功のときは成功を表すコードを、結果は出力引数で返すという規約を定める
+2. The Amark Base shall メモリ不足、不正な引数、サイズの桁あふれ、上限の超過、不正な状態を、互いに区別できるエラーコードとして定義する
+3. When 利用者がエラーコードの説明を問い合わせる, the Amark Base shall 解放の不要な静的な文字列を返し、未知のコードに対しても NULL でない文字列を返す
+4. If 公開関数が失敗する, the Amark Base shall 操作の対象のオブジェクトを呼び出し前の有効な状態のまま保ち、オブジェクトを返す出力引数には NULL を設定する
+5. If 必須のポインタ引数に NULL が渡される, the Amark Base shall 不正な引数を表すコードを返し、異常終了しない
+6. When 解放の関数に NULL が渡される, the Amark Base shall 何もせずに戻る
+7. The Amark Base shall 既存のエラーコードの値を将来の版で変えず、新しいコードは追加だけで増やす
+8. The Amark Base shall アロケータの設定（要件 11）のほかにグローバルな可変状態を持たず、別々のオブジェクトを別々のスレッドから同時に使えるようにする
+9. The Amark Base shall 対象（構文木など）を要求された出力の形式で意味を変えずに表せないことを表すエラーコードを、2 のエラーコードと区別できるコードとして、既存のコードの値を変えずに末尾に追加して定義する
 
 ### Requirement 11: 差し替え可能なグローバルのアロケータ
 **Objective:** As a Amark を組み込むアプリケーションの開発者, I want Amark が使うメモリをすべて自分のアロケータで管理できること, so that オブジェクトごとに指定しなくても、確保の方法をアプリケーション側で制御できる
 
 #### Acceptance Criteria
-1. The Amark Runtime shall 確保・0 で初期化する確保・再確保・解放の関数からなるアロケータを、ライブラリ全体で使うグローバルのアロケータとして設定でき、設定を既定に戻せるようにする
-2. While アロケータが設定されていない, the Amark Runtime shall C 標準ライブラリの確保関数に基づく既定のアロケータを使う
-3. The Amark Runtime shall 確保・0 で初期化する確保・再確保・解放を、すべてその時点で設定されているグローバルのアロケータで行う
-4. If アロケータがメモリの確保に失敗する, the Amark Runtime shall メモリ不足を表すコードを返し、その操作のためにすでに確保したメモリをリークしない
-5. If 設定しようとしたアロケータに必要な関数がない, the Amark Runtime shall 不正な引数を表すコードを返し、現在の設定を変えない
-6. The Amark Runtime shall アロケータの構造体を確保・0 で初期化する確保・再確保・解放の 4 つの関数だけで構成し、将来の版でもその構成を変えず、古い版に合わせてビルドされたプログラムが動き続けるようにする
-7. If 要素数と要素のサイズを指定した 0 で初期化する確保で、サイズの計算が桁あふれする, the Amark Runtime shall アロケータを呼ばずに失敗を返す
-8. The Amark Runtime shall 拡張の実装者と利用者が、グローバルのアロケータでメモリを確保・0 で初期化して確保・再確保・解放できる公開の関数を提供する
-9. The Amark Runtime shall アロケータの設定を変えてよい条件（Amark が確保した未解放のメモリがなく、他のスレッドが Amark を使っていないこと）と、複数のスレッドで Amark を使うときアロケータの関数がスレッド安全でなければならないことを、公開ヘッダに文書化する
+1. The Amark Base shall 確保・0 で初期化する確保・再確保・解放の関数からなるアロケータを、ライブラリ全体で使うグローバルのアロケータとして設定でき、設定を既定に戻せるようにする
+2. While アロケータが設定されていない, the Amark Base shall C 標準ライブラリの確保関数に基づく既定のアロケータを使う
+3. The Amark Base shall 確保・0 で初期化する確保・再確保・解放を、すべてその時点で設定されているグローバルのアロケータで行う
+4. If アロケータがメモリの確保に失敗する, the Amark Base shall メモリ不足を表すコードを返し、その操作のためにすでに確保したメモリをリークしない
+5. If 設定しようとしたアロケータに必要な関数がない, the Amark Base shall 不正な引数を表すコードを返し、現在の設定を変えない
+6. The Amark Base shall アロケータの構造体を確保・0 で初期化する確保・再確保・解放の 4 つの関数だけで構成し、将来の版でもその構成を変えず、古い版に合わせてビルドされたプログラムが動き続けるようにする
+7. If 要素数と要素のサイズを指定した 0 で初期化する確保で、サイズの計算が桁あふれする, the Amark Base shall アロケータを呼ばずに失敗を返す
+8. The Amark Base shall 拡張の実装者と利用者が、グローバルのアロケータでメモリを確保・0 で初期化して確保・再確保・解放できる公開の関数を提供する
+9. The Amark Base shall アロケータの設定を変えてよい条件（Amark が確保した未解放のメモリがなく、他のスレッドが Amark を使っていないこと）と、複数のスレッドで Amark を使うときアロケータの関数がスレッド安全でなければならないことを、公開ヘッダに文書化する
 
 ### Requirement 12: 伸長できるバイトバッファ
 **Objective:** As a 後続の spec の開発者と拡張の実装者, I want 任意のバイト列を効率よく組み立てられるバッファ, so that レンダラの出力やテキストの組み立てを安全に書ける
 
 #### Acceptance Criteria
-1. The Amark Runtime shall NUL を含む任意のバイト列を末尾に追加でき、必要に応じて容量を伸ばすバッファを提供する
-2. The Amark Runtime shall バッファの内容の直後に常に NUL を置き、内容の先頭と長さを参照できるようにする
-3. The Amark Runtime shall バッファに、1 バイトの追加、同じバイトの繰り返しの追加、NUL 終端の文字列の追加、符号位置の UTF-8 での追加、容量の予約、短い長さへの切り詰め、内容を空にする操作、内容の所有権を呼び出し側に移して取り出す操作を提供する
-4. If 容量の伸長に失敗する, the Amark Runtime shall メモリ不足を表すコードを返し、バッファの内容と長さを呼び出し前のまま保つ
-5. If 追加や予約の後の長さが表現できる大きさを超える, the Amark Runtime shall 桁あふれを表すコードを返し、バッファを変更しない
-6. If 現在の長さより長い長さへの切り詰めが指定される, the Amark Runtime shall 不正な引数を表すコードを返し、バッファを変更しない
-7. When 利用者が合計 n バイトを少しずつ追加する, the Amark Runtime shall 容量の再確保の回数を n の対数に比例する程度に抑える
-8. When 利用者がバッファの内容の所有権を取り出す, the Amark Runtime shall NUL 終端の内容と長さを返し、取り出した内容を公開の解放の関数で解放できるようにし、バッファを空の状態に戻す
+1. The Amark Base shall NUL を含む任意のバイト列を末尾に追加でき、必要に応じて容量を伸ばすバッファを提供する
+2. The Amark Base shall バッファの内容の直後に常に NUL を置き、内容の先頭と長さを参照できるようにする
+3. The Amark Base shall バッファに、1 バイトの追加、同じバイトの繰り返しの追加、NUL 終端の文字列の追加、符号位置の UTF-8 での追加、容量の予約、短い長さへの切り詰め、内容を空にする操作、内容の所有権を呼び出し側に移して取り出す操作を提供する
+4. If 容量の伸長に失敗する, the Amark Base shall メモリ不足を表すコードを返し、バッファの内容と長さを呼び出し前のまま保つ
+5. If 追加や予約の後の長さが表現できる大きさを超える, the Amark Base shall 桁あふれを表すコードを返し、バッファを変更しない
+6. If 現在の長さより長い長さへの切り詰めが指定される, the Amark Base shall 不正な引数を表すコードを返し、バッファを変更しない
+7. When 利用者が合計 n バイトを少しずつ追加する, the Amark Base shall 容量の再確保の回数を n の対数に比例する程度に抑える
+8. When 利用者がバッファの内容の所有権を取り出す, the Amark Base shall NUL 終端の内容と長さを返し、取り出した内容を公開の解放の関数で解放できるようにし、バッファを空の状態に戻す
 
 ### Requirement 13: UTF-8 のデコード・検証・エンコード
 **Objective:** As a 後続の spec の開発者と拡張の実装者, I want 不正なバイト列があっても安全に UTF-8 を扱える関数, so that 入力をクラッシュせずに処理し続けられる
 
 #### Acceptance Criteria
-1. When 利用者が長さを指定したバイト列の先頭の文字を復号する, the Amark Runtime shall 符号位置と、消費したバイト数を返す
-2. If 先頭のバイト列が不正な UTF-8（冗長な表現、サロゲート、U+10FFFF を超える値、途中で切れた並び、不正な先頭バイト）である, the Amark Runtime shall U+FFFD と、Unicode の推奨する「最大部分の置き換え」に従った 1 以上のバイト数を返す
-3. When 利用者が長さを指定したバイト列の、指定した位置の直前にある文字を復号する, the Amark Runtime shall その文字の符号位置とバイト数を、先頭から順に復号したときの区切りと矛盾しない形で返す
-4. When 利用者が長さを指定したバイト列を検証する, the Amark Runtime shall バイト列全体が正しい UTF-8 かどうかを返し、正しくないときは最初の不正なバイトの位置を返す
-5. When 利用者が符号位置を符号化する, the Amark Runtime shall 1 から 4 バイトの UTF-8 を返し、サロゲートや U+10FFFF を超える値に対しては U+FFFD を符号化する
-6. The Amark Runtime shall 長さ 0 を含む任意の入力に対して、指定された長さの外を読まず、入力のバイト列を書き換えない
-7. The Amark Runtime shall 入力に NUL 終端を要求せず、途中に NUL を含むバイト列も長さどおりに扱う
+1. When 利用者が長さを指定したバイト列の先頭の文字を復号する, the Amark Base shall 符号位置と、消費したバイト数を返す
+2. If 先頭のバイト列が不正な UTF-8（冗長な表現、サロゲート、U+10FFFF を超える値、途中で切れた並び、不正な先頭バイト）である, the Amark Base shall U+FFFD と、Unicode の推奨する「最大部分の置き換え」に従った 1 以上のバイト数を返す
+3. When 利用者が長さを指定したバイト列の、指定した位置の直前にある文字を復号する, the Amark Base shall その文字の符号位置とバイト数を、先頭から順に復号したときの区切りと矛盾しない形で返す
+4. When 利用者が長さを指定したバイト列を検証する, the Amark Base shall バイト列全体が正しい UTF-8 かどうかを返し、正しくないときは最初の不正なバイトの位置を返す
+5. When 利用者が符号位置を符号化する, the Amark Base shall 1 から 4 バイトの UTF-8 を返し、サロゲートや U+10FFFF を超える値に対しては U+FFFD を符号化する
+6. The Amark Base shall 長さ 0 を含む任意の入力に対して、指定された長さの外を読まず、入力のバイト列を書き換えない
+7. The Amark Base shall 入力に NUL 終端を要求せず、途中に NUL を含むバイト列も長さどおりに扱う
 
 ### Requirement 14: 文字の分類
 **Objective:** As a 後続の spec の開発者と拡張の実装者, I want CommonMark の定義どおりの文字の分類, so that 強調の区切りやエスケープなどを仕様どおりに判定できる
 
 #### Acceptance Criteria
-1. The Amark Runtime shall 符号位置が CommonMark の Unicode whitespace character（Unicode の Zs 一般カテゴリ、タブ、LF、FF、CR）かどうかを判定する
-2. The Amark Runtime shall 符号位置が CommonMark の Unicode punctuation character（Unicode の P または S の一般カテゴリ）かどうかを判定する
-3. The Amark Runtime shall 符号位置が CommonMark の ASCII punctuation character かどうかを判定する
-4. If 判定の対象が Unicode の範囲外の値かサロゲートである, the Amark Runtime shall どの分類にも当たらないと判定する
-5. The Amark Runtime shall 分類に使う Unicode のデータの版を固定し、その版を文書とテストで明示する
-6. The Amark Runtime shall 1 回の判定を、符号位置の値によらず一定の上限の時間内で終える
-7. The Amark Runtime shall Unicode のデータから分類の表を生成し直す手順を保守者向けに提供し、後続の spec が別の文字の性質の表を同じ手順で追加できるようにする
+1. The Amark Base shall 符号位置が CommonMark の Unicode whitespace character（Unicode の Zs 一般カテゴリ、タブ、LF、FF、CR）かどうかを判定する
+2. The Amark Base shall 符号位置が CommonMark の Unicode punctuation character（Unicode の P または S の一般カテゴリ）かどうかを判定する
+3. The Amark Base shall 符号位置が CommonMark の ASCII punctuation character かどうかを判定する
+4. If 判定の対象が Unicode の範囲外の値かサロゲートである, the Amark Base shall どの分類にも当たらないと判定する
+5. The Amark Base shall 分類に使う Unicode のデータの版を固定し、その版を文書とテストで明示する
+6. The Amark Base shall 1 回の判定を、符号位置の値によらず一定の上限の時間内で終える
+7. The Amark Base shall Unicode のデータから分類の表を生成し直す手順を保守者向けに提供し、後続の spec が別の文字の性質の表を同じ手順で追加できるようにする

@@ -44,7 +44,7 @@
 - エスケープの方式と、Markdown の出力のスロット（`markdown-renderer`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）。`src/parse/inline_*.c` だけが内部 API を使う
+- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`base/alloc_internal.h`、`base/buffer_internal.h`）。`src/parse/inline_*.c` だけが内部 API を使う
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`dump.h`、`extension.h`）
 - `block-parser` の公開 API（`parser.h`、`scan.h`、`entity.h`、`commonmark.h`）。`scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`、`amark_scan_html_open_tag` / `_closing_tag`、そのバイト列の版 `amark_scan_html_open_tag_bytes` / `_closing_tag_bytes` を含む（名前と引数は `block-parser` の design に従う）。`src/parse/inline_*.c` は `parse_internal.h` を使わない（公開 API だけを使い、委譲先として呼ばれる）。例外は既定の委譲先を返す `inline_plain.c`（`block-parser` のファイル）が `inline_internal.h` の 1 つの宣言を使うこと
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`block-parser` の `tests/support/gen_examples.cmake`（拡張して使う）、`amark_test_support`、`amark_test_tree`、`amark_test_parse`（`amark_test_parse_check`。`block-parser` が関数の形で実装）、`amark_test_html_gfm`、`amark_test_parse_gfm`（`block-parser` が実装）、`amark_add_fuzzer`
@@ -87,7 +87,7 @@ graph TB
     subgraph Upstream
         ST[syntax tree public API]
         BP[block parser public API]
-        RT[foundation runtime]
+        RT[foundation base]
     end
     subgraph Parse
         Special[InlineSpecial]

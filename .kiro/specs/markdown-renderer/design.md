@@ -37,7 +37,7 @@
 - 木の変更（出力は木を変えない）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h`）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）。内部 API は `src/render/` だけが使う
+- `foundation` の公開 API（`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h`）と内部 API（`base/alloc_internal.h`、`base/buffer_internal.h`）。内部 API は `src/render/` だけが使う
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`extension.h`）。`src/tree/` の内部ヘッダは使わない
 - `html-renderer` の `render.h`（`amark_write_fn_t`）
 - `src/syntax/md_*.c` だけが、`block-parser` の公開 API（`parser.h` の `amark_label_normalize`・`amark_label_map_*`、`scan.h` の走査、`commonmark.h` の役割の番号）と `inline-parser` の公開 API（`inline.h` の文字の宣言・ノードの性質・flanking と照合の関数・raw HTML の走査、役割の番号）を使う
@@ -78,7 +78,7 @@ graph TB
     subgraph Upstream
         Tree[syntax tree]
         Parsers[block and inline parser public api]
-        Runtime[foundation]
+        Base[foundation]
     end
     Engine --> Dispatch
     Engine --> Blocks
@@ -92,7 +92,7 @@ graph TB
     Source --> Tree
     Core --> MdHeader
     Core --> Parsers
-    RenderEngine --> Runtime
+    RenderEngine --> Base
 ```
 
 **Dependency direction（`src/render/` の中）**：`markdown_escape` → `markdown_source` → `markdown_lines` → `markdown_inline` → `markdown_blocks` → `markdown_dispatch` → `markdown_render`。左のファイルは右のファイルの関数を呼ばない。`markdown_internal.h` は構造体と、ファイルをまたぐ `amark_md_*` の宣言だけを持つ。`src/syntax/md_*.c` は `markdown.h` を通してだけエンジンを使う。違反はレビューでエラーとする。
@@ -133,7 +133,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Language | C99 | ライブラリ、テスト、ファジング | `amark_target_defaults()` |
-| Runtime | `foundation`（error、allocator、buffer、utf8、unicode） | 確保、出力の組み立て、空白と句読点の判定 | エラーコードを 1 つ追加（上流） |
+| Base | `foundation`（error、allocator、buffer、utf8、unicode） | 確保、出力の組み立て、空白と句読点の判定 | エラーコードを 1 つ追加（上流） |
 | Tree | `syntax-tree`（node、document、token、extension） | トークン、編集の記録、ソースと位置、スロットの列挙 | 内部ヘッダは使わない |
 | Parse rules | `block-parser`・`inline-parser` の公開 API | 役割の番号、文字の宣言、ラベルの正規化、HTML の走査、flanking と照合 | `src/syntax/md_*.c` だけが使う |
 | Reference | CommonMark Spec 0.31.2 | エスケープ、ブロックの境目、flanking の規則 | 規則だけ |

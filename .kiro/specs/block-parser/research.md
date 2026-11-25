@@ -52,13 +52,13 @@
 - **Findings**：
   - CommonMark の例は完全な case fold（C と F。ẞ → ss）を要求する。単純な case fold（C と S）では一致しない。T（トルコ語）は使わない。
   - F の対応は最大 3 つの符号位置になる。
-- **Implications**：`block-parser` が foundation の生成スクリプトに `CaseFolding.txt` の読み取りを足し、`src/runtime/case_fold_tables.inc` と `amark_unicode_case_fold()`（`unicode.h`）を追加する。`inline-parser` は同じ関数を使う（追加しない）。
+- **Implications**：`block-parser` が foundation の生成スクリプトに `CaseFolding.txt` の読み取りを足し、`src/base/case_fold_tables.inc` と `amark_unicode_case_fold()`（`unicode.h`）を追加する。`inline-parser` は同じ関数を使う（追加しない）。
 
 ### 文字参照の表
 - **Context**：要件 8.7。リンク参照定義の宛先とタイトル、フェンスの情報文字列は文字参照を解読する。foundation の design は HTML の文字参照の表も「必要とする spec が追加する」としている。
 - **Sources Consulted**：CommonMark Spec 2.5（HTML5 の名前付き文字参照、数値参照の桁数、0 とサロゲートと範囲外は U+FFFD）、WHATWG HTML の `entities.json`。
 - **Findings**：CommonMark はセミコロンで終わる名前だけを認める（セミコロンなしの古い名前は認めない）。1 つの名前は最大 2 つの符号位置になる。数値参照は 10 進 1–7 桁、16 進 1–6 桁。
-- **Implications**：ブロックが最初に必要とするので、この spec が `tools/gen_entity_table.py`、`src/runtime/entity_tables.inc`、`src/runtime/entity.c`、公開ヘッダ `include/amark/entity.h` を追加する。表は名前の昇順で、二分探索する。`inline-parser` は同じ関数を使う。
+- **Implications**：ブロックが最初に必要とするので、この spec が `tools/gen_entity_table.py`、`src/base/entity_tables.inc`、`src/base/entity.c`、公開ヘッダ `include/amark/entity.h` を追加する。表は名前の昇順で、二分探索する。`inline-parser` は同じ関数を使う。
 
 ### 計算量の危険のある箇所
 - **Context**：要件 12。
@@ -181,8 +181,8 @@
   2. `amark_error_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent)`：別の文書（または同じ文書）の `source_parent` の子をすべて、1 回の操作で取り込み、`parent` の `before` の前（NULL なら末尾）に順に挿入する。ソースの複製は呼び出し全体で 1 回だけ行う。包含の規則の検査を先に行い、確保の失敗を含めて全か無か（強い保証）。挿入は通常の挿入と同じく編集を記録する。
   3. `extension.h` にこの spec のスロットの種類の名前と番号（0x0100–0x0103）を追記する（`syntax-tree` の design が予定している追記）。
 - **`foundation`**（foundation の design が予定している「必要とする spec が追加する」作業）：
-  - `tools/gen_unicode_tables.py` に `CaseFolding.txt` の読み取りを足し、`src/runtime/case_fold_tables.inc` を出力する。`include/amark/unicode.h` に `amark_unicode_case_fold()` を足す。
-  - `tools/gen_entity_table.py`、`src/runtime/entity_tables.inc`、`src/runtime/entity.c`、`include/amark/entity.h` を追加する。
+  - `tools/gen_unicode_tables.py` に `CaseFolding.txt` の読み取りを足し、`src/base/case_fold_tables.inc` を出力する。`include/amark/unicode.h` に `amark_unicode_case_fold()` を足す。
+  - `tools/gen_entity_table.py`、`src/base/entity_tables.inc`、`src/base/entity.c`、`include/amark/entity.h` を追加する。
   - `.gitattributes` に、CommonMark spec の例を写したテストデータの `export-ignore` を足す。
 - **スロットの種類の番号の範囲**：`block-parser` 0x0100–0x01FF、`inline-parser` 0x0200–0x02FF、`html-renderer` 0x0300–0x03FF（`html-renderer` の design と一致）、`markdown-renderer` 0x0400–0x04FF。`syntax-tree` の `extension.h` の注記に範囲の表を加えることを推奨する。
 - 上記の `syntax-tree` への変更は、2026-11-25 に `syntax-tree` の spec に反映された（Revision Notes を参照）。

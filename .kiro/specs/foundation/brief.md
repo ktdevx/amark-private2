@@ -10,13 +10,13 @@ Amark を開発する人は、Windows・Linux・macOS の 3 OS で静的/動的�
 - `cmake -B build && cmake --build build && ctest --test-dir build` が 3 OS で通る。
 - 静的ライブラリと動的ライブラリの両方をビルドでき、install できる。利用者は `find_package(Amark)`、`add_subdirectory`、FetchContent、pkg-config のいずれでも使える。
 - GitHub Actions が、Linux（GCC、Clang）、macOS（Clang）、Windows（MSVC、MinGW）、サニタイザ（ASan/UBSan）のマトリクスでビルドとテストを行う。タグを付けたときにリリース成果物を作る。
-- 後続の spec が使う共通ランタイムが揃っている。
+- 後続の spec が使う共通基盤が揃っている。
 
 ## Approach
 - CMake 3.21 以上を使う。ライブラリターゲットは `amark` とし、エイリアス `Amark::amark` を用意する。`BUILD_SHARED_LIBS` に従う構成と、静的版・動的版を同時に作る構成のどちらを採るかは design で決める。
 - エクスポートマクロ（`AMARK_API`）を用意し、シンボルの可視性は既定で hidden にする。Windows の dllexport/dllimport にも対応する。
 - Naos は FetchContent で v0.4.0 に固定し、`naos_add_executable` を使って CTest に登録する。
-- 共通ランタイムとして次を用意する。
+- 共通基盤として次を用意する。
   - 差し替え可能なグローバルのアロケータ（`amark_allocator_t`）
   - 伸長できるバイトバッファ
   - エラーコードと結果型の規約
@@ -39,7 +39,7 @@ Amark を開発する人は、Windows・Linux・macOS の 3 OS で静的/動的�
 
 ## Boundary Candidates
 - ビルド、パッケージング、CI（インフラ）
-- 共通ランタイム（すべてのモジュールが依存する低レベルのユーティリティ）
+- 共通基盤（すべてのモジュールが依存する低レベルのユーティリティ）
 
 ## Out of Boundary
 - ノード型や構文トークンの定義
@@ -51,7 +51,7 @@ Amark を開発する人は、Windows・Linux・macOS の 3 OS で静的/動的�
 
 ## Existing Spec Touchpoints
 - **Extends**：なし
-- **Adjacent**：`syntax-tree`（共通ランタイムの API を最初に使う spec）
+- **Adjacent**：`syntax-tree`（共通基盤の API を最初に使う spec）
 
 ## Constraints
 - C99 のみを使う。コンパイラ固有の拡張は使わない。

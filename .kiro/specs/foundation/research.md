@@ -6,7 +6,7 @@
 - **Key Findings**:
   - Naos v0.4.0 は `Naos::naos` と `naos_add_executable()` / `naos_discover_tests()` を提供し、テストの一覧をビルド直後に実行ファイルを起動して取得する。そのため、Windows で動的版の Amark を使うテストでは、ビルドの時点で DLL が実行ファイルから見つかる必要がある。Naos 自身は、他のプロジェクトに組み込まれると常に静的ライブラリになり、セルフテストとインストール規則は無効になる。
   - CommonMark 0.31.2 では、Unicode punctuation character が「P または S の一般カテゴリ」に広がった（0.30 までは P と ASCII 句読点）。Unicode whitespace character は「Zs、タブ、LF、FF、CR」。ASCII punctuation character は U+0021–2F、3A–40、5B–60、7B–7E。
-  - 組み込みの構文も公開 API だけで実装する（steering）。そのため、拡張の実装者が必要とする共通ランタイム（アロケータ、バッファ、UTF-8、文字の分類）は内部ヘッダではなく公開 API として出す必要がある。
+  - 組み込みの構文も公開 API だけで実装する（steering）。そのため、拡張の実装者が必要とする共通基盤（アロケータ、バッファ、UTF-8、文字の分類）は内部ヘッダではなく公開 API として出す必要がある。
 
 ## Research Log
 
@@ -117,7 +117,7 @@
 
 ### Decision: バッファは公開の不透明型、内部向けには構造体を公開する内部ヘッダを持つ
 - **Context**：要件 12。レンダラの出力スロットを拡張が使うため、公開が必要。内部では構造体に埋め込みたい。
-- **Selected Approach**：`amark_buffer_t` は公開では不透明型（作成・解放の関数経由）。`src/runtime/buffer_internal.h` が構造体の定義と、埋め込み用の初期化・破棄の関数（`amark_buffer_init` / `amark_buffer_deinit`）を持つ。
+- **Selected Approach**：`amark_buffer_t` は公開では不透明型（作成・解放の関数経由）。`src/base/buffer_internal.h` が構造体の定義と、埋め込み用の初期化・破棄の関数（`amark_buffer_init` / `amark_buffer_deinit`）を持つ。
 - **Rationale**：ABI を不透明型で守りつつ、内部の性能を落とさない。
 
 ### Decision: テスト生成は CMake スクリプトで行い、データは 16 進で扱う
@@ -155,7 +155,7 @@
 - **Context**：全 spec を横断したレビュー（cross-spec review r1）で、この spec が所有する規則とファイルに関わる 3 つの指摘（#1、#5、#7）があった。承認済みの要件・設計・タスクに追加する形で反映し、既存の受け入れ基準の意味は変えない。
 - **#1 ファジング用の補助ライブラリの規則**：後続の spec のファジングターゲットが `tests/` で定義するテスト用の補助ライブラリ（`amark_test_gfm` など）をリンクするが、`tests/` は `AMARK_BUILD_TESTS` のときだけ加えられ、`fuzz/` は `AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに加えられていた。そのため `-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF` で構成が失敗し、補助ライブラリが Naos をリンクしていればファジングだけの構成でも Naos が必要になっていた。決定：ファジングターゲットがリンクする補助ライブラリは Naos に依存してはならず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義する。`tests/` と `fuzz/` はどちらもその条件で、この順に加える。Naos に依存するターゲットは `if(AMARK_BUILD_TESTS)` の中に置き、`amark_add_test()` などは OFF のとき何もしない。`amark_add_fuzzer()` は `LIBRARIES` の各要素がターゲットとして定義されていなければ、また `Naos::naos` に直接依存していれば、名前を示して構成を失敗させる（通常のテストの構成でも検出できるようにするため）。CI の `fuzz` ジョブは `-DAMARK_BUILD_TESTS=OFF` で構成し、ファジングだけの構成を常に検査する。この spec の `buffer_fuzz` は失敗を注入するアロケータを自分のソースに持ち、Naos をリンクする `amark_test_support` を使わない。要件 7.7、7.8、design の BuildCore・Testing・TestSupport・FuzzInfra・CIWorkflow、タスク 1.4、1.5、3.5、3.6、4.2 に反映した。検討した代替：`AMARK_FUZZ` のときに `fuzz/` で補助ライブラリを定義し直す案は、同じライブラリの定義が 2 か所に分かれるので採らなかった。`AMARK_FUZZ` を `AMARK_BUILD_TESTS` の前提にする案は、Naos のないファジング専用の構成ができなくなるので採らなかった。
 - **#5 `block-parser` の拡張点の追加**：`block-parser` が最上位の `CMakeLists.txt` にオプション `AMARK_BUILD_BENCH`（既定 `OFF`）と `add_subdirectory(bench)` を、`.gitattributes` に `tests/syntax/data/spec_blocks.txt` の `export-ignore` を追加する予定であることが、Downstream Extension Points の表から漏れていた。表に 2 行を加え、最上位の `CMakeLists.txt` のオプションとサブディレクトリの組み立てを拡張点として Revalidation Trigger に加えた。`bench/` の中身（`inline-parser` などからの追加を受け入れる `bench/CMakeLists.txt` を含む）は `block-parser` が所有する。要件の Adjacent expectations と Out of Boundary にも記した。これらの追加はこの spec のタスクにしない。
-- **#7 `amark.h` の正規の include の順**：各 spec が「`extension.h` の後に」などと個別に位置を指定していたため、並行して追加すると順が一意に決まらなかった。`amark.h` はこの spec が所有するので、全 spec の公開ヘッダを並べる唯一の順（共通ランタイム → 構文木 → `render.h`・`html.h` → `entity.h`・`scan.h`・`parser.h`・`block.h`・`inline.h`・`commonmark.h` → `markdown.h`）を design の PublicHeaders に定め、後続の spec はこの順の自分の位置に追加することにした。構文木の群の中の順は `syntax-tree` の設計の依存の順（`node.h` → `document.h` → `token.h` → `iterator.h` → `dump.h` → `extension.h`）に合わせた。要件 9.7、タスク 1.4、4.1 に反映した。各ヘッダは単独でコンパイルできる（4.9）ので、この順は正しさではなく内容の一意性のためのもの。
+- **#7 `amark.h` の正規の include の順**：各 spec が「`extension.h` の後に」などと個別に位置を指定していたため、並行して追加すると順が一意に決まらなかった。`amark.h` はこの spec が所有するので、全 spec の公開ヘッダを並べる唯一の順（共通基盤 → 構文木 → `render.h`・`html.h` → `entity.h`・`scan.h`・`parser.h`・`block.h`・`inline.h`・`commonmark.h` → `markdown.h`）を design の PublicHeaders に定め、後続の spec はこの順の自分の位置に追加することにした。構文木の群の中の順は `syntax-tree` の設計の依存の順（`node.h` → `document.h` → `token.h` → `iterator.h` → `dump.h` → `extension.h`）に合わせた。要件 9.7、タスク 1.4、4.1 に反映した。各ヘッダは単独でコンパイルできる（4.9）ので、この順は正しさではなく内容の一意性のためのもの。
 
 ### 2026-11-25：グローバルのアロケータへの変更
 - 利用者の決定により、オブジェクトごとのアロケータをグローバルのアロケータに変えた。要件 10.8、11、12.8、design の Allocator・Buffer・TestSupport、タスク 2.1–2.3、2.7、3.6 を変え、要件 11.9 を追加した。

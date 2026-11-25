@@ -5,7 +5,7 @@
 
 **Users**：利用者は、一括のパース、逐次の入力、断片のパースを使う。拡張の実装者は、ブロック構文・段落の先頭の消費・後処理・パースの間の状態のスロットと、行・トークン・テキストの走査の API を使う。`inline-parser` は、インラインへの委譲の取り決め、区間の並びのテキスト、走査と解読の関数、リンク参照定義の表を使う。`html-renderer` は組み込みのノード型の HTML 出力を構文拡張 `amark.core.html` として提供し、この spec の CommonMark の構文セットの構築関数がそれを `amark.core` の直後に加える。`markdown-renderer` の同じ形の `amark.core.markdown` はその直後に加わる（構築関数の一覧への 1 行の追加は `markdown-renderer` のタスク 3.7 が行う）。`markdown-renderer` は公開された役割の番号で表記を区別し、`scan.h` のバイト列の HTML ブロックの条件とタグの走査で、HTML ブロックとして再パースされるかを判定する。
 
-**Impact**：`syntax-tree` の上に、公開ヘッダ 5 つ（`parser.h`、`block.h`、`scan.h`、`commonmark.h`、`entity.h`）、`src/parse/`、`src/syntax/` を追加し、`foundation` の共通ランタイムに case fold と文字参照の表を足す。
+**Impact**：`syntax-tree` の上に、公開ヘッダ 5 つ（`parser.h`、`block.h`、`scan.h`、`commonmark.h`、`entity.h`）、`src/parse/`、`src/syntax/` を追加し、`foundation` の共通基盤に case fold と文字参照の表を足す。
 
 ### Goals
 - CommonMark 0.31.2 のブロック構造（タブ、不正な文字、4 章、5 章）を、組み込み拡張だけで正しく解析する。
@@ -29,8 +29,8 @@
 - `inline-parser` の依頼で加えた宛先の括弧の入れ子の上限、エンジンの役割の範囲の分け方、`amark_test_parse_gfm`、`amark_test_parse_check` の唯一の実装（`inline-parser` は実装せず、使うだけ）
 - スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`（0x0100）、`AMARK_SLOT_PARAGRAPH_CONSUMER`（0x0101）、`AMARK_SLOT_POSTPROCESS`（0x0102）、`AMARK_SLOT_PARSE_STATE`（0x0103）とその構造体
 - 組み込みのブロック構文の構文トークンの役割の番号（`commonmark.h`。0x0001–0x00FF に収める）と、エンジンが使う役割の番号の範囲 0xFF00–0xFFFF の割り当て（ブロックのエンジン 0xFF00–0xFF0F をこの spec が使い、インラインのエンジン 0xFF10–0xFF1F を `inline-parser` に割り当て、0xFF20–0xFFFF を予約する。`block.h` の注記）
-- `src/runtime/` への追加：case fold（`case_fold_tables.inc`、`amark_unicode_case_fold`）、文字参照（`entity.c`、`entity_tables.inc`）と、その生成手順（`tools/gen_unicode_tables.py` の拡張、`tools/gen_entity_table.py`）
-- テスト：`tests/parse/`、`tests/syntax/`、`tests/runtime/` の追加分、テスト用の補助 `tests/support/parse_check.{h,c}`（INTERFACE ライブラリ `amark_test_parse`）、GFM 相当のブロックの検証用の構文 `tests/parse/gfm_block_ext.{h,c}`（INTERFACE ライブラリ `amark_test_parse_gfm`。`inline-parser` のテストが再利用する）、`fuzz/block_parse_fuzz.c`、`bench/`（`bench/CMakeLists.txt` と、その中のベンチマークの登録関数 `amark_add_bench`。`bench/CMakeLists.txt` は他の spec も追記する。下の「共同で編集するファイル」）
+- `src/base/` への追加：case fold（`case_fold_tables.inc`、`amark_unicode_case_fold`）、文字参照（`entity.c`、`entity_tables.inc`）と、その生成手順（`tools/gen_unicode_tables.py` の拡張、`tools/gen_entity_table.py`）
+- テスト：`tests/parse/`、`tests/syntax/`、`tests/base/` の追加分、テスト用の補助 `tests/support/parse_check.{h,c}`（INTERFACE ライブラリ `amark_test_parse`）、GFM 相当のブロックの検証用の構文 `tests/parse/gfm_block_ext.{h,c}`（INTERFACE ライブラリ `amark_test_parse_gfm`。`inline-parser` のテストが再利用する）、`fuzz/block_parse_fuzz.c`、`bench/`（`bench/CMakeLists.txt` と、その中のベンチマークの登録関数 `amark_add_bench`。`bench/CMakeLists.txt` は他の spec も追記する。下の「共同で編集するファイル」）
 - 共有のテスト生成スクリプト `tests/support/gen_examples.cmake`：spec.txt の例の形式（32 個のバッククォートの区切り）を読む唯一のパーサ。この spec が先に実装して作り、データの形式・テストの名前の規則・基本の ARGS（`EXPECT=dump`、`DUMP_FLAGS=`）・基本の検査の経路の契約を持つ。`inline-parser` は同じファイルに `EXPECT=html`、`FACTORY=`、`CHECK=` を追加で足す（SyntaxTests の「`gen_examples.cmake` の契約」。拡張は追加だけで、基本の経路の出力を変えない）
 - **共同で編集するファイル**：`bench/CMakeLists.txt` はこの spec が作り、登録関数 `amark_add_bench` の定義とベンチマークの登録（`amark_add_bench(...)` の行）だけを持つ。オプション `AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は `bench/CMakeLists.txt` ではなく最上位の `CMakeLists.txt` に置く（下記の `foundation` の拡張点）。`inline-parser`（`inline_pathological`）など他の spec は、`bench/CMakeLists.txt` に `amark_add_bench(...)` の行を追記するだけで、関数と構成を変えない。`tests/support/gen_examples.cmake` は上のとおり `inline-parser` が拡張する。最上位の `CMakeLists.txt` の `AMARK_BUILD_BENCH` と `add_subdirectory(bench)`、`.gitattributes` の `tests/syntax/data/spec_blocks.txt export-ignore` は、`foundation` が所有するファイルへの追記で、`foundation` の Downstream Extension Points の表に載る拡張点として行う（表への行の追加は `foundation` の spec が行う。この spec はその行の内容に従い、拡張点の外の編集をしない）
 
@@ -42,12 +42,12 @@
 - spec.txt 全体と CommonMark の準拠テストのランナー（`inline-parser`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）
+- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`base/alloc_internal.h`、`base/buffer_internal.h`）
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h`）。`src/parse/` は `tree/tree_internal.h` を使わない
 - `html-renderer` の公開 API `amark_html_core_extension()`（`html.h`）：`src/syntax/commonmark.c` の構築関数だけが使う（roadmap の順で `html-renderer` は先に実装される）。`markdown-renderer` の公開 API `amark_markdown_core_extension()`（`markdown.h`）も同じ場所だけが使い、その 1 行は `markdown-renderer` のタスク 3.7 が足す（この spec の実装の時点では使わない）
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`amark_test_support`、`amark_test_tree`、`amark_test_html_gfm`（`html-renderer` の検証用のノード型の記述子。GfmHookTests だけ）、`amark_add_fuzzer`
 - C99 の標準ライブラリ
-- レイヤーの規則：`src/parse/` は `src/render/` と `src/syntax/` を参照しない。`src/syntax/` は公開ヘッダだけを使う（`src/parse/` の内部ヘッダに依存しない）。`src/runtime/` の追加分は他のレイヤーを参照しない
+- レイヤーの規則：`src/parse/` は `src/render/` と `src/syntax/` を参照しない。`src/syntax/` は公開ヘッダだけを使う（`src/parse/` の内部ヘッダに依存しない）。`src/base/` の追加分は他のレイヤーを参照しない
 
 ### Revalidation Triggers
 独立に変わりうる継ぎ目ごとに分ける（spec は分けない）。
@@ -90,8 +90,8 @@
 
 ```mermaid
 graph TB
-    subgraph Runtime
-        RT[foundation runtime]
+    subgraph Base
+        RT[foundation base]
         CaseFold[case fold]
         Entity[entity table]
     end
@@ -138,7 +138,7 @@ graph TB
 **Dependency direction（`src/parse/` の中）**：`text_input` → `label` → `scan_link` / `scan_html` → `parse_context` → `line_reader` → `block_lines` → `block_context` → `block_engine` → `inline_plain` → `parser` → `fragment`。左のファイルは右のファイルの関数を呼ばない。`src/syntax/` は公開ヘッダだけを include し、`src/parse/` はそれを知らない（`commonmark.c` だけが `parser.h` の公開関数と `html.h` の `amark_html_core_extension()`、`markdown-renderer` のタスク 3.7 の後は `markdown.h` の `amark_markdown_core_extension()` を呼ぶ）。違反はレビューでエラーとする。
 
 **Architecture Integration**：
-- Domain boundaries：エンジン（`src/parse/`）、構文（`src/syntax/`）、文字データ（`src/runtime/`）。構文の知識はエンジンに置かない。
+- Domain boundaries：エンジン（`src/parse/`）、構文（`src/syntax/`）、文字データ（`src/base/`）。構文の知識はエンジンに置かない。
 - Existing patterns preserved：エラーコードと出力引数、強い保証（パーサの失敗だけは例外。下記）、不透明型、`struct_size`、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、内部関数も `amark_`、ライセンスヘッダ。
 - Steering compliance：構文ごとに 1 ファイル、組み込みも公開 API だけ、parse → tree の一方向。
 
@@ -147,7 +147,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Language | C99 | ライブラリ、テスト、ファジング、ベンチマーク | `amark_target_defaults()` |
-| Runtime | `foundation`（error、allocator、buffer、utf8、unicode） | 確保、UTF-8 の復号、文字の分類 | case fold と文字参照を追加 |
+| Base | `foundation`（error、allocator、buffer、utf8、unicode） | 確保、UTF-8 の復号、文字の分類 | case fold と文字参照を追加 |
 | Tree | `syntax-tree`（公開 API） | ノード、トークン、追跡、構文セット | 上流の変更 2 件（Upstream Changes） |
 | Data | Unicode 17.0.0 `CaseFolding.txt`、WHATWG `entities.json` | case fold、文字参照の表 | 生成物をリポジトリに入れる |
 | Test | Naos v0.4.0、`amark_add_generated_tests` | 単体テスト、データ駆動のテスト | CommonMark 0.31.2 の例をテストデータにする |
@@ -192,7 +192,7 @@ src/syntax/
 ├── block_quote.c               # commonmark.block_quote
 ├── list_item.c                 # commonmark.list_item（リストとリスト項目）
 └── commonmark.c                # 拡張の一覧（出力の core 拡張を含む）、構文セットへの追加、便宜の関数
-src/runtime/
+src/base/
 ├── case_fold_tables.inc        # 生成物：完全な case fold の表
 ├── entity.c                    # amark_char_ref_decode：名前付きと数値の文字参照
 └── entity_tables.inc           # 生成物：名前付き文字参照の表（名前の昇順）
@@ -206,7 +206,7 @@ tests/
 │   │                           # inline-parser が EXPECT=html、FACTORY=、CHECK= を追加で足す）
 │   └── data/
 │       └── gen_examples_selftest.txt  # 生成の自己テスト（NUL、CR、タブ、n=、見出しの名前）
-├── runtime/
+├── base/
 │   ├── case_fold_test.c
 │   └── entity_test.c
 ├── parse/
@@ -248,10 +248,10 @@ bench/
 ### Modified Files
 - `include/amark/amark.h` — `entity.h`、`scan.h`、`parser.h`、`block.h`、`commonmark.h` を、`foundation` が定める正準の順（`amark.h` の include の順の規則）のそれぞれの位置に追加する（`inline-parser` の `inline.h` は後で `block.h` と `commonmark.h` の間に入る）。 依存の順（左は右を include しない）：`entity.h` → `scan.h` → `parser.h`（`extension.h` も include）→ `block.h` → `commonmark.h`。
 - `include/amark/extension.h` — `syntax-tree` が置いたスロットの種類の範囲の表（`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` / `_LAST`、0x0100–0x01FF）の `block-parser` の節の下に、スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`、`AMARK_SLOT_PARAGRAPH_CONSUMER`、`AMARK_SLOT_POSTPROCESS`、`AMARK_SLOT_PARSE_STATE` の番号を追記する。
-- `include/amark/unicode.h`、`src/runtime/unicode.c` — `amark_unicode_case_fold()` を追加する。
+- `include/amark/unicode.h`、`src/base/unicode.c` — `amark_unicode_case_fold()` を追加する。
 - `tools/gen_unicode_tables.py` — `CaseFolding.txt`（状態 C と F）を読み、`case_fold_tables.inc` を出力する。`--check` の対象に加える。
-- `src/CMakeLists.txt` — `amark_objects` に `src/parse/*.c`、`src/syntax/*.c`、`src/runtime/entity.c` を追加する。
-- `tests/CMakeLists.txt` — `add_subdirectory(parse)` を `tests/` の中で条件なしに追加し、Naos を使う INTERFACE ライブラリ `amark_test_parse`（INTERFACE のソース `support/parse_check.c`）の定義と `add_subdirectory(syntax)` は `if(AMARK_BUILD_TESTS)` の中に置く（`foundation` の規則 7.7。`tests/` とその下は `AMARK_FUZZ` だけが ON の構成でも入る）。`tests/parse/CMakeLists.txt` は INTERFACE ライブラリ `amark_test_parse_gfm`（INTERFACE のソース `${CMAKE_CURRENT_SOURCE_DIR}/gfm_block_ext.c`、インクルード `tests/parse/`、`amark_test_html_gfm` に依存）を条件なしに定義し（`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義される）、Naos を使う `tests/parse/` のテスト（`gfm_hooks_test` などの単体テスト）は `if(AMARK_BUILD_TESTS)` の中に置く。`amark_test_parse_gfm` は Naos に依存しない（Naos のヘッダを include せず、Naos をリンクしない）。`inline-parser` の `amark_test_gfm` を通して `inline_parse`（`inline-parser`）と `md_roundtrip`・`md_edit`（`markdown-renderer`）のファジングターゲットに間接にリンクされるため（7.7、7.8）。ターゲットは全体で見えるので、`inline-parser` の `tests/extensions/` からリンクできる。`tests/syntax/CMakeLists.txt` は `tests/support/gen_examples.cmake` を生成スクリプトとして使う（SyntaxTests）。`tests/runtime/CMakeLists.txt` に case fold と文字参照のテストを足す。
+- `src/CMakeLists.txt` — `amark_objects` に `src/parse/*.c`、`src/syntax/*.c`、`src/base/entity.c` を追加する。
+- `tests/CMakeLists.txt` — `add_subdirectory(parse)` を `tests/` の中で条件なしに追加し、Naos を使う INTERFACE ライブラリ `amark_test_parse`（INTERFACE のソース `support/parse_check.c`）の定義と `add_subdirectory(syntax)` は `if(AMARK_BUILD_TESTS)` の中に置く（`foundation` の規則 7.7。`tests/` とその下は `AMARK_FUZZ` だけが ON の構成でも入る）。`tests/parse/CMakeLists.txt` は INTERFACE ライブラリ `amark_test_parse_gfm`（INTERFACE のソース `${CMAKE_CURRENT_SOURCE_DIR}/gfm_block_ext.c`、インクルード `tests/parse/`、`amark_test_html_gfm` に依存）を条件なしに定義し（`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義される）、Naos を使う `tests/parse/` のテスト（`gfm_hooks_test` などの単体テスト）は `if(AMARK_BUILD_TESTS)` の中に置く。`amark_test_parse_gfm` は Naos に依存しない（Naos のヘッダを include せず、Naos をリンクしない）。`inline-parser` の `amark_test_gfm` を通して `inline_parse`（`inline-parser`）と `md_roundtrip`・`md_edit`（`markdown-renderer`）のファジングターゲットに間接にリンクされるため（7.7、7.8）。ターゲットは全体で見えるので、`inline-parser` の `tests/extensions/` からリンクできる。`tests/syntax/CMakeLists.txt` は `tests/support/gen_examples.cmake` を生成スクリプトとして使う（SyntaxTests）。`tests/base/CMakeLists.txt` に case fold と文字参照のテストを足す。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(block_parse SOURCES block_parse_fuzz.c CORPUS corpus/block_parse)`。
 - `CMakeLists.txt`（最上位）— オプション `AMARK_BUILD_BENCH`（既定 OFF）と、ON のときの `add_subdirectory(bench)`。`foundation` の Downstream Extension Points の表に載る拡張点への追記。
 - `.gitattributes` — `tests/syntax/data/spec_blocks.txt export-ignore`。同じく `foundation` の拡張点への追記。
@@ -427,7 +427,7 @@ stateDiagram-v2
 | Fragment | Parse | 断片のパースと挿入 | 10.1–10.5 | ParserAPI (P0), syntax-tree import (P0) | Service |
 | CommonMarkSet | Syntax | 拡張の一覧と構文セット、便宜の関数 | 1.2, 3.8, 7.2–7.4, 7.6 | Builtin syntaxes (P0), ParserAPI (P0) | Service |
 | Builtin syntaxes | Syntax | CommonMark の各ブロック構文 | 4.9, 7.1, 7.5, 7.8, 8.1, 8.2, 9.1, 9.2, 9.4, 9.5, 9.7 | BlockContext (P0), Scanners (P0) | Service |
-| CaseFold / Entity | Runtime | 文字データ | 8.3, 8.7 | 生成スクリプト (P2) | Service, Batch |
+| CaseFold / Entity | Base | 文字データ | 8.3, 8.7 | 生成スクリプト (P2) | Service, Batch |
 | ParseCheck | Test | パースの検査の補助（文書を返す） | 14.3, 14.5 | 公開 API (P0) | Service |
 | ParseTests / SyntaxTests / Fuzz / Bench | Test | 要件の検証 | 12.5, 14.1–14.4 | ParseCheck (P0) | Batch |
 | GfmHookTests | Test | GFM 相当のフックの検証と、再利用できる検証用の構文（`amark_test_parse_gfm`） | 13.1–13.6 | ParseCheck (P0), amark_test_html_gfm (P0) | Service, Batch |
@@ -1044,7 +1044,7 @@ AMARK_API amark_error_t amark_parse_commonmark(const char *data, size_t length, 
 - 組み込みの優先度は `AMARK_CM_PRIORITY_*`（`commonmark.h`）として公開する。
 - 組み込みの構文は `include/amark/` のヘッダだけを include する（4.9）。
 
-### Runtime
+### Base
 
 #### CaseFold / Entity
 
@@ -1236,7 +1236,7 @@ struct amark_parser {
 
 ## Testing Strategy
 
-### Unit Tests（`tests/parse/`、`tests/runtime/`）
+### Unit Tests（`tests/parse/`、`tests/base/`）
 - **parser_api**：一括のパースの確保が、設定したテスト用アロケータを通ること（1.1）、便宜の関数で返した文書がパーサの解放後も構文セットを保つこと（1.2、11.3）、凍結していない構文セット（1.4）、終了後の `feed` と二重の `finish`（1.5）、追跡が有効で返ることと `NO_EDIT_TRACKING`（1.8、11.1）、空の入力（2.7）、2 つのパーサの交互の操作が干渉しないこと（1.7）。
 - **line_reader**：LF/CR/CRLF の混在、チャンクの境目の CR と LF、BOM の 3 バイトの分割、改行で終わらない最後の行（2.1、2.4、2.6、1.3）。
 - **engine**（`test_syntaxes`）：外側からの照合と照合できなかったブロックの閉鎖（3.1）、優先度と同じ値での構文セットの順（3.2）、受け入れられない親を閉じながらたどること（3.3）、遅延継続と印（3.4、9.3）、空行の印と `IGNORE_BLANK`（3.5）、終わりでの閉鎖の順（3.6）、構文を取り除いた構文セットで他が変わらないこと（3.8）、深さの上限での劣化（12.1、12.2）。

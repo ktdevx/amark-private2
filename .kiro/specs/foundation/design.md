@@ -1,17 +1,17 @@
 # Design Document: foundation
 
 ## Overview
-**Purpose**：`foundation` は、Amark の開発者と利用者に、3 つの OS で静的/動的ライブラリとしてビルド・テスト・配布できる土台と、すべてのモジュールが従う共通ランタイム（エラー、メモリ、バッファ、UTF-8、文字の分類、版）を提供する。
+**Purpose**：`foundation` は、Amark の開発者と利用者に、3 つの OS で静的/動的ライブラリとしてビルド・テスト・配布できる土台と、すべてのモジュールが従う共通基盤（エラー、メモリ、バッファ、UTF-8、文字の分類、版）を提供する。
 
-**Users**：後続の spec（`syntax-tree`、`html-renderer`、`block-parser`、`inline-parser`、`markdown-renderer`）の開発者は、テスト・ファジング・テスト生成の仕組みと共通ランタイムをそのまま使う。Amark を組み込むアプリケーションの開発者は、4 つの取り込み方法と公開 API の規約（接頭辞、エクスポート、不透明型、アロケータ）を使う。拡張の実装者は、公開の共通ランタイムを使って構文を実装する。
+**Users**：後続の spec（`syntax-tree`、`html-renderer`、`block-parser`、`inline-parser`、`markdown-renderer`）の開発者は、テスト・ファジング・テスト生成の仕組みと共通基盤をそのまま使う。Amark を組み込むアプリケーションの開発者は、4 つの取り込み方法と公開 API の規約（接頭辞、エクスポート、不透明型、アロケータ）を使う。拡張の実装者は、公開の共通基盤を使って構文を実装する。
 
-**Impact**：コードのないリポジトリに、ビルド構成、CI/CD、ライセンス、共通ランタイムを追加する。
+**Impact**：コードのないリポジトリに、ビルド構成、CI/CD、ライセンス、共通基盤を追加する。
 
 ### Goals
 - `cmake -B build && cmake --build build && ctest --test-dir build` が 5 つのコンパイラ環境で、静的版・動的版のどちらでも通る。
 - 4 つの取り込み方法（`find_package`、`add_subdirectory`、FetchContent、pkg-config）が自動テストで保証される。
 - 後続の spec が、テスト・データ駆動のテスト・ファジングターゲットを CMake の関数 1 つで追加できる。
-- 共通ランタイムの規約（エラーコード、出力引数、アロケータ、所有権）を、後続の spec がそのまま従える形で確定する。
+- 共通基盤の規約（エラーコード、出力引数、アロケータ、所有権）を、後続の spec がそのまま従える形で確定する。
 
 ### Non-Goals
 - ノード型、構文トークン、パーサ、レンダラ、拡張レジストリ
@@ -31,7 +31,7 @@
 - `.github/workflows/` の CI とリリースのワークフロー
 - `LICENSE`、`README.md`、`.gitattributes`、`.gitignore`、ソースのライセンスヘッダの規約
 - 公開ヘッダの配置規約と `include/amark/{amark,export,version,error,allocator,buffer,utf8,unicode}.h`
-- `src/runtime/` のすべて（版、エラーコード、アロケータ、バッファ、UTF-8、文字の分類と Unicode の表）と `tools/gen_unicode_tables.py`
+- `src/base/` のすべて（版、エラーコード、アロケータ、バッファ、UTF-8、文字の分類と Unicode の表）と `tools/gen_unicode_tables.py`
 - ライブラリ全体のエラーとメモリ管理の規約（後続の spec が従う）
 
 ### Out of Boundary
@@ -47,7 +47,7 @@
 - ビルド時：CMake 3.21 以上、C99 のコンパイラ。C++ のコンパイラは、あれば公開ヘッダの C++ の検査に使う（なくてもよい）
 - テスト時：Naos v0.4.0（FetchContent）、pkg-config（あれば）
 - 保守者のツール：Python 3.8 以上（Unicode の表の生成だけ。ビルドとテストでは使わない）
-- レイヤーの規則：`src/runtime/` は他のレイヤー（tree、parse、render、syntax）を参照しない。公開ヘッダは他の公開ヘッダだけを include する
+- レイヤーの規則：`src/base/` は他のレイヤー（tree、parse、render、syntax）を参照しない。公開ヘッダは他の公開ヘッダだけを include する
 
 ### Revalidation Triggers
 - エラーコードの追加・意味の変更、出力引数の規約の変更 → すべての後続の spec
@@ -63,21 +63,21 @@
 
 | 追加する spec | 対象のファイル | 追加の内容 | 受け入れる拡張点 |
 |---|---|---|---|
-| `block-parser` | `tools/gen_unicode_tables.py`、`include/amark/unicode.h`、`src/runtime/unicode.c` | `CaseFolding.txt`（状態 C と F）の読み取り、`src/runtime/case_fold_tables.inc`、`amark_unicode_case_fold()`、`--check` の対象への追加 | UnicodeTableGen の拡張（別の UCD のファイルを読む生成の関数と別の `.inc`）、`unicode.h` の末尾への関数の追加 |
-| `block-parser` | `tools/gen_entity_table.py`（新規）、`src/runtime/entity.c`、`src/runtime/entity_tables.inc`、`include/amark/entity.h` | WHATWG `entities.json` からの名前付き文字参照の表と生成手順 | UnicodeTableGen と同じ方式（保守者が手で実行、生成物をリポジトリに入れる、`--check`、ビルドでは実行しない）。`src/runtime/` のレイヤーの規則に従う |
+| `block-parser` | `tools/gen_unicode_tables.py`、`include/amark/unicode.h`、`src/base/unicode.c` | `CaseFolding.txt`（状態 C と F）の読み取り、`src/base/case_fold_tables.inc`、`amark_unicode_case_fold()`、`--check` の対象への追加 | UnicodeTableGen の拡張（別の UCD のファイルを読む生成の関数と別の `.inc`）、`unicode.h` の末尾への関数の追加 |
+| `block-parser` | `tools/gen_entity_table.py`（新規）、`src/base/entity.c`、`src/base/entity_tables.inc`、`include/amark/entity.h` | WHATWG `entities.json` からの名前付き文字参照の表と生成手順 | UnicodeTableGen と同じ方式（保守者が手で実行、生成物をリポジトリに入れる、`--check`、ビルドでは実行しない）。`src/base/` のレイヤーの規則に従う |
 | `block-parser` | `CMakeLists.txt`（最上位） | オプション `AMARK_BUILD_BENCH`（既定 `OFF`）と、それが ON のときの `add_subdirectory(bench)`。`bench/` の中身（`bench/CMakeLists.txt` を含む）は `block-parser` が所有し、他の spec のベンチマークの追加は `block-parser` の拡張点で受け入れる | BuildCore のオプションの表とサブディレクトリの組み立て（新しいオプションは組み込み時に既定で無効、`add_subdirectory(fuzz)` の後に置く） |
 | `block-parser` | `.gitattributes` | `tests/syntax/data/spec_blocks.txt` の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
 | `inline-parser` | `.gitattributes` | `tests/spec/data/` の spec.txt と NOTICE.txt の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
 | `inline-parser` | `.github/workflows/ci.yml` | 全ジョブの構成に `-DAMARK_REQUIRE_SPEC_TESTS=ON` を加える | CIWorkflow の構成の段（構成のオプションを追加できる） |
-| `markdown-renderer` | `include/amark/error.h`、`src/runtime/error.c` | `AMARK_ERROR_UNREPRESENTABLE` | エラーコードの末尾への追加（10.7）。2026-11-25 にこの spec に取り込み済み（値 6、要件 10.9、タスク 2.1） |
+| `markdown-renderer` | `include/amark/error.h`、`src/base/error.c` | `AMARK_ERROR_UNREPRESENTABLE` | エラーコードの末尾への追加（10.7）。2026-11-25 にこの spec に取り込み済み（値 6、要件 10.9、タスク 2.1） |
 
 - 表のほかに、すべての後続の spec が行う定型の追加として、`src/CMakeLists.txt` へのソース、`include/amark/amark.h` への公開ヘッダ（PublicHeaders の正規の順の自分の位置に）、`tests/CMakeLists.txt` と `fuzz/CMakeLists.txt` へのサブディレクトリ（FuzzInfra の「ファジング用の補助ライブラリの規則」に従う）がある。
-- 上の追加で `src/runtime/` に入るファイルは、This Spec Owns の「`src/runtime/` のすべて」の例外として、追加する spec が所有する。ライセンスヘッダ、`amark_` 接頭辞、アロケータの経由、レイヤーの規則などの規約はこの spec のものに従う。
+- 上の追加で `src/base/` に入るファイルは、This Spec Owns の「`src/base/` のすべて」の例外として、追加する spec が所有する。ライセンスヘッダ、`amark_` 接頭辞、アロケータの経由、レイヤーの規則などの規約はこの spec のものに従う。
 
 ## Architecture
 
 ### Architecture Pattern & Boundary Map
-**Selected pattern**：レイヤードな C ライブラリ ＋ CMake のモジュールによるインフラ。共通ランタイムは最下層で、上位のレイヤーを知らない。インフラ（`cmake/`）は、後続の spec が自分のソースとテストを足すための関数を提供し、個々のモジュールの知識を持たない。
+**Selected pattern**：レイヤードな C ライブラリ ＋ CMake のモジュールによるインフラ。共通基盤は最下層で、上位のレイヤーを知らない。インフラ（`cmake/`）は、後続の spec が自分のソースとテストを足すための関数を提供し、個々のモジュールの知識を持たない。
 
 ```mermaid
 graph TB
@@ -92,7 +92,7 @@ graph TB
         Checks[Repo check scripts]
         Workflows[GitHub workflows]
     end
-    subgraph Runtime
+    subgraph Base
         Export[export h]
         Version[version]
         Error[error]
@@ -117,7 +117,7 @@ graph TB
     Unicode --> Export
     Utf8 --> Export
     Error --> Export
-    Tree --> Runtime
+    Tree --> Base
     Tree --> TestingMod
     Tree --> FuzzMod
     Workflows --> TopCMake
@@ -126,8 +126,8 @@ graph TB
 **Dependency direction（実行時のコード）**：`export.h` → `version` / `error` → `allocator` → `utf8` / `unicode` → `buffer` → （後続：tree → parse / render → syntax）。左のものは右のものを参照しない。違反はレビューでエラーとして扱う。
 
 **Architecture Integration**：
-- Domain boundaries：インフラはファイル単位で責務を分ける（ビルドの中核、パッケージ、テスト、テスト生成、ファジング、検査、ワークフロー）。共通ランタイムは 1 つの機能につき 1 つの公開ヘッダと 1 つのソースにする。
-- Steering compliance：C99、`amark_` / `AMARK_` 接頭辞、`AMARK_API`、既定で hidden の可視性、不透明型、アロケータの経由、エラーコード、`include/amark/`、`src/runtime/`、`_internal.h`、ライセンスヘッダ。
+- Domain boundaries：インフラはファイル単位で責務を分ける（ビルドの中核、パッケージ、テスト、テスト生成、ファジング、検査、ワークフロー）。共通基盤は 1 つの機能につき 1 つの公開ヘッダと 1 つのソースにする。
+- Steering compliance：C99、`amark_` / `AMARK_` 接頭辞、`AMARK_API`、既定で hidden の可視性、不透明型、アロケータの経由、エラーコード、`include/amark/`、`src/base/`、`_internal.h`、ライセンスヘッダ。
 
 ### Technology Stack
 
@@ -177,7 +177,7 @@ graph TB
 │   └── unicode.h                  # 文字の分類、Unicode の版のマクロ
 ├── src/
 │   ├── CMakeLists.txt             # amark_objects、amark、amark_internal のターゲット
-│   └── runtime/
+│   └── base/
 │       ├── version.c
 │       ├── error.c
 │       ├── allocator.c            # 既定のアロケータ、グローバルの設定、確保の関数
@@ -195,7 +195,7 @@ graph TB
 │   │   ├── test_allocator.h       # テスト用アロケータと確保失敗の総当たりの補助
 │   │   ├── test_allocator.c
 │   │   └── test_check.h           # バイト列とバッファの比較のマクロ
-│   ├── runtime/
+│   ├── base/
 │   │   ├── CMakeLists.txt
 │   │   ├── version_test.c
 │   │   ├── error_test.c
@@ -298,7 +298,7 @@ graph TB
 | 1.4 | 最上位で警告をエラーに | CompilerOptions | `AMARK_WARNINGS_AS_ERRORS` | — |
 | 1.5 | 組み込み時は既定で無効、利用者を変えない | CompilerOptions、PackageTests | ターゲット単位の PRIVATE の設定 | — |
 | 1.6 | 明示の指定に従う | CompilerOptions | `AMARK_WARNINGS_AS_ERRORS` | — |
-| 1.7 | 実行時は C 標準ライブラリだけ | BuildCore、Runtime 全体 | — | — |
+| 1.7 | 実行時は C 標準ライブラリだけ | BuildCore、Base 全体 | — | — |
 | 2.1, 2.2 | 静的版・動的版のビルド | BuildCore | `BUILD_SHARED_LIBS` | — |
 | 2.3 | `amark` と `Amark::amark` | BuildCore、Packaging | ターゲット | — |
 | 2.4 | 公開 API だけのエクスポート | Export、CompilerOptions、SymbolCheck | `AMARK_API`、hidden | — |
@@ -347,7 +347,7 @@ graph TB
 | 9.7 | `amark.h` の正規の include の順 | PublicHeaders | `amark.h` | — |
 | 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | エラーコードと失敗の規約 | Error、Error conventions | `amark_error_t`、`amark_error_string()` | — |
 | 10.9 | 表現できないことのエラーコード | Error | `AMARK_ERROR_UNREPRESENTABLE`、`amark_error_string()` | — |
-| 10.8 | アロケータの設定のほかにグローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
+| 10.8 | アロケータの設定のほかにグローバルな可変状態を持たない | Base 全体 | 規約 | — |
 | 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9 | グローバルのアロケータ | Allocator | `amark_allocator_set()`、`amark_malloc()` など | — |
 | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8 | バッファ | Buffer | `amark_buffer_*` | — |
 | 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7 | UTF-8 | Utf8 | `amark_utf8_*` | — |
@@ -370,17 +370,17 @@ graph TB
 | LicenseCheck | Test | ライセンスヘッダの検査 | 8.3, 8.4 | — | Batch |
 | PackageTests | Test | 4 つの取り込み方法の検査 | 1.5, 3.2–3.4, 3.6, 3.7, 4.11, 4.12, 5.5 | Packaging (P0) | Batch |
 | FuzzInfra | Infra | ファジングの仕組み | 5.3, 7.1–7.5, 7.7, 7.8 | BuildCore (P0) | Service |
-| FuzzTargets | Fuzz | ランタイムのファジング | 7.6 | Utf8, Buffer (P0) | Batch |
+| FuzzTargets | Fuzz | 共通基盤のファジング | 7.6 | Utf8, Buffer (P0) | Batch |
 | CIWorkflow | CI | マトリクス、サニタイザ、ファジング | 1.1, 5.1–5.5, 7.7 | BuildCore (P0) | Batch |
 | ReleaseWorkflow | CI | 成果物の作成と公開 | 6.1–6.5 | Packaging (P0) | Batch |
 | RepoDocs | Repo | LICENSE、README、gitattributes | 6.5, 8.1, 8.2, 8.5 | — | — |
-| PublicHeaders / Export | Runtime | 配置、まとめのヘッダ、エクスポート、正規の include の順 | 2.4, 2.5, 9.1–9.3, 9.7 | — | Service |
-| Version | Runtime | 版のマクロと関数 | 9.4, 9.5 | Export (P0) | Service |
-| Error | Runtime | エラーコード | 10.1–10.7, 10.9 | Export (P0) | Service |
-| Allocator | Runtime | 差し替え可能なグローバルのアロケータ | 11.1–11.9 | Error (P0) | Service |
-| Buffer | Runtime | 伸長できるバイトバッファ | 12.1–12.8 | Allocator (P0), Utf8 (P1) | Service, State |
-| Utf8 | Runtime | UTF-8 の処理 | 13.1–13.7 | Export (P0) | Service |
-| Unicode | Runtime | 文字の分類 | 14.1–14.6 | Export (P0) | Service |
+| PublicHeaders / Export | Base | 配置、まとめのヘッダ、エクスポート、正規の include の順 | 2.4, 2.5, 9.1–9.3, 9.7 | — | Service |
+| Version | Base | 版のマクロと関数 | 9.4, 9.5 | Export (P0) | Service |
+| Error | Base | エラーコード | 10.1–10.7, 10.9 | Export (P0) | Service |
+| Allocator | Base | 差し替え可能なグローバルのアロケータ | 11.1–11.9 | Error (P0) | Service |
+| Buffer | Base | 伸長できるバイトバッファ | 12.1–12.8 | Allocator (P0), Utf8 (P1) | Service, State |
+| Utf8 | Base | UTF-8 の処理 | 13.1–13.7 | Export (P0) | Service |
+| Unicode | Base | 文字の分類 | 14.1–14.6 | Export (P0) | Service |
 | UnicodeTableGen | Tool | 表の生成 | 14.5, 14.7 | Python, UCD (P2) | Batch |
 
 ### Infra
@@ -717,7 +717,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 - `amark_test_oom_sweep`：各回の前に `set_allocator` でテスト用アロケータを設定し、戻る前に `set_allocator(NULL)` で既定に戻す（入れ子では使わない）。`fail_at = 1, 2, ...` と増やしながら実行し、失敗が注入されなかった回で終える。各回で、戻り値が `AMARK_ERROR_OUT_OF_MEMORY` であることと `live_blocks == 0` を確かめる。`max_iterations` を超えたら打ち切って結果に示す。
 - `AMARK_CHECK_BUFFER_EQ` は `buffer.h` の関数を呼ぶため、ヘッダ `test_check.h` のマクロとして呼び出し側で展開される。`AMARK_CHECK_OOM_SWEEP` も同じく `amark_allocator_set` の参照を呼び出し側に置く（`amark_test_support` 自体は Amark の関数に依存しない）。
 
-### Runtime
+### Base
 
 #### 公開 API の共通の規約（Error conventions を含む）
 - 公開の関数と型、モジュールをまたぐ内部の関数と型は `amark_`、マクロと定数は `AMARK_`。内部のものは内部ヘッダだけで宣言し、`AMARK_API` を付けない。公開の名前と重複させない。typedef した型の名前は末尾に `_t` を付ける（構造体と列挙のタグには付けない）。公開の関数にはすべて `AMARK_API` を付ける。
@@ -762,7 +762,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 
 | 群 | 所有する spec | ヘッダ（この順） |
 |---|---|---|
-| 1. 共通ランタイム | `foundation` | `export.h`、`version.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h` |
+| 1. 共通基盤 | `foundation` | `export.h`、`version.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h` |
 | 2. 構文木 | `syntax-tree` | `node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h` |
 | 3. レンダラの共通部と HTML | `html-renderer` | `render.h`、`html.h` |
 | 4. パーサ | `block-parser`、`inline-parser` | `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`（`inline-parser`）、`commonmark.h` |
@@ -823,7 +823,7 @@ AMARK_API const char *amark_error_string(amark_error_t error);
 ```
 - コードと説明は `AMARK_ERROR_LIST` の X マクロで 1 か所に定義する。検索で定義が見つかるように、名前は `##` で組み立てず完全な形で書く。`amark_error_string` は `error.c` の `switch` に同じ一覧を `case name: return text;` として展開し、`switch` の後で `"unknown error"` を返す（`default` は書かない）。
 - 値は明示せず、一覧の順で決まる（先頭の `AMARK_ERROR_NONE` が 0）。具体的な値に意味はなく、利用者は名前で比較する。既存の値を変えない（10.7）ため、並べ替え、途中への挿入、削除をせず、新しいコードは末尾に追加する（追加は Revalidation Trigger）。利用者は未知の非 0 の値を一般的な失敗として扱う。
-- `AMARK_ERROR_UNREPRESENTABLE`（10.9）は 2026-11-25 に `markdown-renderer` の依頼で追加した。一覧の末尾（値は 6）に置く。説明の文字列は `"unrepresentable"`。共通ランタイム自身はこのコードを返さない。どの操作がいつ返すか（`amark_markdown_render` など）と、理由の報告は、返す spec が定める。
+- `AMARK_ERROR_UNREPRESENTABLE`（10.9）は 2026-11-25 に `markdown-renderer` の依頼で追加した。一覧の末尾（値は 6）に置く。説明の文字列は `"unrepresentable"`。共通基盤自身はこのコードを返さない。どの操作がいつ返すか（`amark_markdown_render` など）と、理由の報告は、返す spec が定める。
 
 #### Allocator
 
@@ -860,7 +860,7 @@ AMARK_API void amark_free(void *ptr);
 - `amark_calloc`：全バイトが 0 の領域を返す。`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す（失敗）。0 の確保と桁あふれのほかは必ず `calloc_fn` を使い、`malloc_fn` で代用しない。
 - コールバックは標準ライブラリの `malloc` / `calloc` / `realloc` / `free` と同じ形で、利用者のデータを渡さない。状態が要るアロケータは自分の静的な変数などに持つ。複数のスレッドで Amark を使うとき、コールバックはスレッド安全であること。コールバックから Amark の関数を呼ばない。オブジェクトはアロケータを保持しない。`new_size` が 0 でない `amark_realloc` が失敗したとき（`realloc_fn` が NULL を返したとき）、元のブロックは有効なまま。
 
-**内部の契約**（`src/runtime/alloc_internal.h`）
+**内部の契約**（`src/base/alloc_internal.h`）
 ```c
 bool amark_size_add(size_t a, size_t b, size_t *out);   /* 桁あふれなら false */
 bool amark_size_mul(size_t a, size_t b, size_t *out);
@@ -903,7 +903,7 @@ AMARK_API amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_d
 - `truncate`：`length` が現在の長さを超えたら `AMARK_ERROR_INVALID_ARGUMENT`。容量は減らさない。`clear` は長さを 0 にする。
 - `detach`：内容（NUL 終端）と長さを返し、所有権を呼び出し側に移す。取り出したメモリは `amark_free(data)` で解放する。容量 0 のときは 1 バイトを確保して返す（確保に失敗したら `AMARK_ERROR_OUT_OF_MEMORY`、出力引数は NULL と 0）。成功後、バッファは空の状態で使い続けられる。
 
-**内部の契約**（`src/runtime/buffer_internal.h`）
+**内部の契約**（`src/base/buffer_internal.h`）
 ```c
 struct amark_buffer { char *data; size_t length; size_t capacity; };
 void amark_buffer_init(amark_buffer_t *buffer); /* 確保しない */
@@ -964,12 +964,12 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 **Contracts**: Batch [x]
 - Trigger：保守者が手で実行する（`python3 tools/gen_unicode_tables.py --ucd-dir <dir> [--check]`。`--fetch` で unicode.org から固定の版の `UnicodeData.txt` を取得する）。
 - Input：`UnicodeData.txt`（範囲の項目 `<..., First>` / `<..., Last>` を展開する）。
-- Output：`src/runtime/unicode_tables.inc`（ライセンスヘッダ、Unicode の版、生成の手順を書いたコメント、`static const amark_unicode_range_t amark_unicode_zs[]`、`amark_unicode_punct[]`）。`--check` は生成結果と既存のファイルを比べ、違えば非 0 で終わる。
+- Output：`src/base/unicode_tables.inc`（ライセンスヘッダ、Unicode の版、生成の手順を書いたコメント、`static const amark_unicode_range_t amark_unicode_zs[]`、`amark_unicode_punct[]`）。`--check` は生成結果と既存のファイルを比べ、違えば非 0 で終わる。
 - 拡張：表の定義は、スクリプト内の「名前とカテゴリの集合」の一覧で決まる。後続の spec は一覧に項目を足すか、別の UCD のファイル（`CaseFolding.txt` など）を読む生成の関数を足して、同じ出力ファイルか別の `.inc` に書き出す。`block-parser` が `CaseFolding.txt` と `case_fold_tables.inc` を、同じ方式の別のスクリプトで文字参照の表を追加する予定（Downstream Extension Points）。追加した生成の関数も `--check` と Unicode の版の照合の対象にする。
 - Unicode の版はスクリプトの定数 1 か所と `unicode.h` のマクロで持ち、スクリプトは両者が一致しなければ失敗する。
 
 ## Data Models
-- 永続的なデータはない。共通ランタイムの状態は `amark_buffer_t`（State model は Buffer を参照）と、グローバルのアロケータの設定（`amark_allocator_t` 1 つ）だけ。
+- 永続的なデータはない。共通基盤の状態は `amark_buffer_t`（State model は Buffer を参照）と、グローバルのアロケータの設定（`amark_allocator_t` 1 つ）だけ。
 - Unicode の範囲の表：`typedef struct { uint32_t first; uint32_t last; } amark_unicode_range_t;` の昇順で重ならない配列。隣り合う範囲は生成時に結合する。
 
 ## Error Handling
@@ -982,7 +982,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 ### Error Categories and Responses
 - **利用者の誤り**：NULL の必須引数、範囲外の切り詰め、不完全なアロケータ → `AMARK_ERROR_INVALID_ARGUMENT`。
 - **資源の不足**：確保の失敗 → `AMARK_ERROR_OUT_OF_MEMORY`、サイズの桁あふれ → `AMARK_ERROR_OVERFLOW`。
-- **表現できない対象**：→ `AMARK_ERROR_UNREPRESENTABLE`。共通ランタイムは定義と説明だけを持ち、返すのは後続の spec（`markdown-renderer`）。
+- **表現できない対象**：→ `AMARK_ERROR_UNREPRESENTABLE`。共通基盤は定義と説明だけを持ち、返すのは後続の spec（`markdown-renderer`）。
 - **入力の不正**：不正な UTF-8 はエラーではなく U+FFFD として扱い、処理を続ける。
 
 ### Monitoring
@@ -990,7 +990,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 
 ## Testing Strategy
 
-### Unit Tests（Naos、`tests/runtime/`）
+### Unit Tests（Naos、`tests/base/`）
 - **allocator**：未設定と NULL の設定で既定のアロケータになること（11.1, 11.2）、設定した後の確保・0 で初期化する確保・再確保・解放がすべて設定したアロケータを通ること（11.3）、コールバックの欠落の拒否と、拒否の後に設定が変わらないこと（11.5）、`amark_calloc` が `calloc_fn` を呼んで全バイトが 0 の領域を返すこと、その桁あふれでコールバックが呼ばれないこと（11.7）、0 の確保（`amark_calloc` は `count` だけ、`size` だけ、両方が 0 のとき）がコールバックを呼ばずに NULL を返すこと、`amark_realloc(ptr, 0)` が `free_fn` を 1 回だけ呼んで NULL を返し、ほかのコールバックを呼ばないこと。
 - **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、`SIZE_MAX` 付近の予約が `AMARK_ERROR_OVERFLOW` で内容が変わらないこと（12.5）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
@@ -1013,7 +1013,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - 5 つの環境 × 静的/動的で全テスト（1.1, 5.1）、サニタイザ（5.2）、ファジングの短時間実行（5.3）。
 
 ## Security Considerations
-- 信頼できない入力（Markdown の文書）を扱うライブラリの土台として、共通ランタイムの関数はすべて境界を検査し、サイズの計算の桁あふれを検出する。サニタイザとファジングを CI で常に実行する。
+- 信頼できない入力（Markdown の文書）を扱うライブラリの土台として、共通基盤の関数はすべて境界を検査し、サイズの計算の桁あふれを検出する。サニタイザとファジングを CI で常に実行する。
 - リリースのワークフローは、公開のジョブだけに書き込みの権限を与える。成果物にはチェックサムを付ける。
 
 ## Performance & Scalability

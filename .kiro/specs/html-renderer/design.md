@@ -38,7 +38,7 @@
 - 木の変更（出力は木を変えない）、ノード型の登録とレジストリの API（`syntax-tree`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_deinit`）。`src/render/` だけが内部 API を使う
+- `foundation` の公開 API：`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`。内部 API：`base/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`base/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_deinit`）。`src/render/` だけが内部 API を使う
 - `syntax-tree` の公開 API：`node.h`、`document.h`、`extension.h`（`amark_syntax_set_find_node_type`、`amark_syntax_set_slot_count`、`amark_syntax_set_slot_at`、`amark_node_source_span`、`amark_document_position`、`amark_document_source_data`、属性とリテラルの取得関数）。`src/tree/` の内部ヘッダは使わない
 - テスト時：Naos、`amark_add_test()`、`amark_add_generated_tests()`、`AmarkTestGen.cmake`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`、`amark_test_allocator_t`）、`amark_test_tree`（`amark_test_tree_build`）、`amark_add_fuzzer()`
 - レイヤーの規則：`src/render/` は `src/syntax/` と `src/parse/` を参照しない。`src/syntax/html_*.c` は公開ヘッダだけを include する（`src/render/` の内部ヘッダを使わない）。公開ヘッダは他の公開ヘッダだけを include する
@@ -77,7 +77,7 @@ graph TB
     end
     subgraph Upstream
         Tree[syntax tree]
-        Runtime[foundation runtime]
+        Base[foundation base]
     end
     subgraph Downstream
         BlockParser[block parser builder]
@@ -88,7 +88,7 @@ graph TB
     Dispatch --> Output
     Render --> Dispatch
     Render --> Tree
-    Output --> Runtime
+    Output --> Base
     CoreHtml --> HtmlH
     UserExt --> HtmlH
     BlockParser --> CoreHtml
@@ -117,7 +117,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Language | C99 | ライブラリ、テスト、ファジング | `amark_target_defaults()` |
-| Runtime | `foundation`（error、allocator、buffer、utf8） | 確保、出力の組み立て | 新しい依存なし |
+| Base | `foundation`（error、allocator、buffer、utf8） | 確保、出力の組み立て | 新しい依存なし |
 | Tree | `syntax-tree`（node、document、extension） | 木の参照、スロットの列挙、ソース上の範囲 | 内部ヘッダは使わない |
 | Reference | cmark 0.31.1 `html.c` / houdini（規則だけ） | 出力とエスケープの規則の基準 | コードは取り込まない |
 | Test | Naos v0.4.0、`amark_test_support`、`amark_test_tree`、`amark_add_generated_tests` | 手で組み立てた木の出力の照合 | `amark_test_html_gfm` を追加 |

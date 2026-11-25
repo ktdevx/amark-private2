@@ -2,7 +2,7 @@
 
 ## Summary
 - **Feature**：`syntax-tree`
-- **Discovery Scope**：New Feature（greenfield。`foundation` の共通ランタイムの上に作る。下流の 4 つの spec が使う継ぎ目を定義する）
+- **Discovery Scope**：New Feature（greenfield。`foundation` の共通基盤の上に作る。下流の 4 つの spec が使う継ぎ目を定義する）
 - **Key Findings**：
   - 元の表記の保持は「意味の AST ＋ ノードごとのソース範囲の参照」で足りる。ただし、CommonMark の行の接頭辞（`>`、リストのインデント）は内側のノードの範囲の途中に現れるため、トークンは「所有するノード」と「ソース上の順序」を別々に持つ必要がある。所有は意味（どのコンテナの接頭辞か）で決め、順序はオフセットで決める。
   - タブは「1 バイトが複数の構文要素に列単位で分かれる」唯一のケースである（CommonMark 0.31.2 の 2.2 節）。バイト範囲だけのトークンでは表せないため、部分的なタブの列の情報が要る。

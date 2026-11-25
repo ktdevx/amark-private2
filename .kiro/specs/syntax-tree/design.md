@@ -5,7 +5,7 @@
 
 **Users**：利用者（翻訳、リンクの書き換え、Lint などのツールの開発者）は、木の参照・走査・編集の API を使う。`block-parser` と `inline-parser` は、木を組み立てて構文トークンを記録する。`html-renderer` は木とレジストリのスロットを使って出力する。`markdown-renderer` は、構文トークンと編集の記録から、元の表記を出す部分と作り直す部分を判断する。拡張の実装者は、ノード型と構文拡張の記述子を書く。
 
-**Impact**：`foundation` の共通ランタイムの上に、公開ヘッダ 6 つ（`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h`）と `src/tree/` を追加する。
+**Impact**：`foundation` の共通基盤の上に、公開ヘッダ 6 つ（`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h`）と `src/tree/` を追加する。
 
 ### Goals
 - CommonMark の全ノード（とリンク参照定義）を、拡張と同じ記述子で登録した組み込みの型として提供する。
@@ -38,7 +38,7 @@
 - CommonMark の構文セットの構築関数、パーサの入口
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_deinit`）
+- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`base/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`base/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_deinit`）
 - テスト時：Naos、`amark_add_test()`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`）、`amark_add_fuzzer()`
 - C99 の標準ライブラリ（`<stddef.h>`、`<stdint.h>`、`<stdbool.h>`、`<string.h>`、`<limits.h>`）
 - レイヤーの規則：`src/tree/` は `src/parse/`、`src/render/`、`src/syntax/` を参照しない。公開ヘッダは他の公開ヘッダだけを include する
@@ -57,12 +57,12 @@
 ## Architecture
 
 ### Architecture Pattern & Boundary Map
-**Selected pattern**：レイヤードな C のモジュール。`src/tree/` は共通ランタイムの上にあり、パーサとレンダラを知らない。レジストリは組み込みの型の記述子を「拡張の 1 つ」として持ち、スロットの中身を解釈しない。
+**Selected pattern**：レイヤードな C のモジュール。`src/tree/` は共通基盤の上にあり、パーサとレンダラを知らない。レジストリは組み込みの型の記述子を「拡張の 1 つ」として持ち、スロットの中身を解釈しない。
 
 ```mermaid
 graph TB
-    subgraph Runtime
-        RT[foundation runtime]
+    subgraph Base
+        RT[foundation base]
     end
     subgraph Tree
         Registry[SyntaxSet]
@@ -117,7 +117,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Language | C99 | ライブラリ、テスト、ファジング | `foundation` の `amark_target_defaults()` |
-| Runtime | `foundation`（error、allocator、buffer、utf8） | 確保、文字列の検査、ダンプの出力 | 新しい依存なし |
+| Base | `foundation`（error、allocator、buffer、utf8） | 確保、文字列の検査、ダンプの出力 | 新しい依存なし |
 | Test | Naos v0.4.0、`amark_add_test`、`amark_test_support` | 単体テスト、確保失敗の総当たり | `amark_test_tree`（INTERFACE）を追加 |
 | Fuzz | `amark_add_fuzzer` | 編集の操作列のファジング | `fuzz/tree_edit_fuzz.c` |
 
