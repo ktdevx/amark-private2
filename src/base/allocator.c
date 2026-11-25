@@ -3,9 +3,9 @@
 
 #include <amark/allocator.h>
 
-#include <stdlib.h>
-
 #include "base/allocator_internal.h"
+
+#include <stdlib.h>
 
 /* The default allocator: the only place in Amark that uses the allocation
  * functions of the C standard library directly. */

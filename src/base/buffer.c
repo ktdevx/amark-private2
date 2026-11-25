@@ -1,16 +1,16 @@
 /* SPDX-License-Identifier: MIT
  * Copyright (c) The Amark Authors */
 
-#include <amark/buffer.h>
-
-#include <stdint.h>
-#include <string.h>
+#include "base/buffer_internal.h"
 
 #include <amark/allocator.h>
+#include <amark/buffer.h>
 #include <amark/utf8.h>
 
 #include "base/allocator_internal.h"
-#include "base/buffer_internal.h"
+
+#include <stdint.h>
+#include <string.h>
 
 /* The content of a buffer with no capacity. Read-only: nothing writes to it (a
  * buffer with capacity 0 has length 0 and is never written to) and nothing frees
