@@ -10,3 +10,8 @@
 #     in corpus/<name>/) is replayed by the CTest test fuzz.<name>.corpus, whether
 #     AMARK_FUZZ is on or off.
 # Later specs add their fuzz targets here, or in subdirectories added here.
+
+# The fuzz targets of the foundation (FuzzTargets). They link only amark_internal:
+# buffer_fuzz keeps its failure-injecting allocator in its own source.
+amark_add_fuzzer(utf8_fuzz SOURCES utf8_fuzz.c CORPUS corpus/utf8)
+amark_add_fuzzer(buffer_fuzz SOURCES buffer_fuzz.c CORPUS corpus/buffer)
