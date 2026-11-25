@@ -43,7 +43,7 @@
 
 ### 出力の前後のフック、フィルタ、レンダラの共通の形
 - **Context**：要件 8 と、`markdown-renderer` とスロットの設計を揃えるため（brief の Adjacent）。
-- **Sources Consulted**：cmark-gfm の `cmark_html_renderer`（`filter_extensions`、`footnote_ix`）、markdown-it の renderer rules（`rules[type] = fn` の置き換えと元の規則の保存）、pulldown-cmark の HTML 出力、`syntax-tree` の design（`amark_slot_header`、スロットの種類の番号の範囲、`amark_syntax_set_slot_at`）
+- **Sources Consulted**：cmark-gfm の `cmark_html_renderer`（`filter_extensions`、`footnote_ix`）、markdown-it の renderer rules（`rules[type] = fn` の置き換えと元の規則の保存）、pulldown-cmark の HTML 出力、`syntax-tree` の design（`amark_slot_header_t`、スロットの種類の番号の範囲、`amark_syntax_set_slot_at`）
 - **Findings**：
   - markdown-it の「規則の置き換えと、元の規則の呼び出し」は、拡張の差し替えと包み込みを最小の API で表す。Amark では、構文セットの順を優先度とし、`render_next` で前の処理を呼ぶ形が対応する。
   - cmark-gfm のフィルタは HTML 全体の文字列に対して動くため、テキストのエスケープ後の `&lt;` と、生の HTML の `<` を区別できず、生の HTML の出力の箇所に専用の分岐が入っている。出力に「マークアップ / テキスト / 生の HTML」の分類を付ければ、フィルタは分類で対象を選べる。

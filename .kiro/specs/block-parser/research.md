@@ -43,8 +43,8 @@
   - リンクの宛先・タイトル・ラベルの文法は、リンク参照定義（ブロック）とインラインのリンクで同じ。HTML の開始タグと終了タグの文法は、HTML ブロックの種類 7 と生の HTML で同じ。これらはどちらも複数行にまたがりうる（リンク参照定義のタイトル、インラインのリンク）。
   - リンク参照定義の表は、すべてのブロックが閉じた後にしか完成しない（後ろの定義も参照できる）。したがってインラインの解析は終了の指示の後に行う。
 - **Implications**：
-  - 区間の並びの抽象（`amark_text_input`）を公開し、走査の関数（ラベル、宛先、タイトル、HTML のタグ）と、エスケープと文字参照を解読しながらトークンを記録する関数を、この上に作って公開する。ブロックが最初に必要とするので、この spec が持つ。
-  - 委譲は関数表（`amark_inline_delegate`）で行い、既定の委譲先を差し替え可能にする。この spec は単純な委譲先（テキストと softbreak）を提供し、インラインのエンジンがない段階でもロスレス性の検証まで完結させる。`inline-parser` は既定の委譲先を自分のエンジンに変える。
+  - 区間の並びの抽象（`amark_text_input_t`）を公開し、走査の関数（ラベル、宛先、タイトル、HTML のタグ）と、エスケープと文字参照を解読しながらトークンを記録する関数を、この上に作って公開する。ブロックが最初に必要とするので、この spec が持つ。
+  - 委譲は関数表（`amark_inline_delegate_t`）で行い、既定の委譲先を差し替え可能にする。この spec は単純な委譲先（テキストと softbreak）を提供し、インラインのエンジンがない段階でもロスレス性の検証まで完結させる。`inline-parser` は既定の委譲先を自分のエンジンに変える。
 
 ### ラベルの正規化と Unicode の case fold
 - **Context**：要件 8.3。foundation の design は「case fold は必要とする spec が生成手順の上に追加する」としている。
@@ -72,7 +72,7 @@
 
 ### 出力のスロットを足す下流の spec との関係
 - **Context**：`html-renderer` は並行して spec を書いており、組み込みのノードの HTML 出力のスロットを定義する。`markdown-renderer` は後で Markdown 出力のスロットを足す。
-- **Sources Consulted**：`.kiro/steering/roadmap.md`（Boundary Strategy：1 つの構文拡張が、ノード型、パース、HTML 出力、Markdown 出力をまとめる）、`.kiro/steering/structure.md`（構文ごとに 1 ファイル）、`.kiro/specs/syntax-tree/design.md`（`amark_extension` のスロットの一覧、`amark.core` が組み込みの型を持つ）。
+- **Sources Consulted**：`.kiro/steering/roadmap.md`（Boundary Strategy：1 つの構文拡張が、ノード型、パース、HTML 出力、Markdown 出力をまとめる）、`.kiro/steering/structure.md`（構文ごとに 1 ファイル）、`.kiro/specs/syntax-tree/design.md`（`amark_extension_t` のスロットの一覧、`amark.core` が組み込みの型を持つ）。
 - **Findings**：組み込みのノード型は `amark.core` が持つため、構文ごとの拡張はスロットだけを持つ。見出し（ATX と setext）とコードブロック（インデントとフェンス）は、2 つの構文が同じノード型を作る。document 型は構文ではなくエンジンが作る。
 - **Implications（`html-renderer` の design の確定後に更新）**：`html-renderer` は、組み込みの 19 のノード型の HTML 出力を 1 つの構文拡張 `amark.core.html`（`amark_html_core_extension()`）に置き、`commonmark.*` の構文の拡張は組み込みのノード型の HTML のスロットを持たないと決めた（出力は構文ではなくノード型に従う）。これにより、見出しやコードブロックのように 2 つの構文が同じ型を作る場合の重複の問題は起きない。この spec の構築関数は `amark.core.html` を `amark.core` の直後に加え、`markdown-renderer` の `amark.core.markdown` も同じ位置に加えられる形にする。構文ごとのファイルの静的なスロットの一覧は残し、特定の構文だけが独自の出力を必要とする場合にそこへ足せるようにする。GFM 相当の検証用の構文は、`html-renderer` の `amark_test_html_gfm` のノード型の記述子を使い、パースのスロットだけを持つ。
 
@@ -127,8 +127,8 @@
 - **Context**：要件 6.2、8.7、4.9。
 - **Alternatives Considered**：
   1. 段落の中身を連結した文字列として渡し、位置の対応表を別に持つ
-  2. ソース上の区間の並び（`amark_text_input`）として渡し、論理的な位置からソースのオフセットを引ける形にする
-- **Selected Approach**：2。走査（ラベル、宛先、タイトル、HTML のタグ）と、解読しながらトークンを記録する関数を、`amark_text_input` の上に公開する。
+  2. ソース上の区間の並び（`amark_text_input_t`）として渡し、論理的な位置からソースのオフセットを引ける形にする
+- **Selected Approach**：2。走査（ラベル、宛先、タイトル、HTML のタグ）と、解読しながらトークンを記録する関数を、`amark_text_input_t` の上に公開する。
 - **Rationale**：連結した文字列を作らずに済み、トークンはそのままソースのオフセットを持てる。リンク参照定義とインラインのリンクが同じ実装を使う。
 
 ### Decision: 断片のパースはこの spec が持ち、別の文書でパースして取り込む
@@ -165,8 +165,8 @@
 ## Synthesis Outcomes
 - **Generalization**：
   - setext 見出し、表、リンク参照定義、脚注の定義は、どれも「段落の類のブロックの行を、別のノードに渡す」操作である。行の記録、解釈し直し、先頭の消費の 3 つの操作に一般化した。
-  - リンク参照定義の表と、脚注の定義の表は、同じ「正規化したラベルで引ける表」に一般化した（`amark_label_map`）。
-  - ブロックの中身のインラインの入力、リンク参照定義の走査、断片のインラインの文脈は、どれも「区間の並びのテキスト」に一般化した（`amark_text_input`）。
+  - リンク参照定義の表と、脚注の定義の表は、同じ「正規化したラベルで引ける表」に一般化した（`amark_label_map_t`）。
+  - ブロックの中身のインラインの入力、リンク参照定義の走査、断片のインラインの文脈は、どれも「区間の並びのテキスト」に一般化した（`amark_text_input_t`）。
 - **Build vs. Adopt**：
   - 外部の依存は持たない（steering）。cmark のアルゴリズムは採り入れるが、コードは使わない（ノードのモデルとトークンの記録が根本的に異なり、ライセンスの表記も分けたい）。
   - Unicode の case fold と HTML の文字参照は、公式のデータ（UCD、WHATWG の `entities.json`）から生成する。
@@ -177,8 +177,8 @@
 
 ## Upstream Changes
 - **`syntax-tree`**：
-  1. `amark_status amark_document_take_syntax_set(amark_document *document, amark_syntax_set *set)`：文書がすでに使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードの後に解放する。静的な core の構文セット、別の構文セット、2 回目の呼び出しは `AMARK_ERROR_INVALID_ARGUMENT`。
-  2. `amark_status amark_node_import_children(amark_node *parent, amark_node *before, const amark_node *source_parent)`：別の文書（または同じ文書）の `source_parent` の子をすべて、1 回の操作で取り込み、`parent` の `before` の前（NULL なら末尾）に順に挿入する。ソースの複製は呼び出し全体で 1 回だけ行う。包含の規則の検査を先に行い、確保の失敗を含めて全か無か（強い保証）。挿入は通常の挿入と同じく編集を記録する。
+  1. `amark_status_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set)`：文書がすでに使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードの後に解放する。静的な core の構文セット、別の構文セット、2 回目の呼び出しは `AMARK_ERROR_INVALID_ARGUMENT`。
+  2. `amark_status_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent)`：別の文書（または同じ文書）の `source_parent` の子をすべて、1 回の操作で取り込み、`parent` の `before` の前（NULL なら末尾）に順に挿入する。ソースの複製は呼び出し全体で 1 回だけ行う。包含の規則の検査を先に行い、確保の失敗を含めて全か無か（強い保証）。挿入は通常の挿入と同じく編集を記録する。
   3. `extension.h` にこの spec のスロットの種類の名前と番号（0x0100–0x0103）を追記する（`syntax-tree` の design が予定している追記）。
 - **`foundation`**（foundation の design が予定している「必要とする spec が追加する」作業）：
   - `tools/gen_unicode_tables.py` に `CaseFolding.txt` の読み取りを足し、`src/runtime/case_fold_tables.inc` を出力する。`include/amark/unicode.h` に `amark_unicode_case_fold()` を足す。
@@ -211,10 +211,10 @@
 
 ### 2026-11-25：`markdown-renderer` からの上流の変更の依頼の反映と、`inline-parser` との所有の明確化
 - **Context**：`markdown-renderer` の設計で、HTML ブロックとして再パースされるかの判定（HTML ブロックのリテラルの検査、段落の行頭の保護）に、パーサと同じ HTML ブロックの開始と終わりの条件とタグの走査が要ると分かり、`markdown-renderer` の design の Integration & Upstream Changes に `block-parser` への 2 つの依頼が書かれた。`markdown-renderer` は回避策をとらない方針なので、この spec を更新する。承認済みの要件・設計・タスクに追加する形で行い、既存の受け入れ基準の意味は変えない。
-- **バイト列の HTML ブロックの条件とタグの走査（7.7、7.8。依頼 1）**：これまでタグの走査は `amark_text_input` の上の版だけで、HTML ブロックの 7 種類の条件は `commonmark.html_block` の中に閉じていた。レンダラは文書のパースの文脈も区間の並びも持たず、リテラルの行を見るだけなので、`amark_scan_html_block_start(line, length, interrupting, out_kind)`、`amark_scan_html_block_end(kind, line, length)`、`amark_scan_html_open_tag_bytes`、`amark_scan_html_closing_tag_bytes` を `scan.h` に公開した。規則を 2 か所に書くと、パーサとレンダラの判定が食い違ったときに往復が壊れる（レンダラが「HTML ブロックにならない」と判断した出力が再パースで HTML ブロックになる）。そこで `scan_html.c` の内部の走査を、連続したバイト列と区間の並びのどちらからも読める読み取りの上の 1 組の関数にし、公開の関数はすべてその薄い包みとした。`commonmark.html_block` も行の `<` からのバイト列を同じ関数に渡すだけにした。同じ内容に対する両方の版の一致をテストで確かめる（7.8）。
+- **バイト列の HTML ブロックの条件とタグの走査（7.7、7.8。依頼 1）**：これまでタグの走査は `amark_text_input_t` の上の版だけで、HTML ブロックの 7 種類の条件は `commonmark.html_block` の中に閉じていた。レンダラは文書のパースの文脈も区間の並びも持たず、リテラルの行を見るだけなので、`amark_scan_html_block_start(line, length, interrupting, out_kind)`、`amark_scan_html_block_end(kind, line, length)`、`amark_scan_html_open_tag_bytes`、`amark_scan_html_closing_tag_bytes` を `scan.h` に公開した。規則を 2 か所に書くと、パーサとレンダラの判定が食い違ったときに往復が壊れる（レンダラが「HTML ブロックにならない」と判断した出力が再パースで HTML ブロックになる）。そこで `scan_html.c` の内部の走査を、連続したバイト列と区間の並びのどちらからも読める読み取りの上の 1 組の関数にし、公開の関数はすべてその薄い包みとした。`commonmark.html_block` も行の `<` からのバイト列を同じ関数に渡すだけにした。同じ内容に対する両方の版の一致をテストで確かめる（7.8）。
   - 開始の条件の関数は、字下げを除いた行を受け取る。タブを含む字下げの列の計算はコンテナの接頭辞の文脈に依存するので、呼び出し側（パーサはブロックの文脈の列、レンダラはリテラルの先頭の空白）に任せた。
   - 終わりの条件の関数は種類 1–5 だけを判定し、種類 6・7 は false とした。6・7 は空行の前で終わり、空行はブロックに含まれないので、「この行で終わる（行を含む）」の 1–5 と意味が違う。同じ関数で空行を true にすると、行を含むかどうかを呼び出し側が種類で分け直すことになる。
-  - 検討した代替：（a）レンダラの側で規則を複製する案は、上の食い違いの危険があり、spec の境界の回避策になるので採らなかった。（b）レンダラに 1 区間の `amark_text_input` を作らせる案は、`amark_text_input_new` が文書を要求し確保を伴うため、行ごとの判定に向かないので採らなかった。
+  - 検討した代替：（a）レンダラの側で規則を複製する案は、上の食い違いの危険があり、spec の境界の回避策になるので採らなかった。（b）レンダラに 1 区間の `amark_text_input_t` を作らせる案は、`amark_text_input_new` が文書を要求し確保を伴うため、行ごとの判定に向かないので採らなかった。
 - **出力の core 拡張の一覧への `amark.core.markdown` の追加（依頼 2）**：設計はもともと、構築関数の「出力の core 拡張の一覧」を 1 行で足せる配列にする予定だった。`markdown-renderer` のタスク 3.7 が、その配列への 1 行と、拡張の順（`amark.core`、`amark.core.html`、`amark.core.markdown`、構文の拡張）を確かめるテストの更新を行う。`commonmark.c` の所有はこの spec のままで、その 1 行の編集だけを `markdown-renderer` が行うことを Boundary Commitments と CommonMarkSet に明記した。`amark_markdown_core_extension()` はこの spec の実装の時点ではまだないので、この spec のタスク 8.1 は `amark.core.html` だけの配列で実装し、タスクは足さない。Revalidation Triggers に `amark_markdown_core_extension()` の名前と登録の規則の変更を加えた。
 - **`inline-parser` との所有の明確化**：宛先の括弧の入れ子の上限、エンジンの役割の範囲の分け方、`amark_test_parse_gfm`、`amark_test_parse_check` は、`inline-parser` の依頼でこの spec が実装する（前の改訂）。`inline-parser` のタスク 1.2、1.3 がこれらを実装の作業として重ねて書いているが、所有者と唯一の実装者はこの spec であり、`inline-parser` の側の記述は `inline-parser` の更新で直す。この spec は Boundary Commitments と Integration & Upstream Changes でそれを明記しただけで、タスクは変えない。HTML のタグの走査のバイト列の版は、`inline-parser` が公開する `amark_scan_raw_html` も使える（重複して実装しない）。
 - **Implications**：要件 7.7、7.8 を追加し、design の Scanners（契約、責務、テスト）、Builtin syntaxes の html_block、CommonMarkSet、Boundary Commitments、Revalidation Triggers、Integration & Upstream Changes を更新した。タスクは 1.1（宣言）、3.4（1 つの実装とバイト列の版、HTML ブロックの条件）、7.9（条件の関数を使う）、8.1（`amark.core.markdown` の 1 行は `markdown-renderer` のタスク 3.7 が足すことの注記）を更新した。タスクの番号と依存は変えない。
@@ -223,7 +223,7 @@
 - **Context**：全 spec の横断レビューで、この spec に関わる指摘（#5、#7、#8、#10、#14）が出た。approvals は維持し、境界・契約の明確化として反映した。
 - **#5 共同で編集するファイルと `foundation` の拡張点**：`bench/CMakeLists.txt` はこの spec が作るが、`inline-parser` が `inline_pathological` を追記する。Boundary Commitments に「共同で編集するファイル」を置き、登録関数 `amark_add_bench(<name> SOURCES ... [INTERNAL])` を定義して、他の spec は 1 行の追記だけにした。最上位の `CMakeLists.txt`（`AMARK_BUILD_BENCH`、`add_subdirectory(bench)`）と `.gitattributes`（`spec_blocks.txt export-ignore`）への追記は、`foundation` の Downstream Extension Points の表の行として載る拡張点で行う（行の追加は `foundation` の spec の作業。この spec はその前提を Integration に書いた）。
 - **#7 `amark.h` の include の順**：「`extension.h` の後に」という書き方をやめ、`foundation` が定める正準の順（foundation → tree → render、html → entity、scan、parser、block、inline、commonmark → markdown）のそれぞれの位置に足す、と書き直した（design の Modified Files、タスク 1.1）。
-- **#8 `const` を外すキャストの除去**：`amark_parser_new(const amark_syntax_set *)` が印のフラグで `amark_document_take_syntax_set(amark_syntax_set *)` を呼ぶと、`const` を外すキャストが要る。検討した代替：（a）`amark_parser_new` の引数を非 `const` にする（借りるだけの利用者と静的な構文セット `amark_syntax_set_core()` が使いにくくなる）、（b）`syntax-tree` の受け取りを `const` にする（所有権の移動を `const` で表すのは誤解を招く。`syntax-tree` は非 `const` のまま）、（c）非 `const` の構文セットを受け取る別の入口を設ける。（c）を選び、`amark_parser_new_take_syntax_set(amark_syntax_set *, ...)` を追加し、`AMARK_PARSE_TAKE_SYNTAX_SET`（0x02）を削った（0x02 は未知のビットとして拒否）。`amark_parser_new` は `const` で借りるだけになった。所有権の受け渡しは、非 `const` の構文セットを持つ経路（CommonMark の便宜の関数、構文セットを指定しないときの `amark_test_parse_check`）だけで起こる。要件 1.9 を追加した。
+- **#8 `const` を外すキャストの除去**：`amark_parser_new(const amark_syntax_set_t *)` が印のフラグで `amark_document_take_syntax_set(amark_syntax_set_t *)` を呼ぶと、`const` を外すキャストが要る。検討した代替：（a）`amark_parser_new` の引数を非 `const` にする（借りるだけの利用者と静的な構文セット `amark_syntax_set_core()` が使いにくくなる）、（b）`syntax-tree` の受け取りを `const` にする（所有権の移動を `const` で表すのは誤解を招く。`syntax-tree` は非 `const` のまま）、（c）非 `const` の構文セットを受け取る別の入口を設ける。（c）を選び、`amark_parser_new_take_syntax_set(amark_syntax_set_t *, ...)` を追加し、`AMARK_PARSE_TAKE_SYNTAX_SET`（0x02）を削った（0x02 は未知のビットとして拒否）。`amark_parser_new` は `const` で借りるだけになった。所有権の受け渡しは、非 `const` の構文セットを持つ経路（CommonMark の便宜の関数、構文セットを指定しないときの `amark_test_parse_check`）だけで起こる。要件 1.9 を追加した。
 - **#10 spec.txt の例の形式のパーサの一本化**：この spec の `tests/syntax/gen_block_cases.cmake` と `inline-parser` の `gen_examples.cmake` が同じ形式を別々に読んでいた。この spec が先に実装されるので、`tests/support/gen_examples.cmake` をこの spec が作り、`inline-parser` が `EXPECT=html`、`FACTORY=`、`CHECK=` を追加で足す形にした。拡張が追加だけで済むよう、データの形式・テストの名前の規則（`ex<4 桁の番号>_<節>`。`inline-parser` の design と同じ）・基本の ARGS（`EXPECT=dump`、`DUMP_FLAGS=`）・基本の経路の出力を固定し、`FACTORY` / `CHECK` / `EXPECT=html` を予約した（未実装の間は構成の失敗）。spec の一部を写す `spec_blocks.txt` のために、開始の行の語 `n=<N>` で番号を明示できるようにした（spec.txt には現れないので通し番号と矛盾しない）。見出しの行は、foundation の生成の規則でスイートの名前がデータのファイル名から決まるので、テストの名前の節の部分にした。要件 14.6 を追加した。
 - **#14 Revalidation Triggers の分割**：独立に変わりうる継ぎ目ごとに、ブロックのエンジンと公開 API、`scan.h` の走査、実行時の文字データ（case fold、文字参照）、CommonMark の構文セットの構築関数、GFM 相当の検証用ライブラリとテストの補助（`gen_examples.cmake` を含む）、ベンチマークの基盤の群に分けた。spec の分割はしない。
 - **Implications**：requirements に 1.9、14.6 と Boundary Context の 2 項目を追加した。design の Boundary Commitments、Revalidation Triggers、File Structure Plan、Modified Files、Requirements Traceability、ParserAPI、Fragment、CommonMarkSet、ParseCheck、SyntaxTests、Bench、Integration & Upstream Changes を更新した。タスクは 1.1、1.4、6.2、8.1、8.4、10.4 の記述と `_Boundary:_` / `_Requirements:_` を更新した（依存の順は変わらない）。

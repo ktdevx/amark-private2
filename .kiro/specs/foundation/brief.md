@@ -17,7 +17,7 @@ Amark を開発する人は、Windows・Linux・macOS の 3 OS で静的/動的�
 - エクスポートマクロ（`AMARK_API`）を用意し、シンボルの可視性は既定で hidden にする。Windows の dllexport/dllimport にも対応する。
 - Naos は FetchContent で v0.4.0 に固定し、`naos_add_executable` を使って CTest に登録する。
 - 共通ランタイムとして次を用意する。
-  - 差し替え可能なアロケータ（`amark_allocator`）
+  - 差し替え可能なアロケータ（`amark_allocator_t`）
   - 伸長できるバイトバッファ
   - エラーコードと結果型の規約
   - バージョン情報の API

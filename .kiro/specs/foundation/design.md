@@ -51,7 +51,7 @@
 
 ### Revalidation Triggers
 - 状態コードの追加・意味の変更、出力引数の規約の変更 → すべての後続の spec
-- `amark_allocator` のフィールドの追加、`amark_buffer` の API の変更 → `syntax-tree`、`html-renderer`、`markdown-renderer`
+- `amark_allocator_t` のフィールドの追加、`amark_buffer_t` の API の変更 → `syntax-tree`、`html-renderer`、`markdown-renderer`
 - `amark_add_test()` / `amark_add_generated_tests()` / `amark_add_fuzzer()` の引数の変更、テスト生成の補助の契約の変更、ファジングターゲットがリンクするテスト用の補助ライブラリの規則（FuzzInfra の「ファジング用の補助ライブラリの規則」）の変更 → テストやファジングターゲットを持つすべての spec
 - 文字の分類の定義の変更、Unicode の版の更新、準拠対象の CommonMark の版の変更 → `inline-parser`、`block-parser`
 - 公開ヘッダの配置、`amark.h` の構成と正規の include の順（PublicHeaders）、`AMARK_API` の規則の変更 → すべての後続の spec
@@ -170,9 +170,9 @@ graph TB
 │   ├── amark.h                    # すべての公開ヘッダをまとめる
 │   ├── export.h                   # AMARK_API、AMARK_BEGIN_DECLS / AMARK_END_DECLS
 │   ├── version.h                  # 版のマクロ（版の唯一の定義）と実行時の版の関数
-│   ├── status.h                   # amark_status と amark_status_string()
-│   ├── allocator.h                # amark_allocator と確保の関数
-│   ├── buffer.h                   # amark_buffer（不透明型）
+│   ├── status.h                   # amark_status_t と amark_status_string()
+│   ├── allocator.h                # amark_allocator_t と確保の関数
+│   ├── buffer.h                   # amark_buffer_t（不透明型）
 │   ├── utf8.h                     # UTF-8 の復号・検証・符号化
 │   └── unicode.h                  # 文字の分類、Unicode の版のマクロ
 ├── src/
@@ -323,7 +323,7 @@ graph TB
 | 4.2 | 個別の CTest のテスト | Testing | `naos_add_executable` | テストのビルド |
 | 4.3 | 公開・内部の両方のテスト | BuildCore、Testing | `amark_internal`、`INTERNAL` | — |
 | 4.4 | Windows の DLL を見つけられる | Testing、BuildCore | 共通の出力ディレクトリ | テストのビルド |
-| 4.5, 4.6 | テスト用アロケータ、確保失敗の総当たり | TestSupport | `amark_test_allocator`、`AMARK_CHECK_OOM_SWEEP` | — |
+| 4.5, 4.6 | テスト用アロケータ、確保失敗の総当たり | TestSupport | `amark_test_allocator_t`、`AMARK_CHECK_OOM_SWEEP` | — |
 | 4.7, 4.8 | データからのテスト生成、再生成 | Testing、TestGen | `amark_add_generated_tests()`、`AmarkTestGen.cmake` | テストのビルド |
 | 4.9 | 公開ヘッダの単独コンパイル（C、C++） | HeaderChecks | `tests/headers` | — |
 | 4.10 | エクスポートの検査 | SymbolCheck | `check_exported_symbols.cmake` | — |
@@ -353,10 +353,10 @@ graph TB
 | 9.4, 9.5 | コンパイル時と実行時の版 | Version | `AMARK_VERSION_*`、`amark_version_number()` | — |
 | 9.6 | 版の唯一の定義 | VersionMod、Packaging | `amark_read_version()` | — |
 | 9.7 | `amark.h` の正規の include の順 | PublicHeaders | `amark.h` | — |
-| 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | 状態コードと失敗の規約 | Status、Error conventions | `amark_status`、`amark_status_string()` | — |
+| 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | 状態コードと失敗の規約 | Status、Error conventions | `amark_status_t`、`amark_status_string()` | — |
 | 10.9 | 表現できないことの状態コード | Status | `AMARK_ERROR_UNREPRESENTABLE`、`amark_status_string()` | — |
 | 10.8 | グローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
-| 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8 | アロケータ | Allocator | `amark_allocator`、`amark_alloc()` など | — |
+| 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8 | アロケータ | Allocator | `amark_allocator_t`、`amark_alloc()` など | — |
 | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8 | バッファ | Buffer | `amark_buffer_*` | — |
 | 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7 | UTF-8 | Utf8 | `amark_utf8_*` | — |
 | 14.1, 14.2, 14.3, 14.4, 14.5, 14.6 | 文字の分類 | Unicode | `amark_unicode_*`、`amark_ascii_is_punctuation()` | — |
@@ -686,30 +686,30 @@ amark_add_fuzzer(<name>
 **Contracts**: Service [x]
 ```c
 typedef struct amark_test_allocator {
-    amark_allocator base;          /* amark_test_allocator_get() が返すもの */
+    amark_allocator_t base;        /* amark_test_allocator_get() が返すもの */
     size_t fail_at;                /* この回数目の確保（allocate と reallocate）を失敗させる。0 なら失敗させない */
     size_t calls;                  /* 確保の呼び出しの回数 */
     size_t failures;               /* 注入した失敗の回数 */
     size_t live_blocks;            /* 解放されていないブロックの数 */
     size_t live_bytes;
     size_t peak_bytes;
-} amark_test_allocator;
+} amark_test_allocator_t;
 
-void amark_test_allocator_init(amark_test_allocator *t);
-const amark_allocator *amark_test_allocator_get(amark_test_allocator *t);
-void amark_test_allocator_reset_counters(amark_test_allocator *t);
+void amark_test_allocator_init(amark_test_allocator_t *t);
+const amark_allocator_t *amark_test_allocator_get(amark_test_allocator_t *t);
+void amark_test_allocator_reset_counters(amark_test_allocator_t *t);
 
 /* 対象の処理：渡されたアロケータだけを使い、成功でも失敗でも、作ったものをすべて解放してから戻る */
-typedef amark_status (*amark_test_oom_scenario)(const amark_allocator *allocator, void *context);
+typedef amark_status_t (*amark_test_oom_scenario_t)(const amark_allocator_t *allocator, void *context);
 
 typedef struct amark_test_oom_result {
     size_t iterations;             /* 失敗を注入した回数 */
     size_t wrong_status_at;        /* メモリ不足以外が返った最初の回（0 ならなし） */
     size_t leak_at;                /* リークした最初の回（0 ならなし） */
-    amark_status final_status;     /* 失敗を注入しない最後の実行の結果 */
-} amark_test_oom_result;
+    amark_status_t final_status;   /* 失敗を注入しない最後の実行の結果 */
+} amark_test_oom_result_t;
 
-amark_test_oom_result amark_test_oom_sweep(amark_test_oom_scenario scenario, void *context, size_t max_iterations);
+amark_test_oom_result_t amark_test_oom_sweep(amark_test_oom_scenario_t scenario, void *context, size_t max_iterations);
 
 /* 呼び出し側の行で報告するマクロ：final_status が AMARK_OK、wrong_status_at と leak_at が 0 */
 #define AMARK_CHECK_OOM_SWEEP(scenario, context) /* ... */
@@ -722,9 +722,9 @@ amark_test_oom_result amark_test_oom_sweep(amark_test_oom_scenario scenario, voi
 ### Runtime
 
 #### 公開 API の共通の規約（Error conventions を含む）
-- 公開の関数と型は `amark_`、マクロと定数は `AMARK_`、モジュールをまたぐ内部の関数は `amark__`。公開の関数にはすべて `AMARK_API` を付ける。
+- 公開の関数と型は `amark_`、マクロと定数は `AMARK_`、モジュールをまたぐ内部の関数は `amark__`。typedef した型の名前は末尾に `_t` を付ける（構造体と列挙のタグには付けない）。公開の関数にはすべて `AMARK_API` を付ける。
 - 公開ヘッダは `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS`（C++ のときの `extern "C"`）で宣言を囲む。インクルードガードは `AMARK_<NAME>_H`。
-- 失敗しうる関数は `amark_status` を返す。結果は最後の引数の出力引数（名前は `out_` で始める）で返す。
+- 失敗しうる関数は `amark_status_t` を返す。結果は最後の引数の出力引数（名前は `out_` で始める）で返す。
 - 失敗したとき：操作の対象のオブジェクトは呼び出し前の有効な状態のまま（強い保証）。オブジェクトのポインタを返す出力引数には NULL を入れる。それ以外の出力引数は関数ごとに文書化する。
 - 必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT` を返す。解放の関数は NULL を受け付けて何もしない。
 - 失敗し得ない関数（問い合わせ、分類、復号）は値を直接返す。確保の関数（`amark_alloc` など）は `malloc` に倣い、失敗を NULL で示す。
@@ -804,9 +804,9 @@ typedef enum amark_status {
     AMARK_ERROR_LIMIT_EXCEEDED = 4,    /* 文書化された上限（入れ子の深さなど）を超えた */
     AMARK_ERROR_INVALID_STATE = 5,     /* オブジェクトの状態がその操作を許さない */
     AMARK_ERROR_UNREPRESENTABLE = 6    /* 対象を要求された形式で意味を変えずに表せない（例：Markdown の出力） */
-} amark_status;
+} amark_status_t;
 
-AMARK_API const char *amark_status_string(amark_status status);
+AMARK_API const char *amark_status_string(amark_status_t status);
 /* 例："out of memory"、"unrepresentable"。未知の値には "unknown status"。静的な文字列で、NULL を返さない */
 ```
 - 値は固定し、変更しない。新しいコードは末尾に追加する（追加は Revalidation Trigger）。利用者は未知の非 0 の値を一般的な失敗として扱う。
@@ -822,20 +822,20 @@ AMARK_API const char *amark_status_string(amark_status status);
 **Contracts**: Service [x]
 ```c
 typedef struct amark_allocator {
-    size_t struct_size;   /* sizeof(amark_allocator) を入れる */
+    size_t struct_size;   /* sizeof(amark_allocator_t) を入れる */
     void *user_data;      /* コールバックにそのまま渡す */
     void *(*allocate)(void *user_data, size_t size);
     void *(*reallocate)(void *user_data, void *ptr, size_t new_size);
     void (*deallocate)(void *user_data, void *ptr);
-} amark_allocator;
+} amark_allocator_t;
 
-AMARK_API const amark_allocator *amark_allocator_default(void); /* malloc/realloc/free に基づく */
-AMARK_API amark_status amark_allocator_check(const amark_allocator *allocator);
+AMARK_API const amark_allocator_t *amark_allocator_default(void); /* malloc/realloc/free に基づく */
+AMARK_API amark_status_t amark_allocator_check(const amark_allocator_t *allocator);
 
-AMARK_API void *amark_alloc(const amark_allocator *allocator, size_t size);
-AMARK_API void *amark_alloc_array(const amark_allocator *allocator, size_t count, size_t size);
-AMARK_API void *amark_realloc(const amark_allocator *allocator, void *ptr, size_t new_size);
-AMARK_API void amark_free(const amark_allocator *allocator, void *ptr);
+AMARK_API void *amark_alloc(const amark_allocator_t *allocator, size_t size);
+AMARK_API void *amark_alloc_array(const amark_allocator_t *allocator, size_t count, size_t size);
+AMARK_API void *amark_realloc(const amark_allocator_t *allocator, void *ptr, size_t new_size);
+AMARK_API void amark_free(const amark_allocator_t *allocator, void *ptr);
 ```
 - `allocator` が NULL なら既定のアロケータ。
 - `amark_allocator_check`：NULL なら `AMARK_OK`。`struct_size` が v1 の最小のサイズ（`deallocate` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
@@ -845,7 +845,7 @@ AMARK_API void amark_free(const amark_allocator *allocator, void *ptr);
 
 **内部の契約**（`src/runtime/alloc_internal.h`）
 ```c
-amark_status amark__allocator_resolve(const amark_allocator *in, amark_allocator *out); /* 検査して既定を補い、v1 の形にコピー */
+amark_status_t amark__allocator_resolve(const amark_allocator_t *in, amark_allocator_t *out); /* 検査して既定を補い、v1 の形にコピー */
 bool amark__size_add(size_t a, size_t b, size_t *out);   /* 桁あふれなら false */
 bool amark__size_mul(size_t a, size_t b, size_t *out);
 ```
@@ -862,23 +862,23 @@ bool amark__size_mul(size_t a, size_t b, size_t *out);
 
 **Contracts**: Service [x] / State [x]
 ```c
-typedef struct amark_buffer amark_buffer;   /* 不透明型 */
+typedef struct amark_buffer amark_buffer_t;   /* 不透明型 */
 
-AMARK_API amark_status amark_buffer_new(const amark_allocator *allocator, amark_buffer **out_buffer);
-AMARK_API void amark_buffer_free(amark_buffer *buffer);
+AMARK_API amark_status_t amark_buffer_new(const amark_allocator_t *allocator, amark_buffer_t **out_buffer);
+AMARK_API void amark_buffer_free(amark_buffer_t *buffer);
 
-AMARK_API const char *amark_buffer_data(const amark_buffer *buffer);  /* NULL にならない。常に NUL 終端 */
-AMARK_API size_t amark_buffer_length(const amark_buffer *buffer);
+AMARK_API const char *amark_buffer_data(const amark_buffer_t *buffer);  /* NULL にならない。常に NUL 終端 */
+AMARK_API size_t amark_buffer_length(const amark_buffer_t *buffer);
 
-AMARK_API amark_status amark_buffer_reserve(amark_buffer *buffer, size_t additional);
-AMARK_API amark_status amark_buffer_append(amark_buffer *buffer, const void *data, size_t size);
-AMARK_API amark_status amark_buffer_append_byte(amark_buffer *buffer, unsigned char byte);
-AMARK_API amark_status amark_buffer_append_repeat(amark_buffer *buffer, unsigned char byte, size_t count);
-AMARK_API amark_status amark_buffer_append_cstr(amark_buffer *buffer, const char *text);
-AMARK_API amark_status amark_buffer_append_codepoint(amark_buffer *buffer, uint32_t codepoint);
-AMARK_API amark_status amark_buffer_truncate(amark_buffer *buffer, size_t length);
-AMARK_API void amark_buffer_clear(amark_buffer *buffer);
-AMARK_API amark_status amark_buffer_detach(amark_buffer *buffer, char **out_data, size_t *out_length);
+AMARK_API amark_status_t amark_buffer_reserve(amark_buffer_t *buffer, size_t additional);
+AMARK_API amark_status_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size_t size);
+AMARK_API amark_status_t amark_buffer_append_byte(amark_buffer_t *buffer, unsigned char byte);
+AMARK_API amark_status_t amark_buffer_append_repeat(amark_buffer_t *buffer, unsigned char byte, size_t count);
+AMARK_API amark_status_t amark_buffer_append_cstr(amark_buffer_t *buffer, const char *text);
+AMARK_API amark_status_t amark_buffer_append_codepoint(amark_buffer_t *buffer, uint32_t codepoint);
+AMARK_API amark_status_t amark_buffer_truncate(amark_buffer_t *buffer, size_t length);
+AMARK_API void amark_buffer_clear(amark_buffer_t *buffer);
+AMARK_API amark_status_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_t *out_length);
 ```
 - State model：`{data, length, capacity, allocator}`。不変条件は `length < capacity`（容量 0 のときは `data` が静的な空文字列を指す）と `data[length] == '\0'`。
 - 伸長：必要な容量の 2 倍か必要量の大きい方へ伸ばす（再確保の回数は対数的）。計算の桁あふれは `AMARK_ERROR_OVERFLOW`、確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。どちらも内容を変えない。
@@ -889,11 +889,11 @@ AMARK_API amark_status amark_buffer_detach(amark_buffer *buffer, char **out_data
 
 **内部の契約**（`src/runtime/buffer_internal.h`）
 ```c
-struct amark_buffer { char *data; size_t length; size_t capacity; amark_allocator allocator; };
-void amark__buffer_init(amark_buffer *buffer, const amark_allocator *resolved_allocator); /* 確保しない */
-void amark__buffer_destroy(amark_buffer *buffer);
+struct amark_buffer { char *data; size_t length; size_t capacity; amark_allocator_t allocator; };
+void amark__buffer_init(amark_buffer_t *buffer, const amark_allocator_t *resolved_allocator); /* 確保しない */
+void amark__buffer_destroy(amark_buffer_t *buffer);
 ```
-- 内部のモジュールは、構造体に `amark_buffer` を値で埋め込み、公開の追加の関数をそのまま使える。
+- 内部のモジュールは、構造体に `amark_buffer_t` を値で埋め込み、公開の追加の関数をそのまま使える。
 
 #### Utf8
 
@@ -948,13 +948,13 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 **Contracts**: Batch [x]
 - Trigger：保守者が手で実行する（`python3 tools/gen_unicode_tables.py --ucd-dir <dir> [--check]`。`--fetch` で unicode.org から固定の版の `UnicodeData.txt` を取得する）。
 - Input：`UnicodeData.txt`（範囲の項目 `<..., First>` / `<..., Last>` を展開する）。
-- Output：`src/runtime/unicode_tables.inc`（ライセンスヘッダ、Unicode の版、生成の手順を書いたコメント、`static const amark__unicode_range amark__unicode_zs[]`、`amark__unicode_punct[]`）。`--check` は生成結果と既存のファイルを比べ、違えば非 0 で終わる。
+- Output：`src/runtime/unicode_tables.inc`（ライセンスヘッダ、Unicode の版、生成の手順を書いたコメント、`static const amark__unicode_range_t amark__unicode_zs[]`、`amark__unicode_punct[]`）。`--check` は生成結果と既存のファイルを比べ、違えば非 0 で終わる。
 - 拡張：表の定義は、スクリプト内の「名前とカテゴリの集合」の一覧で決まる。後続の spec は一覧に項目を足すか、別の UCD のファイル（`CaseFolding.txt` など）を読む生成の関数を足して、同じ出力ファイルか別の `.inc` に書き出す。`block-parser` が `CaseFolding.txt` と `case_fold_tables.inc` を、同じ方式の別のスクリプトで文字参照の表を追加する予定（Downstream Extension Points）。追加した生成の関数も `--check` と Unicode の版の照合の対象にする。
 - Unicode の版はスクリプトの定数 1 か所と `unicode.h` のマクロで持ち、スクリプトは両者が一致しなければ失敗する。
 
 ## Data Models
-- 永続的なデータはない。共通ランタイムの状態は `amark_buffer`（State model は Buffer を参照）と、オブジェクトにコピーされる `amark_allocator` だけ。
-- Unicode の範囲の表：`typedef struct { uint32_t first; uint32_t last; } amark__unicode_range;` の昇順で重ならない配列。隣り合う範囲は生成時に結合する。
+- 永続的なデータはない。共通ランタイムの状態は `amark_buffer_t`（State model は Buffer を参照）と、オブジェクトにコピーされる `amark_allocator_t` だけ。
+- Unicode の範囲の表：`typedef struct { uint32_t first; uint32_t last; } amark__unicode_range_t;` の昇順で重ならない配列。隣り合う範囲は生成時に結合する。
 
 ## Error Handling
 

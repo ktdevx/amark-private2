@@ -39,7 +39,7 @@
 ### Allowed Dependencies
 - `foundation` の公開 API（`export.h`、`status.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h`）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）。内部 API は `src/render/` だけが使う
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`extension.h`）。`src/tree/` の内部ヘッダは使わない
-- `html-renderer` の `render.h`（`amark_write_fn`）
+- `html-renderer` の `render.h`（`amark_write_fn_t`）
 - `src/syntax/md_*.c` だけが、`block-parser` の公開 API（`parser.h` の `amark_label_normalize`・`amark_label_map_*`、`scan.h` の走査、`commonmark.h` の役割の番号）と `inline-parser` の公開 API（`inline.h` の文字の宣言・ノードの性質・flanking と照合の関数・raw HTML の走査、役割の番号）を使う
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`amark_test_support`、`amark_test_tree`、`amark_test_parse`、`amark_test_inline`、`amark_test_gfm`、`tests/support/gen_examples.cmake`（ファイルと基本の契約は `block-parser`、`EXPECT=html`・`FACTORY=`・`CHECK=` の追加は `inline-parser`）、`html-renderer` の `gen_html_cases.cmake`（ケースの形式と生成の手順。`CHECK=`）、`inline-parser` の `tests/spec/spec_version.cmake`（spec.txt の版と SHA-256）、`inline-parser` の `tests/extensions/gfm_inline_ext.h`（拡張オートリンクの役割の定数）、`amark_add_fuzzer`
 - ファジングの規則（`foundation`）：ファジングのターゲットがリンクするテストの補助ライブラリは Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義される。この spec の `amark_test_md` と `amark_test_md_gfm` はこの規則に従い、Naos に依存する検査は別のライブラリ `amark_test_md_check` に分ける（ファジングのターゲットはリンクしない）
@@ -49,7 +49,7 @@
 - スロットの構造体、文脈の API の意味（状態の印、書き出しの分類、保護、区切り文字、空行の規則、汚れの印）、種類の番号の変更 → 利用者の拡張、`amark_test_md_gfm`、`inline-parser` の `gfm_set`
 - `amark.core.markdown` の名前・取得関数・登録の規則の変更 → `block-parser`（構築関数）
 - エスケープの方式の変更（必要最小限の方式の追加など）→ 期待する出力を書いたテスト（意味の保存のテストは変わらない）
-- 上流：トークンの種類・印・編集の記録・比較（`syntax-tree`）、役割の番号・トークンの所有の規則・文字の宣言・照合と走査の関数（`block-parser`、`inline-parser`）、`amark_inline_run` / `amark_inline_run_match` の形と `capacity` の規則（`inline-parser`。MdDispatch の対応づけ）、`gfm_inline_ext.h` の拡張オートリンクの役割の定数と拡張オートリンクのトークンの形（`inline-parser`）、`gen_examples.cmake` の `CHECK=`・`spec_version.cmake`（`inline-parser`）、`render.h`・`gen_html_cases.cmake` のケースの形式と `CHECK=`（`html-renderer`）、状態コード・`amark.h` の正準の順・テストの補助ライブラリとファジングの規則（`foundation`）の変更 → この spec
+- 上流：トークンの種類・印・編集の記録・比較（`syntax-tree`）、役割の番号・トークンの所有の規則・文字の宣言・照合と走査の関数（`block-parser`、`inline-parser`）、`amark_inline_run_t` / `amark_inline_run_match_t` の形と `capacity` の規則（`inline-parser`。MdDispatch の対応づけ）、`gfm_inline_ext.h` の拡張オートリンクの役割の定数と拡張オートリンクのトークンの形（`inline-parser`）、`gen_examples.cmake` の `CHECK=`・`spec_version.cmake`（`inline-parser`）、`render.h`・`gen_html_cases.cmake` のケースの形式と `CHECK=`（`html-renderer`）、状態コード・`amark.h` の正準の順・テストの補助ライブラリとファジングの規則（`foundation`）の変更 → この spec
 - `amark_test_md`・`amark_test_md_gfm` の依存の変更（Naos に依存しないことの維持）→ `fuzz/` の 2 つのターゲットと、`amark_test_gfm`（`inline-parser`）を通じてそれをリンクするファジングのターゲット
 
 ## Architecture
@@ -98,7 +98,7 @@ graph TB
 **Dependency direction（`src/render/` の中）**：`markdown_escape` → `markdown_source` → `markdown_lines` → `markdown_inline` → `markdown_blocks` → `markdown_dispatch` → `markdown_render`。左のファイルは右のファイルの関数を呼ばない。`markdown_internal.h` は構造体と、ファイルをまたぐ `amark__md_*` の宣言だけを持つ。`src/syntax/md_*.c` は `markdown.h` を通してだけエンジンを使う。違反はレビューでエラーとする。
 
 **Architecture Integration**：
-- Existing patterns preserved：`html-renderer` の Renderer slot conventions（ノード型ごとのスロットとフックのスロット、名前でのノード型の指定、構文セットの順の連鎖と `render_next`、子の省略、拡張ごとの状態、`begin` は順・`end` と `finish` は逆順、不透明な文脈、バッファと `amark_write_fn` の 2 つの入口、`struct_size` と未知のビットの拒否、組み込みの出力は 1 つの core 拡張）。`foundation` の状態コード・アロケータ・`struct_size`。`syntax-tree` のトークンと編集の記録。
+- Existing patterns preserved：`html-renderer` の Renderer slot conventions（ノード型ごとのスロットとフックのスロット、名前でのノード型の指定、構文セットの順の連鎖と `render_next`、子の省略、拡張ごとの状態、`begin` は順・`end` と `finish` は逆順、不透明な文脈、バッファと `amark_write_fn_t` の 2 つの入口、`struct_size` と未知のビットの拒否、組み込みの出力は 1 つの core 拡張）。`foundation` の状態コード・アロケータ・`struct_size`。`syntax-tree` のトークンと編集の記録。
 - New components rationale：行（接頭辞）、葉（エスケープと区切り文字）、ブロックの区切り（空行）の 3 つの境目は、ノードごとの処理では判断できないため、エンジンのコンポーネントにする。
 - Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、不透明型、グローバルな可変状態なし、ライセンスヘッダ、組み込みも公開 API だけを使う、spec の境界を守るための回避策を作らない（上流の変更として示す）。
 
@@ -293,15 +293,15 @@ graph TB
 | 3.6 | ブロックの隣接 | MdBlocks, CoreMarkdown | `amark_markdown_set_gap`, `can_follow`, `NEW_BEFORE`/`NEW_AFTER` | ブロックの区切り |
 | 3.7 | 参照の依存 | CoreMarkdown, MdBlocks | `begin`, `amark_markdown_mark_dirty` | 1 回の出力 |
 | 3.8 | 構文の有無 | CoreMarkdown, MdInline | `amark_markdown_set_encodings`, `NO_SYNTAX` | — |
-| 4.1–4.4 | 表現できない木の報告 | MdEngine, CoreMarkdown | `AMARK_ERROR_UNREPRESENTABLE`, `amark_markdown_report`, `amark_markdown_fail` | 1 回の出力 |
+| 4.1–4.4 | 表現できない木の報告 | MdEngine, CoreMarkdown | `AMARK_ERROR_UNREPRESENTABLE`, `amark_markdown_report_t`, `amark_markdown_fail` | 1 回の出力 |
 | 4.5 | パースで作った木は報告しない | CoreMarkdown, MdInline, MdBlocks | 構成的な割り当て、作り直しの規則 | 全フロー |
 | 5.1, 5.2 | 局所性の範囲 | MdBlocks, MdInline, MdLines | 判定、元の隣接、行のアンカー | 全フロー |
 | 5.3 | 葉の中の無編集のノード | MdInline, CoreMarkdown | `amark_markdown_write_text_tokens`, verbatim の書き出し | 葉の解決 |
 | 5.4 | 元の表記の引き継ぎ | CoreMarkdown | トークンの役割による希望 | — |
 | 6.1–6.5 | 新しいノード | CoreMarkdown, MdInline | 作り直し、オプション | — |
-| 7.1–7.5 | オプション | MdEngine, CoreMarkdown | `amark_markdown_options` | — |
+| 7.1–7.5 | オプション | MdEngine, CoreMarkdown | `amark_markdown_options_t` | — |
 | 8.1–8.6 | 接頭辞 | MdLines, CoreMarkdown | `prefix`, `amark_markdown_write_item_prefix` | 1 回の出力 |
-| 9.1–9.3 | スロットとフック | MdDispatch, MdEngine | `amark_markdown_node_slot`, `amark_markdown_hooks_slot` | 1 回の出力 |
+| 9.1–9.3 | スロットとフック | MdDispatch, MdEngine | `amark_markdown_node_slot_t`, `amark_markdown_hooks_slot_t` | 1 回の出力 |
 | 9.4–9.7 | 文脈の API | MdEngine, MdInline, MdLines, MdBlocks | 文脈の関数 | 全フロー |
 | 9.8 | 不正なスロット | MdDispatch | 検査 | — |
 | 9.9 | 処理のない無編集の型 | MdEngine | 判定 | — |
@@ -329,7 +329,7 @@ graph TB
 | MdTests / MdFuzz | Test / Fuzz | 要件の検証 | 全要件, 11.5 | MdTestSupport (P0) | Batch |
 
 ### 共通の規約
-- `foundation` の規約に従う：失敗しうる関数は `amark_status` を返す。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。問い合わせの関数は値を直接返す。公開の構造体は先頭に `size_t struct_size`（スロットは `amark_slot_header`）を持ち、ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
+- `foundation` の規約に従う：失敗しうる関数は `amark_status_t` を返す。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。問い合わせの関数は値を直接返す。公開の構造体は先頭に `size_t struct_size`（スロットは `amark_slot_header_t`）を持ち、ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
 - 文脈の関数は、出力の処理・接頭辞の処理・`can_follow`・フックの呼び出しの間だけ使える。外での呼び出し、使えない場面での呼び出しは `AMARK_ERROR_INVALID_STATE`（void の関数は何もしない、問い合わせは「なし」を返す）。
 - 表現できないことは、エンジンの検査か `amark_markdown_fail` で記録し、最初の 1 つを報告する。以後の書き出しは何もせずにその失敗を返す。
 
@@ -350,8 +350,8 @@ graph TB
 ```c
 /* include/amark/extension.h（追記） */
 /* 0x0400–0x04FF：markdown-renderer */
-#define AMARK_SLOT_MARKDOWN_NODE  0x0401u   /* amark_markdown_node_slot */
-#define AMARK_SLOT_MARKDOWN_HOOKS 0x0402u   /* amark_markdown_hooks_slot */
+#define AMARK_SLOT_MARKDOWN_NODE  0x0401u   /* amark_markdown_node_slot_t */
+#define AMARK_SLOT_MARKDOWN_HOOKS 0x0402u   /* amark_markdown_hooks_slot_t */
 ```
 
 ### Render
@@ -372,9 +372,9 @@ graph TB
 **Contracts**: Service [x]
 ```c
 /* include/amark/markdown.h */
-AMARK_API amark_status amark_markdown_escape(amark_buffer *out, const char *data, size_t length,
-                                             const unsigned char chars[32]);
-AMARK_API amark_status amark_markdown_char_ref(amark_buffer *out, uint32_t codepoint);
+AMARK_API amark_status_t amark_markdown_escape(amark_buffer_t *out, const char *data, size_t length,
+                                               const unsigned char chars[32]);
+AMARK_API amark_status_t amark_markdown_char_ref(amark_buffer_t *out, uint32_t codepoint);
 ```
 
 #### MdSource
@@ -394,10 +394,10 @@ AMARK_API amark_status amark_markdown_char_ref(amark_buffer *out, uint32_t codep
 **Contracts**: Service [x]
 ```c
 /* src/render/markdown_internal.h */
-amark_status amark__md_cursor_init(amark__md_cursor *cursor, const amark_node *root, amark_markdown_context *ctx);
-bool amark__md_cursor_next(amark__md_cursor *cursor, const amark_node **out_owner, amark_token *out_token);
-size_t amark__md_line_start(const amark_document *doc, amark_source_id source, size_t offset);
-unsigned amark__md_tab_width(const amark_document *doc, amark_source_id source, size_t offset);
+amark_status_t amark__md_cursor_init(amark__md_cursor_t *cursor, const amark_node_t *root, amark_markdown_context_t *ctx);
+bool amark__md_cursor_next(amark__md_cursor_t *cursor, const amark_node_t **out_owner, amark_token_t *out_token);
+size_t amark__md_line_start(const amark_document_t *doc, amark_source_id_t source, size_t offset);
+unsigned amark__md_tab_width(const amark_document_t *doc, amark_source_id_t source, size_t offset);
 ```
 
 #### MdLines
@@ -426,24 +426,24 @@ typedef enum amark_markdown_line_kind {
     AMARK_MARKDOWN_LINE_FIRST = 1,   /* コンテナの最初の行 */
     AMARK_MARKDOWN_LINE_NEXT = 2,    /* 続く行 */
     AMARK_MARKDOWN_LINE_BLANK = 3    /* 内容のない行 */
-} amark_markdown_line_kind;
+} amark_markdown_line_kind_t;
 
-AMARK_API amark_status amark_markdown_write(amark_markdown_context *ctx, const char *data, size_t length);
+AMARK_API amark_status_t amark_markdown_write(amark_markdown_context_t *ctx, const char *data, size_t length);
     /* マークアップ（改行を含めない）。接頭辞の処理の中では接頭辞に書く */
-AMARK_API amark_status amark_markdown_write_lines(amark_markdown_context *ctx, const char *data, size_t length);
+AMARK_API amark_status_t amark_markdown_write_lines(amark_markdown_context_t *ctx, const char *data, size_t length);
     /* LF で区切った行をそのまま書く（コードの内容、HTML のリテラル）。LF ごとに合成した改行で行を閉じる */
-AMARK_API amark_status amark_markdown_end_line(amark_markdown_context *ctx);   /* 合成した改行で行を閉じる */
-AMARK_API amark_status amark_markdown_write_prefix_tokens(amark_markdown_context *ctx, bool *out_written);
+AMARK_API amark_status_t amark_markdown_end_line(amark_markdown_context_t *ctx);   /* 合成した改行で行を閉じる */
+AMARK_API amark_status_t amark_markdown_write_prefix_tokens(amark_markdown_context_t *ctx, bool *out_written);
     /* 接頭辞の処理の中だけ。現在のコンテナの、この行に使える元の接頭辞のトークンを書く */
 
 /* 元の表記 */
 #define AMARK_MARKDOWN_VERBATIM_NO_INDENT 0x01u   /* 最初の行の、接頭辞でない先頭の SPACE を出さない */
-AMARK_API amark_status amark_markdown_write_verbatim(amark_markdown_context *ctx, const amark_node *node,
-                                                     uint32_t flags);   /* 現在のノードの部分木。入るときだけ。子を省く */
-AMARK_API amark_status amark_markdown_write_own_tokens(amark_markdown_context *ctx, const amark_node *node,
-                                                       bool entering);
+AMARK_API amark_status_t amark_markdown_write_verbatim(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                       uint32_t flags);   /* 現在のノードの部分木。入るときだけ。子を省く */
+AMARK_API amark_status_t amark_markdown_write_own_tokens(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                         bool entering);
     /* 自分のトークン（接頭辞と空行を除く）のうち、入るときは最初の子より前、出るときは最後の子より後ろのもの */
-AMARK_API amark_status amark_markdown_write_token(amark_markdown_context *ctx, const amark_node *node, size_t index);
+AMARK_API amark_status_t amark_markdown_write_token(amark_markdown_context_t *ctx, const amark_node_t *node, size_t index);
 ```
 - Preconditions：`write` と `end_line` は葉の中身の外では処理の中、中身の中では MdInline の断片として扱う。`write` の改行のバイト、`write_verbatim` の現在のノード以外の指定は `AMARK_ERROR_INVALID_ARGUMENT`。接頭辞の処理の中の `end_line` と元の表記の書き出しは `AMARK_ERROR_INVALID_STATE`。
 - State model：`{sink, start_length, staging, current_line, prefix_stack[{node, slot, first_done}], used_anchors, line_ending, counters}`。
@@ -485,36 +485,36 @@ typedef struct amark_markdown_inline_options {
     uint32_t flags;
     const unsigned char *escape_chars;     /* 32 バイトの集合。この葉の TEXT で追加でエスケープする。NULL 可 */
     const unsigned char *trailing_chars;   /* 32 バイトの集合。中身の最後の TEXT の文字なら保護する。NULL 可 */
-} amark_markdown_inline_options;
+} amark_markdown_inline_options_t;
 
-AMARK_API amark_status amark_markdown_begin_inline(amark_markdown_context *ctx,
-                                                   const amark_markdown_inline_options *options);
-AMARK_API amark_status amark_markdown_end_inline(amark_markdown_context *ctx);
-AMARK_API amark_status amark_markdown_write_text(amark_markdown_context *ctx, const char *data, size_t length);
-AMARK_API amark_status amark_markdown_write_text_tokens(amark_markdown_context *ctx, const amark_node *text);
-AMARK_API amark_status amark_markdown_write_value(amark_markdown_context *ctx, const char *data, size_t length,
-                                                  const unsigned char extra_chars[32]);   /* extra_chars は NULL 可 */
-AMARK_API amark_status amark_markdown_guard_next(amark_markdown_context *ctx, const unsigned char chars[32]);
+AMARK_API amark_status_t amark_markdown_begin_inline(amark_markdown_context_t *ctx,
+                                                     const amark_markdown_inline_options_t *options);
+AMARK_API amark_status_t amark_markdown_end_inline(amark_markdown_context_t *ctx);
+AMARK_API amark_status_t amark_markdown_write_text(amark_markdown_context_t *ctx, const char *data, size_t length);
+AMARK_API amark_status_t amark_markdown_write_text_tokens(amark_markdown_context_t *ctx, const amark_node_t *text);
+AMARK_API amark_status_t amark_markdown_write_value(amark_markdown_context_t *ctx, const char *data, size_t length,
+                                                    const unsigned char extra_chars[32]);   /* extra_chars は NULL 可 */
+AMARK_API amark_status_t amark_markdown_guard_next(amark_markdown_context_t *ctx, const unsigned char chars[32]);
 
-typedef void (*amark_markdown_flank_fn)(unsigned char character, uint32_t before, uint32_t after,
-                                        bool *out_can_open, bool *out_can_close);
+typedef void (*amark_markdown_flank_fn_t)(unsigned char character, uint32_t before, uint32_t after,
+                                          bool *out_can_open, bool *out_can_close);
 typedef struct amark_markdown_delimiter {
     size_t struct_size;
-    const amark_node *node;              /* 区切りを持つノード。開きと閉じを対にする */
+    const amark_node_t *node;              /* 区切りを持つノード。開きと閉じを対にする */
     bool opening;
     size_t length;                       /* 1 以上 */
     const char *candidates;              /* 使える文字（NUL 終端）。先頭が希望（元の文字かオプション） */
-    amark_markdown_flank_fn flanks;      /* 必須 */
-    uint32_t rule;                       /* 照合に渡す規則（組み込みは inline.h の amark_delimiter_rule の値） */
+    amark_markdown_flank_fn_t flanks;    /* 必須 */
+    uint32_t rule;                       /* 照合に渡す規則（組み込みは inline.h の amark_delimiter_rule_t の値） */
     size_t max_run_length;               /* 照合に渡す。0 は上限なし */
-} amark_markdown_delimiter;
-AMARK_API amark_status amark_markdown_write_delimiter(amark_markdown_context *ctx, const amark_markdown_delimiter *d);
+} amark_markdown_delimiter_t;
+AMARK_API amark_status_t amark_markdown_write_delimiter(amark_markdown_context_t *ctx, const amark_markdown_delimiter_t *d);
 
 /* フックの begin の中だけ */
 #define AMARK_MARKDOWN_ENCODE_BACKSLASH 0x01u
 #define AMARK_MARKDOWN_ENCODE_CHAR_REF  0x02u
-AMARK_API amark_status amark_markdown_add_escape_chars(amark_markdown_context *ctx, const unsigned char chars[32]);
-AMARK_API amark_status amark_markdown_set_encodings(amark_markdown_context *ctx, uint32_t encodings);
+AMARK_API amark_status_t amark_markdown_add_escape_chars(amark_markdown_context_t *ctx, const unsigned char chars[32]);
+AMARK_API amark_status_t amark_markdown_set_encodings(amark_markdown_context_t *ctx, uint32_t encodings);
 
 /* 保護のフックの中だけ */
 #define AMARK_MARKDOWN_BYTE_TEXT 1u
@@ -529,10 +529,10 @@ typedef struct amark_markdown_line {
     size_t length;
     const unsigned char *kinds;          /* バイトごとの AMARK_MARKDOWN_BYTE_* */
     uint32_t flags;
-    const amark_node *leaf;
-} amark_markdown_line;
-AMARK_API const amark_node *amark_markdown_line_owner(const amark_markdown_context *ctx, size_t position);
-AMARK_API amark_status amark_markdown_protect(amark_markdown_context *ctx, size_t start, size_t end);
+    const amark_node_t *leaf;
+} amark_markdown_line_t;
+AMARK_API const amark_node_t *amark_markdown_line_owner(const amark_markdown_context_t *ctx, size_t position);
+AMARK_API amark_status_t amark_markdown_protect(amark_markdown_context_t *ctx, size_t start, size_t end);
 ```
 - Preconditions：`begin_inline` は葉のブロックの処理の入るときだけ、`end_inline` は同じ処理の出るときだけ（入れ子は `INVALID_STATE`）。`write_text` の改行のバイトは `INVALID_ARGUMENT`。区切りの `length` が 0、`flanks` か `candidates` が NULL か空、閉じの対になる開きがない場合は `INVALID_ARGUMENT`。
 - State model：`{pieces[], lines[], escape_set, encodings, leaf_options, open_delimiters[], guards[], protect_ranges[]}`。葉ごとに使い回す。
@@ -563,14 +563,14 @@ AMARK_API amark_status amark_markdown_protect(amark_markdown_context *ctx, size_
 #define AMARK_MARKDOWN_STATE_NEW_BEFORE  0x20u
 #define AMARK_MARKDOWN_STATE_NEW_AFTER   0x40u
 #define AMARK_MARKDOWN_STATE_EDITED_LEAF 0x80u
-AMARK_API uint32_t amark_markdown_node_state(const amark_markdown_context *ctx, const amark_node *node);
+AMARK_API uint32_t amark_markdown_node_state(const amark_markdown_context_t *ctx, const amark_node_t *node);
 
 typedef enum amark_markdown_gap {
     AMARK_MARKDOWN_GAP_KEEP = 0, AMARK_MARKDOWN_GAP_NONE = 1, AMARK_MARKDOWN_GAP_BLANK = 2
-} amark_markdown_gap;
-AMARK_API amark_status amark_markdown_set_gap(amark_markdown_context *ctx, amark_markdown_gap gap);
+} amark_markdown_gap_t;
+AMARK_API amark_status_t amark_markdown_set_gap(amark_markdown_context_t *ctx, amark_markdown_gap_t gap);
     /* 現在のノード（コンテナ）に入るときだけ */
-AMARK_API amark_status amark_markdown_mark_dirty(amark_markdown_context *ctx, const amark_node *node);
+AMARK_API amark_status_t amark_markdown_mark_dirty(amark_markdown_context_t *ctx, const amark_node_t *node);
     /* begin の中か、まだ出力していないノードに対してだけ。出力の後のノードは INVALID_STATE */
 ```
 
@@ -589,23 +589,23 @@ AMARK_API amark_status amark_markdown_mark_dirty(amark_markdown_context *ctx, co
 **Contracts**: Service [x]
 ```c
 /* include/amark/markdown.h */
-typedef struct amark_markdown_context amark_markdown_context;   /* 不透明。処理・接頭辞・can_follow・フックの間だけ有効 */
+typedef struct amark_markdown_context amark_markdown_context_t;   /* 不透明。処理・接頭辞・can_follow・フックの間だけ有効 */
 
-typedef amark_status (*amark_markdown_node_fn)(amark_markdown_context *ctx, const amark_node *node,
-                                               bool entering, void *user_data);
-typedef amark_status (*amark_markdown_prefix_fn)(amark_markdown_context *ctx, const amark_node *node,
-                                                 amark_markdown_line_kind kind, void *user_data);
-typedef bool (*amark_markdown_follow_fn)(amark_markdown_context *ctx, const amark_node *node,
-                                         const amark_node *previous, void *user_data);
+typedef amark_status_t (*amark_markdown_node_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                   bool entering, void *user_data);
+typedef amark_status_t (*amark_markdown_prefix_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                     amark_markdown_line_kind_t kind, void *user_data);
+typedef bool (*amark_markdown_follow_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                           const amark_node_t *previous, void *user_data);
 
 typedef struct amark_markdown_node_slot {
-    amark_slot_header header;             /* kind = AMARK_SLOT_MARKDOWN_NODE */
+    amark_slot_header_t header;             /* kind = AMARK_SLOT_MARKDOWN_NODE */
     const char *node_type;
-    amark_markdown_node_fn render;        /* 必須。入るときと出るとき（葉も両方） */
-    amark_markdown_prefix_fn prefix;      /* 任意。あれば子孫の行に接頭辞を付けるコンテナ */
-    amark_markdown_follow_fn can_follow;  /* 任意。空行なしで previous の直後に置けるか。NULL なら置けない */
+    amark_markdown_node_fn_t render;       /* 必須。入るときと出るとき（葉も両方） */
+    amark_markdown_prefix_fn_t prefix;     /* 任意。あれば子孫の行に接頭辞を付けるコンテナ */
+    amark_markdown_follow_fn_t can_follow; /* 任意。空行なしで previous の直後に置けるか。NULL なら置けない */
     void *user_data;
-} amark_markdown_node_slot;
+} amark_markdown_node_slot_t;
 
 #define AMARK_MARKDOWN_MAX_STATE_SIZE 65536u
 
@@ -616,39 +616,39 @@ typedef struct amark_markdown_run {
     bool can_open, can_close;
     uint32_t rule;
     size_t max_run_length;
-} amark_markdown_run;
-typedef struct amark_markdown_run_match { size_t opener, closer, count; } amark_markdown_run_match;
+} amark_markdown_run_t;
+typedef struct amark_markdown_run_match { size_t opener, closer, count; } amark_markdown_run_match_t;
 
 typedef struct amark_markdown_hooks_slot {
-    amark_slot_header header;             /* kind = AMARK_SLOT_MARKDOWN_HOOKS */
+    amark_slot_header_t header;             /* kind = AMARK_SLOT_MARKDOWN_HOOKS */
     size_t state_size;
-    amark_status (*begin)(amark_markdown_context *ctx, void *state, void *user_data);    /* 任意 */
-    amark_status (*end)(amark_markdown_context *ctx, void *state, void *user_data);      /* 任意 */
-    void (*finish)(amark_markdown_context *ctx, void *state, void *user_data);           /* 任意。後始末 */
-    amark_status (*protect)(amark_markdown_context *ctx, void *state, const amark_markdown_line *line,
-                            void *user_data);                                             /* 任意 */
-    amark_status (*match_delimiters)(amark_markdown_context *ctx, void *state, const amark_markdown_run *runs,
-                                     size_t count, amark_markdown_run_match *out_matches, size_t capacity,
-                                     size_t *out_count, void *user_data);                 /* 任意 */
+    amark_status_t (*begin)(amark_markdown_context_t *ctx, void *state, void *user_data); /* 任意 */
+    amark_status_t (*end)(amark_markdown_context_t *ctx, void *state, void *user_data);   /* 任意 */
+    void (*finish)(amark_markdown_context_t *ctx, void *state, void *user_data);          /* 任意。後始末 */
+    amark_status_t (*protect)(amark_markdown_context_t *ctx, void *state, const amark_markdown_line_t *line,
+                              void *user_data);                                             /* 任意 */
+    amark_status_t (*match_delimiters)(amark_markdown_context_t *ctx, void *state, const amark_markdown_run_t *runs,
+                                       size_t count, amark_markdown_run_match_t *out_matches, size_t capacity,
+                                       size_t *out_count, void *user_data);                 /* 任意 */
     void *user_data;
-} amark_markdown_hooks_slot;
+} amark_markdown_hooks_slot_t;
 ```
 - `match_delimiters` は CommonMark の照合（`process emphasis`）を並びの配列の上で行い、照合の順に（開きの並び、閉じの並び、使った数）を返す。エンジンは `capacity` を並びの長さの合計以上にして呼ぶ（照合の数は長さの合計の半分を超えないので、どの照合の実装にも足りる）。`*out_count` は `capacity` 以下。
-- **`amark_markdown_run(_match)` と `inline-parser` の `amark_inline_run(_match)` の対応**（`amark.core.markdown` の `match_delimiters` が行う。型は別なので、ポインタの読み替えはせず要素ごとに写す）：
+- **`amark_markdown_run(_match)_t` と `inline-parser` の `amark_inline_run(_match)_t` の対応**（`amark.core.markdown` の `match_delimiters` が行う。型は別なので、ポインタの読み替えはせず要素ごとに写す）：
 
-| `amark_markdown_run` | `amark_inline_run` | 規則 |
+| `amark_markdown_run_t` | `amark_inline_run_t` | 規則 |
 |----------------------|--------------------|------|
 | 添字 `i` | 添字 `i` | 同じ順・同じ数（照合の結果の添字をそのまま使える） |
-| `struct_size`（エンジンが設定） | `struct_size` | `sizeof(amark_inline_run)` を設定する |
+| `struct_size`（エンジンが設定） | `struct_size` | `sizeof(amark_inline_run_t)` を設定する |
 | `character`、`length`、`can_open`、`can_close` | 同じ名前 | そのまま写す |
-| `rule`（`uint32_t`） | `rule`（`amark_delimiter_rule`） | 値は同じ（`AMARK_DELIMITER_RULE_EMPHASIS` = 1、`_EXACT` = 2）。それ以外の値はフックが `AMARK_ERROR_INVALID_ARGUMENT` を返す（出力の失敗） |
+| `rule`（`uint32_t`） | `rule`（`amark_delimiter_rule_t`） | 値は同じ（`AMARK_DELIMITER_RULE_EMPHASIS` = 1、`_EXACT` = 2）。それ以外の値はフックが `AMARK_ERROR_INVALID_ARGUMENT` を返す（出力の失敗） |
 | `max_run_length`（0 は上限なし） | `use_mask` | 上限 L（0 なら上限なし）で、`length` > L なら 0。それ以外は L ≥ 1 で `AMARK_INLINE_RUN_USE_1`、L ≥ 2（か上限なし）で `AMARK_INLINE_RUN_USE_2` を立てる |
 
-| `amark_inline_run_match` | `amark_markdown_run_match` | 規則 |
+| `amark_inline_run_match_t` | `amark_markdown_run_match_t` | 規則 |
 |--------------------------|----------------------------|------|
 | `opener`、`closer`、`count` | 同じ名前 | 返った順にそのまま写す（添字は上の対応で同じ） |
 
-  - `capacity`：`amark_inline_match_delimiters` は「長さの合計の半分（切り捨て）以上」を求める。フックは作業の配列（`amark_inline_run` を `count` 個、`amark_inline_run_match` を長さの合計の半分の個数）を、文書のアロケータ（`amark_document_allocator(amark_node_document(amark_markdown_root(ctx)))`）で確保して状態に持ち、葉の間で使い回して `finish` で解放する。受け取った `capacity`（長さの合計以上）は上流の要求を満たすので、上流の `INVALID_ARGUMENT` は起きない。写した `*out_count` は `capacity` 以下。
+  - `capacity`：`amark_inline_match_delimiters` は「長さの合計の半分（切り捨て）以上」を求める。フックは作業の配列（`amark_inline_run_t` を `count` 個、`amark_inline_run_match_t` を長さの合計の半分の個数）を、文書のアロケータ（`amark_document_allocator(amark_node_document(amark_markdown_root(ctx)))`）で確保して状態に持ち、葉の間で使い回して `finish` で解放する。受け取った `capacity`（長さの合計以上）は上流の要求を満たすので、上流の `INVALID_ARGUMENT` は起きない。写した `*out_count` は `capacity` 以下。
   - 失敗：確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`、上流の失敗はそのまま返す。`count` が 0 なら確保せず `*out_count = 0`。
 - 内部の契約：`amark__md_dispatch_build(ctx)`、`amark__md_dispatch_free(ctx)`、`amark__md_chain_of(ctx, type)`。
 
@@ -674,10 +674,10 @@ typedef struct amark_markdown_hooks_slot {
 /* include/amark/markdown.h */
 typedef enum amark_markdown_heading_style {
     AMARK_MARKDOWN_HEADING_ATX = 0, AMARK_MARKDOWN_HEADING_SETEXT = 1
-} amark_markdown_heading_style;
+} amark_markdown_heading_style_t;
 typedef enum amark_markdown_line_ending {
     AMARK_MARKDOWN_EOL_DOCUMENT = 0, AMARK_MARKDOWN_EOL_LF = 1, AMARK_MARKDOWN_EOL_CRLF = 2
-} amark_markdown_line_ending;
+} amark_markdown_line_ending_t;
 
 typedef enum amark_markdown_problem {
     AMARK_MARKDOWN_PROBLEM_NONE = 0,
@@ -690,14 +690,14 @@ typedef enum amark_markdown_problem {
     AMARK_MARKDOWN_PROBLEM_LITERAL = 7,    /* リテラルが構文として成立しない */
     AMARK_MARKDOWN_PROBLEM_ATTRIBUTE = 8,  /* 属性の組み合わせを表せない */
     AMARK_MARKDOWN_PROBLEM_EXTENSION_FIRST = 0x100   /* これ以上は拡張が定める */
-} amark_markdown_problem;
+} amark_markdown_problem_t;
 
 typedef struct amark_markdown_report {
     size_t struct_size;
     uint32_t problem;
-    const amark_node *node;
-    const amark_extension *extension;      /* 報告した処理の構文拡張。エンジンの検査なら NULL */
-} amark_markdown_report;
+    const amark_node_t *node;
+    const amark_extension_t *extension;      /* 報告した処理の構文拡張。エンジンの検査なら NULL */
+} amark_markdown_report_t;
 
 typedef struct amark_markdown_options {
     size_t struct_size;
@@ -708,25 +708,25 @@ typedef struct amark_markdown_options {
     char strong;                           /* 0 か '*' '_'（2 つ並べて書く） */
     char fence;                            /* 0 か '`' '~' */
     char thematic_break;                   /* 0 か '*' '-' '_' */
-    amark_markdown_heading_style heading;
-    amark_markdown_line_ending line_ending;
-    amark_markdown_report *report;         /* NULL 可。成否を問わず書く */
-} amark_markdown_options;
+    amark_markdown_heading_style_t heading;
+    amark_markdown_line_ending_t line_ending;
+    amark_markdown_report_t *report;         /* NULL 可。成否を問わず書く */
+} amark_markdown_options_t;
 
-AMARK_API void amark_markdown_options_init(amark_markdown_options *options);  /* struct_size を設定し、他を 0 に */
-AMARK_API amark_status amark_render_markdown(const amark_node *node, const amark_markdown_options *options,
-                                             amark_buffer *out);
-AMARK_API amark_status amark_render_markdown_to(const amark_node *node, const amark_markdown_options *options,
-                                                amark_write_fn write, void *user_data);
+AMARK_API void amark_markdown_options_init(amark_markdown_options_t *options);  /* struct_size を設定し、他を 0 に */
+AMARK_API amark_status_t amark_render_markdown(const amark_node_t *node, const amark_markdown_options_t *options,
+                                               amark_buffer_t *out);
+AMARK_API amark_status_t amark_render_markdown_to(const amark_node_t *node, const amark_markdown_options_t *options,
+                                                  amark_write_fn_t write, void *user_data);
 
 /* 出力の文脈 */
-AMARK_API const amark_markdown_options *amark_markdown_get_options(const amark_markdown_context *ctx); /* 既定を補った値 */
-AMARK_API const amark_node *amark_markdown_root(const amark_markdown_context *ctx);
-AMARK_API amark_status amark_markdown_render_next(amark_markdown_context *ctx, const amark_node *node, bool entering);
-AMARK_API void amark_markdown_skip_children(amark_markdown_context *ctx);
-AMARK_API const amark_extension *amark_markdown_current_extension(const amark_markdown_context *ctx);
-AMARK_API void *amark_markdown_state(amark_markdown_context *ctx, const amark_extension *extension);
-AMARK_API amark_status amark_markdown_fail(amark_markdown_context *ctx, uint32_t problem, const amark_node *node);
+AMARK_API const amark_markdown_options_t *amark_markdown_get_options(const amark_markdown_context_t *ctx); /* 既定を補った値 */
+AMARK_API const amark_node_t *amark_markdown_root(const amark_markdown_context_t *ctx);
+AMARK_API amark_status_t amark_markdown_render_next(amark_markdown_context_t *ctx, const amark_node_t *node, bool entering);
+AMARK_API void amark_markdown_skip_children(amark_markdown_context_t *ctx);
+AMARK_API const amark_extension_t *amark_markdown_current_extension(const amark_markdown_context_t *ctx);
+AMARK_API void *amark_markdown_state(amark_markdown_context_t *ctx, const amark_extension_t *extension);
+AMARK_API amark_status_t amark_markdown_fail(amark_markdown_context_t *ctx, uint32_t problem, const amark_node_t *node);
     /* 表現できないことを記録し、AMARK_ERROR_UNREPRESENTABLE を返す */
 ```
 - Postconditions：成功なら出力先に部分木の Markdown が追加されている。失敗なら、バッファは呼び出し前の長さで、確保したものはすべて解放されている（書き出しの関数には途中までの確定した行が渡っていてよい）。
@@ -745,10 +745,10 @@ AMARK_API amark_status amark_markdown_fail(amark_markdown_context *ctx, uint32_t
 **Responsibilities & Constraints**
 - `amark.core.markdown`：名前 `"amark.core.markdown"`、ノード型 0、ノードのスロット 19 とフックのスロット 1、静的な `const` の記憶域。公開 API（`markdown.h`、`node.h`、`token.h`、`parser.h`、`scan.h`、`inline.h`、`commonmark.h`）だけを使う。
 - **フック**（状態は `md_core_internal.h` の構造体）：
-  - `begin`：(1) 構文の有無を `amark_syntax_set_find_extension` で `commonmark.*` の名前から求める。(2) `amark_inline_special_chars` の和を `amark_markdown_add_escape_chars` で足す。(3) `commonmark.backslash_escape` と `commonmark.char_ref` の有無から `amark_markdown_set_encodings`。(4) `AMARK_SLOT_INLINE_NODE_TRAITS` から LINK の性質の型を集める。(5) 文書の根に編集の記録があるときだけ、文書の link_definition を前順に集めて `amark_label_normalize` と `amark_label_map`（先勝ち）で表を作り、参照の形のリンクと画像（下の「リンクの書式の分類」で参照の形のもの）のラベルが、同じ宛先とタイトルの定義に解決されなければ `amark_markdown_mark_dirty`。link_definition に編集があれば、`AMARK_ROLE_INLINE_UNMATCHED` の `[` を持つ text に汚れの印を付ける。
+  - `begin`：(1) 構文の有無を `amark_syntax_set_find_extension` で `commonmark.*` の名前から求める。(2) `amark_inline_special_chars` の和を `amark_markdown_add_escape_chars` で足す。(3) `commonmark.backslash_escape` と `commonmark.char_ref` の有無から `amark_markdown_set_encodings`。(4) `AMARK_SLOT_INLINE_NODE_TRAITS` から LINK の性質の型を集める。(5) 文書の根に編集の記録があるときだけ、文書の link_definition を前順に集めて `amark_label_normalize` と `amark_label_map_t`（先勝ち）で表を作り、参照の形のリンクと画像（下の「リンクの書式の分類」で参照の形のもの）のラベルが、同じ宛先とタイトルの定義に解決されなければ `amark_markdown_mark_dirty`。link_definition に編集があれば、`AMARK_ROLE_INLINE_UNMATCHED` の `[` を持つ text に汚れの印を付ける。
   - **リンクの書式の分類**（`begin` と link / image の処理が同じ規則を使う）：自分のトークンの役割で決める。組み込みのリンクと画像は必ず `LINK_OPEN` と `LINK_CLOSE` を持つ。`LINK_OPEN` を持ち `LINK_PAREN_OPEN` を持てばインラインの形、`LINK_OPEN` を持ち `LINK_PAREN_*` を持たなければ参照の形（`LINK_REF_LABEL` があれば完全、`LINK_REF_OPEN` だけなら省略、`LINK_OPEN` と `LINK_CLOSE` だけなら短縮）。`AUTOLINK_*` を持てばオートリンク。`LINK_OPEN`・`LINK_PAREN_*`・`LINK_REF_*`・`AUTOLINK_*` をどれも持たないトークンつきのリンクは拡張の定めた形（例：`inline-parser` の `test.inline.autolink` の拡張オートリンク。長さ 0 の `TEXT` に `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK` を持つ）とし、参照の検査の対象にせず汚れの印を付けない。トークンを持たない新しいリンクはこの分類の外（作り直す）。
   - `protect`：`BLOCK_GUARD` の行の先頭について、`#`・`>`・`-`・`+`・`=`・`~` なら `[0, 1)`、1–9 桁の数字に `.` か `)` が続けばその区切りを保護する。先頭が `MARKUP` で、`amark_scan_html_block_start`（上流）が段落を中断する HTML ブロックの開始と判定すれば `[0, 1)` を保護する（マークアップなので表現できない）。
-  - `match_delimiters`：並びを MdDispatch の対応の表のとおり `amark_inline_run` に写して `amark_inline_match_delimiters`（上流）を呼び、結果を `amark_markdown_run_match` に写して返す（`capacity` と作業の配列の規則も同じ節）。
+  - `match_delimiters`：並びを MdDispatch の対応の表のとおり `amark_inline_run_t` に写して `amark_inline_match_delimiters`（上流）を呼び、結果を `amark_markdown_run_match_t` に写して返す（`capacity` と作業の配列の規則も同じ節）。
   - `finish`：定義の表を解放する。
 - **ブロックの共通の判定**（`can_follow` が使う）：「自分で閉じる」ブロック（ATX と setext の見出し、区切り線、閉じたフェンスのコードブロック、種類 1–5 の HTML ブロック）の直後には、インデントのコードブロック以外を置ける。段落の類（段落、setext の見出し）の直後には、段落を中断できるもの（ATX の見出し、`*`／`_` の区切り線、フェンスのコードブロック、引用、種類 1–6 の HTML ブロック、空でない最初の項目を持つ箇条書きのリストと開始番号 1 の順序付きのリスト）だけを置ける。それ以外（リスト、引用、インデントのコード、種類 6・7 の HTML、リンク参照定義、拡張の型）の直後には置けない。
 - **構文の有無**（3.8）：表記に必要な構文の拡張（例：setext の見出しには `commonmark.setext_heading`、強調には `commonmark.emphasis`）が構文セットにないときは、その表記を選ばず、他の表記もなければ `NO_SYNTAX` で表現できないと報告する。
@@ -781,10 +781,10 @@ AMARK_API amark_status amark_markdown_fail(amark_markdown_context *ctx, uint32_t
 **Contracts**: Service [x]
 ```c
 /* include/amark/markdown.h */
-AMARK_API const amark_extension *amark_markdown_core_extension(void);   /* "amark.core.markdown"。静的、解放しない */
-AMARK_API amark_status amark_markdown_write_item_prefix(amark_markdown_context *ctx, const amark_node *item,
-                                                        amark_markdown_line_kind kind,
-                                                        const char *extra, size_t extra_length);
+AMARK_API const amark_extension_t *amark_markdown_core_extension(void);   /* "amark.core.markdown"。静的、解放しない */
+AMARK_API amark_status_t amark_markdown_write_item_prefix(amark_markdown_context_t *ctx, const amark_node_t *item,
+                                                          amark_markdown_line_kind_t kind,
+                                                          const char *extra, size_t extra_length);
 AMARK_API void amark_markdown_commonmark_flanks(unsigned char character, uint32_t before, uint32_t after,
                                                 bool *out_can_open, bool *out_can_close);
 ```
@@ -805,15 +805,15 @@ AMARK_API void amark_markdown_commonmark_flanks(unsigned char character, uint32_
 
 **Responsibilities & Constraints**
 - 2 つの INTERFACE ライブラリに分ける（`foundation` のファジングの規則。ファジングのターゲットがリンクするものは Naos に依存しない）：
-  - `amark_test_md`（`support/md_test_support.c`、`support/md_edit_script.c`）：Naos に依存しない。凍結した構文セット（`const amark_syntax_set *`）と入力を受け取り、往復・全ノードの編集・編集の手順の各判定を `amark_status` と失敗の説明（どの検査がどのノードで違ったか）で返す関数と、編集の手順と局所性の追跡を持つ。依存は Amark のライブラリと Naos に依存しない補助だけで、`amark_test_tree`（`AMARK_CHECK_TREE_DUMP` を宣言し Naos に依存しうる）にはリンクしない（S 式の木の組み立てとダンプからの作り直しは `amark_test_md_check` に置く）。`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義する。`md_roundtrip_fuzz` と `md_edit_fuzz` はこれをリンクする。
-  - `amark_test_md_check`（`support/md_check.c`）：Naos に依存し、`amark_test_md`、`amark_test_tree`、`amark_test_inline`（`amark_test_set_factory`、`amark_test_example_check_fn` の形）に依存する。`amark_test_md` の判定を Naos の検査にし、トークンなしのダンプからの作り直し（`amark_test_tree_build` を使う）と、生成テストの検査の関数と `AMARK_CHECK_MD` を持つ。`AMARK_BUILD_TESTS` のときだけ定義し、ファジングのターゲットはリンクしない。
+  - `amark_test_md`（`support/md_test_support.c`、`support/md_edit_script.c`）：Naos に依存しない。凍結した構文セット（`const amark_syntax_set_t *`）と入力を受け取り、往復・全ノードの編集・編集の手順の各判定を `amark_status_t` と失敗の説明（どの検査がどのノードで違ったか）で返す関数と、編集の手順と局所性の追跡を持つ。依存は Amark のライブラリと Naos に依存しない補助だけで、`amark_test_tree`（`AMARK_CHECK_TREE_DUMP` を宣言し Naos に依存しうる）にはリンクしない（S 式の木の組み立てとダンプからの作り直しは `amark_test_md_check` に置く）。`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義する。`md_roundtrip_fuzz` と `md_edit_fuzz` はこれをリンクする。
+  - `amark_test_md_check`（`support/md_check.c`）：Naos に依存し、`amark_test_md`、`amark_test_tree`、`amark_test_inline`（`amark_test_set_factory_t`、`amark_test_example_check_fn_t` の形）に依存する。`amark_test_md` の判定を Naos の検査にし、トークンなしのダンプからの作り直し（`amark_test_tree_build` を使う）と、生成テストの検査の関数と `AMARK_CHECK_MD` を持つ。`AMARK_BUILD_TESTS` のときだけ定義し、ファジングのターゲットはリンクしない。
   - 公開 API だけを使う（局所性の追跡だけは INTERNAL の追跡の関数を使い、`amark_internal` と組むときだけ有効）。
-- 検査（`factory` は凍結した構文セットを作る関数。`amark_test_set_factory`。下の作り直しは `amark_test_md_check`、他は `amark_test_md` の判定を `amark_test_md_check` が Naos の検査にしたもの）：
+- 検査（`factory` は凍結した構文セットを作る関数。`amark_test_set_factory_t`。下の作り直しは `amark_test_md_check`、他は `amark_test_md` の判定を `amark_test_md_check` が Naos の検査にしたもの）：
   - 往復：パースして根を出力し、入力とバイト単位で比べる。各トップレベルのブロックの部分木の出力が、そのトークンのバイトをつないだものと等しいことも比べる（2.6）。
   - 作り直し：トークンなしのダンプ（`AMARK_DUMP_*` なし）から `amark_test_tree_build` で同じ構文セットの別の文書に木を作り、出力して再パースし、元の木と `AMARK_EQUAL_NORMALIZE_TEXT` で等しいこと。表現できないと報告されたら失敗（4.5）。
   - 全ノードの編集：すべてのノードに `amark_node_mark_edited` を呼んでから同じ検査。
   - 編集の手順：`md_edit_script` の操作（テキストの置換、一括設定、ブロックの削除・移動・新しい引用への移動、新しいノードの挿入、インラインの包み込みと展開、属性の変更）を種から決まる順に 1 つずつ適用し、出力の再パースが編集後の木と等しいか、表現できないと報告されること。テキストの置換と一括設定では報告されないこと、局所性の追跡で編集の影響を受けないブロックが元の表記で出ていることを確かめる（11.4）。
-- `amark_test_md_check`：`amark_test_md_check_example(factory, input, length, expected, expected_length)` は上の 4 つをまとめた生成テストの検査（`inline-parser` の `gen_examples.cmake` の `CHECK=`。形は `amark_test_example_check_fn`）。`void amark_test_md_check_case(const char *name, const char *options, const char *sexpr, size_t sexpr_length, const char *expected, size_t expected_length)` は、`html-renderer` の `gen_html_cases.cmake` の `CHECK=`（`INCLUDE=md_check.h`）で呼ばれるケースの検査で、`options`（見出しの `[options]` をスクリプトが解釈せずに 1 つの文字列で渡したもの。`bullet=*` などの空白で区切った `key=value`）をオプションに変え（未知の鍵や値はテストの失敗として拒否する）、CommonMark の構文セットで S 式から組み立てた木の出力と期待値を比べる。`AMARK_CHECK_MD(set, sexpr, options, expected_literal)`：手書きのテストの同じ照合。
+- `amark_test_md_check`：`amark_test_md_check_example(factory, input, length, expected, expected_length)` は上の 4 つをまとめた生成テストの検査（`inline-parser` の `gen_examples.cmake` の `CHECK=`。形は `amark_test_example_check_fn_t`）。`void amark_test_md_check_case(const char *name, const char *options, const char *sexpr, size_t sexpr_length, const char *expected, size_t expected_length)` は、`html-renderer` の `gen_html_cases.cmake` の `CHECK=`（`INCLUDE=md_check.h`）で呼ばれるケースの検査で、`options`（見出しの `[options]` をスクリプトが解釈せずに 1 つの文字列で渡したもの。`bullet=*` などの空白で区切った `key=value`）をオプションに変え（未知の鍵や値はテストの失敗として拒否する）、CommonMark の構文セットで S 式から組み立てた木の出力と期待値を比べる。`AMARK_CHECK_MD(set, sexpr, options, expected_literal)`：手書きのテストの同じ照合。
 
 #### GfmMdExt
 
@@ -867,28 +867,28 @@ typedef struct amark__md_piece {
     size_t start, length;            /* 葉のバッファの中の位置 */
     uint8_t kind;                    /* TEXT、FIXED、MARKUP、DELIMITER、LINE_BREAK */
     uint8_t encoding;                /* 0：素、1：バックスラッシュ、2：文字参照（TEXT の各文字は別の配列） */
-    const amark_node *owner;
-    amark_source_id source; size_t origin;   /* 元の位置（なければ SIZE_MAX） */
+    const amark_node_t *owner;
+    amark_source_id_t source; size_t origin;   /* 元の位置（なければ SIZE_MAX） */
     uint32_t delimiter;              /* DELIMITER のとき：区切りの表の添字 */
-} amark__md_piece;
+} amark__md_piece_t;
 
 typedef struct amark__md_info {     /* ノードの情報の表の要素 */
-    const amark_node *node;
+    const amark_node_t *node;
     uint32_t state;                  /* AMARK_MARKDOWN_STATE_* と、汚れた子孫を持つ印 */
-    amark_source_id source;
+    amark_source_id_t source;
     size_t first_offset, first_line, last_offset, last_line;
     size_t trailing_blank_lines, trailing_blank_offset;
-} amark__md_info;
+} amark__md_info_t;
 
 struct amark_markdown_context {
-    const amark_document *document; amark_allocator allocator; const amark_node *root;
-    amark_markdown_options options;  /* 既定を補った値 */
-    amark__md_dispatch dispatch;     /* 連鎖の表、フックの一覧と状態 */
-    amark__md_info *info; size_t info_capacity;
-    amark__md_lines lines;           /* 出力先、現在の行、接頭辞の積み重ね */
-    amark__md_leaf leaf;             /* 断片、行の表示、区切りの表、要求 */
-    amark__md_call call;             /* 現在の呼び出しの文脈 */
-    amark_status error; amark_markdown_report report;
+    const amark_document_t *document; amark_allocator_t allocator; const amark_node_t *root;
+    amark_markdown_options_t options; /* 既定を補った値 */
+    amark__md_dispatch_t dispatch;    /* 連鎖の表、フックの一覧と状態 */
+    amark__md_info_t *info; size_t info_capacity;
+    amark__md_lines_t lines;         /* 出力先、現在の行、接頭辞の積み重ね */
+    amark__md_leaf_t leaf;           /* 断片、行の表示、区切りの表、要求 */
+    amark__md_call_t call;           /* 現在の呼び出しの文脈 */
+    amark_status_t error; amark_markdown_report_t report;
 };
 ```
 
@@ -943,17 +943,17 @@ struct amark_markdown_context {
 ## Integration & Upstream Changes
 この spec の実装の前に、次の上流の spec を更新する（spec の境界を守るための回避策は作らない）。
 
-- **`foundation`**：`amark_status` の末尾に `AMARK_ERROR_UNREPRESENTABLE = 6`（「表現できない」）を追加し、`amark_status_string` に文字列を足す（状態コードの追加は既定の Revalidation Trigger）。
+- **`foundation`**：`amark_status_t` の末尾に `AMARK_ERROR_UNREPRESENTABLE = 6`（「表現できない」）を追加し、`amark_status_string` に文字列を足す（状態コードの追加は既定の Revalidation Trigger）。
 - **`syntax-tree`**：API の変更は要らない。`extension.h` の範囲の表の `markdown-renderer` の行に `AMARK_SLOT_MARKDOWN_NODE`（0x0401）、`AMARK_SLOT_MARKDOWN_HOOKS`（0x0402）を記す（予定どおりの追記）。
 - **`block-parser`**：
-  1. `scan.h` に、`amark_text_input` を作らずに使えるバイト列の走査を追加する：`bool amark_scan_html_block_start(const char *line, size_t length, bool interrupting, int *out_kind)`（7 種類の開始の条件。段落を中断する場面では種類 7 を不成立にする）、`bool amark_scan_html_block_end(int kind, const char *line, size_t length)`（種類 1–5 の終わりの条件）、`bool amark_scan_html_open_tag_bytes` / `amark_scan_html_closing_tag_bytes`（同じ規則のバイト列の版）。`commonmark.html_block` と既存の走査はこれらを使い、規則を 1 か所に保つ。
+  1. `scan.h` に、`amark_text_input_t` を作らずに使えるバイト列の走査を追加する：`bool amark_scan_html_block_start(const char *line, size_t length, bool interrupting, int *out_kind)`（7 種類の開始の条件。段落を中断する場面では種類 7 を不成立にする）、`bool amark_scan_html_block_end(int kind, const char *line, size_t length)`（種類 1–5 の終わりの条件）、`bool amark_scan_html_open_tag_bytes` / `amark_scan_html_closing_tag_bytes`（同じ規則のバイト列の版）。`commonmark.html_block` と既存の走査はこれらを使い、規則を 1 か所に保つ。
   2. 構築関数の出力の core 拡張の一覧に `amark_markdown_core_extension()` を足す（予定どおり。この spec のタスクが 1 行を足す）。
 - **`inline-parser`**：
-  1. `inline.h` に純粋な関数を公開し、InlineDelimiters がそれを内部でも使う：`void amark_inline_delimiter_flanks(amark_delimiter_flanking flanking, uint32_t before, uint32_t after, bool *out_can_open, bool *out_can_close)`（CommonMark 6.2 の判定）と、`amark_status amark_inline_match_delimiters(const amark_allocator *allocator, const amark_inline_run *runs, size_t count, amark_inline_run_match *out_matches, size_t capacity, size_t *out_count)`（区切りの並びの配列の上の process emphasis。規則 EMPHASIS と EXACT、下限の表を含む）。
+  1. `inline.h` に純粋な関数を公開し、InlineDelimiters がそれを内部でも使う：`void amark_inline_delimiter_flanks(amark_delimiter_flanking_t flanking, uint32_t before, uint32_t after, bool *out_can_open, bool *out_can_close)`（CommonMark 6.2 の判定）と、`amark_status_t amark_inline_match_delimiters(const amark_allocator_t *allocator, const amark_inline_run_t *runs, size_t count, amark_inline_run_match_t *out_matches, size_t capacity, size_t *out_count)`（区切りの並びの配列の上の process emphasis。規則 EMPHASIS と EXACT、下限の表を含む）。
   2. `inline.h` に `bool amark_inline_scan_raw_html(const char *data, size_t length, size_t *out_end)`（開始タグ、終了タグ、コメント、処理命令、宣言、CDATA）を公開し、`commonmark.raw_html` がそれを使う。
   3. InlineText の規則を追加する：テキストの走査の一致の範囲に `ESCAPE` か `CHAR_REF` のトークンで表された文字が含まれるなら、その一致を採らない（範囲の後ろから走査を続ける）。エスケープしたテキストが拡張オートリンクなどのきっかけの文字のない構文にならないようにするため。
   4. テストの基盤：`tests/support/gen_examples.cmake` の `CHECK=` は `inline-parser` が所有して実装する（`inline-parser` のタスク 1.4。2026-11-25 に取り込み済み）。この spec が `inline-parser` の所有するファイルに行う編集は、`tests/extensions/gfm_set.c`（`amark_test_gfm_set_new` が HTML の部品の後に `amark_test_md_gfm` の拡張を加える）と `tests/extensions/CMakeLists.txt`（`amark_test_gfm` が `amark_test_md_gfm` に依存する）だけ（この spec のタスク 4.2。brief の Extends）。
   5. 検証用拡張：`test.inline.autolink` が作る link の長さ 0 の `TEXT` の役割を、拡張オートリンクの役割の定数 `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK`（0x0E50u）として `tests/extensions/gfm_inline_ext.h` に公開する（同じヘッダに `AMARK_TEST_GFM_ROLE_STRIKE_MARKER` 0x0E40u、`AMARK_TEST_GFM_ROLE_FOOTNOTE_REF_MARKER` 0x0E60u、`AMARK_TEST_GFM_ROLE_FOOTNOTE_REF_LABEL` 0x0E61u）。`amark_test_gfm` は Naos に依存せず、Naos の補助は `amark_test_gfm_check` に分ける（`foundation` のファジングの規則）。この spec の生成テストは `amark_test_gfm`（構文セット）だけを使い、ファジングのターゲットは `amark_test_gfm_check` をリンクしない。
-  6. `amark_inline_match_delimiters` の `capacity` は「長さの合計の半分（切り捨て）以上」、`amark_inline_run` は `use_mask` を持つ（取り込み済みの形）。この spec は MdDispatch の対応の表でそれに合わせる。
-- **`html-renderer`**：`render.h` の `amark_write_fn` を共有する。テストの基盤として、`html-renderer` が定める共有のケースの生成の契約（`tests/html/gen_html_cases.cmake`。形式 `### name [options]`・S 式・`---`・期待する出力・`===`。オプションは解釈せず 1 つの文字列で渡す。ARGS `CHECK=`（既定 `html_test_check_case`）と `INCLUDE=`（既定 `html_test_support.h`）。生成テストは `CHECK(name, options, sexpr, sexpr_length, expected, expected_length)` を呼ぶ）をそのまま使う。この spec は `CHECK=amark_test_md_check_case`、`INCLUDE=md_check.h` を指定するだけで、`gen_md_cases.cmake` を作らない（2026-11-25 に `html-renderer` の design に定義済み）。
+  6. `amark_inline_match_delimiters` の `capacity` は「長さの合計の半分（切り捨て）以上」、`amark_inline_run_t` は `use_mask` を持つ（取り込み済みの形）。この spec は MdDispatch の対応の表でそれに合わせる。
+- **`html-renderer`**：`render.h` の `amark_write_fn_t` を共有する。テストの基盤として、`html-renderer` が定める共有のケースの生成の契約（`tests/html/gen_html_cases.cmake`。形式 `### name [options]`・S 式・`---`・期待する出力・`===`。オプションは解釈せず 1 つの文字列で渡す。ARGS `CHECK=`（既定 `html_test_check_case`）と `INCLUDE=`（既定 `html_test_support.h`）。生成テストは `CHECK(name, options, sexpr, sexpr_length, expected, expected_length)` を呼ぶ）をそのまま使う。この spec は `CHECK=amark_test_md_check_case`、`INCLUDE=md_check.h` を指定するだけで、`gen_md_cases.cmake` を作らない（2026-11-25 に `html-renderer` の design に定義済み）。
 - **断片のパース**：Markdown の断片を木に差し込む編集 API は `block-parser` の `amark_parse_fragment` が担う（brief の Out of Boundary の決定）。挿入したノードはトークンを持ち `RELOCATED` になるので、このレンダラは元の表記を保ったまま出力する。

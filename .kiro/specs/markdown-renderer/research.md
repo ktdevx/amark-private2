@@ -47,7 +47,7 @@
 ### `html-renderer` のスロットの規約
 - **Context**：要件 9.1、9.3（スロットの形を揃える）。
 - **Sources Consulted**：`.kiro/specs/html-renderer/design.md`（HtmlApi、HtmlDispatch、HtmlEngine、Renderer slot conventions、CoreHtml の登録の規則）
-- **Findings**：ノード型ごとのスロットと前後のフックのスロットの 2 種類、名前でのノード型の指定、構文セットの順の連鎖と `render_next`、子の省略、拡張ごとの状態、`begin`（順）／`end`・`finish`（逆順）、不透明な文脈、バッファと書き出しの関数の 2 つの入口（`amark_write_fn` を `render.h` で共有）、`struct_size` と未知のビットの拒否、組み込みの出力は `amark.core.html` 1 つ、構築関数が `amark.core` の直後に足す。
+- **Findings**：ノード型ごとのスロットと前後のフックのスロットの 2 種類、名前でのノード型の指定、構文セットの順の連鎖と `render_next`、子の省略、拡張ごとの状態、`begin`（順）／`end`・`finish`（逆順）、不透明な文脈、バッファと書き出しの関数の 2 つの入口（`amark_write_fn_t` を `render.h` で共有）、`struct_size` と未知のビットの拒否、組み込みの出力は `amark.core.html` 1 つ、構築関数が `amark.core` の直後に足す。
 - **Implications**：同じ形で `AMARK_SLOT_MARKDOWN_NODE`（0x0401）と `AMARK_SLOT_MARKDOWN_HOOKS`（0x0402）を定義し、組み込みの出力を `amark.core.markdown` にまとめる。HTML の入れ子の出力とフィルタは、Markdown の要件にないので持たない（後で末尾に足せる）。Markdown に固有の文脈（接頭辞、空行の規則、エスケープ、区切り文字、保護）は文脈の API として足す。
 
 ## Architecture Pattern Evaluation
@@ -140,10 +140,10 @@
 - **`foundation`**：`AMARK_ERROR_UNREPRESENTABLE = 6` と `amark_status_string` の文字列が取り込まれた（`foundation` の要件 10.9、タスク 2.1、Downstream Extension Points）。
 - **`block-parser`**：`scan.h` のバイト列の HTML ブロックの開始と終わりの条件とタグの走査（`block-parser` の 7.7、7.8）と、構築関数の出力の core 拡張の一覧への `amark.core.markdown` の 1 行（この spec のタスク 3.7 が足す）が取り込まれた。
 - **`inline-parser`**：
-  - `amark_inline_delimiter_flanks` と `amark_inline_match_delimiters`（5.7）。取り込まれた形では `amark_inline_run` が `max_run_length` ではなく `use_mask` を持ち、`capacity` は「長さの合計の半分（切り捨て）以上」になった。この spec の `amark_markdown_run(_match)` は形を変えず、対応の表を MdDispatch に置いた（下の 13）。
+  - `amark_inline_delimiter_flanks` と `amark_inline_match_delimiters`（5.7）。取り込まれた形では `amark_inline_run_t` が `max_run_length` ではなく `use_mask` を持ち、`capacity` は「長さの合計の半分（切り捨て）以上」になった。この spec の `amark_markdown_run(_match)_t` は形を変えず、対応の表を MdDispatch に置いた（下の 13）。
   - raw HTML のバイト列の走査（7.7）。`inline-parser` の改訂で名前が `amark_scan_raw_html` から `bool amark_inline_scan_raw_html(const char *data, size_t length, size_t *out_end)`（`inline.h`）に決まったので、design の html_inline の行と Integration をその名前にした。
   - テキストの走査の採否の規則（4.5）。
-  - `gen_examples.cmake` の `CHECK=` と `amark_test_example_check_fn`（14.4。`inline-parser` のタスク 1.4）。`CHECK=` の所有と実装は `inline-parser` にある。
+  - `gen_examples.cmake` の `CHECK=` と `amark_test_example_check_fn_t`（14.4。`inline-parser` のタスク 1.4）。`CHECK=` の所有と実装は `inline-parser` にある。
   - `gfm_set.c` の部品の並びは 1 つの配列で、Markdown の部品を加える編集だけをこの spec のタスク 4.2 が行う。
 
 ### 2026-11-25：spec 間のレビュー（1 回目）の反映
@@ -153,8 +153,8 @@
 - **6. 拡張オートリンクの局所性**：`test.inline.autolink` の link はブラケットも括弧のトークンも持たず、長さ 0 の `TEXT` だけを持つ。CoreMarkdown の `begin` は `LINK_PAREN_OPEN` のない link をすべて短縮の参照とみなしていたので、定義を編集すると無編集の拡張オートリンクに汚れの印が付き、局所性が崩れた。参照の形を「`LINK_REF_*` を持つか、`LINK_OPEN` を持ち `LINK_PAREN_OPEN` を持たない」に限り、ブラケットと括弧のトークンを持たない link を拡張の定めた形として無編集なら元の表記で出す。`inline-parser` が `gfm_inline_ext.h` に公開する拡張オートリンクの役割の定数 `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK`（0x0E50u）で、`amark_test_md_gfm` の `link` の処理が明示的に扱う。組み込みのリンクと画像は必ず `LINK_OPEN` と `LINK_CLOSE` を持ち（短縮の参照はその 2 つだけ）、拡張の定めたリンクは `LINK_OPEN`・`LINK_PAREN_*`・`LINK_REF_*` をどれも持たない（`inline-parser` の確定）ので、分類は役割だけで曖昧なく決まる。`amark_test_gfm` は Naos に依存せず、Naos の補助は `amark_test_gfm_check` に分かれた。拡張の型を知らないエンジンの規則（トークンの役割による分類）に一般化したので、他の拡張の link も同じ扱いになる。
 - **7. `amark.h`**：`foundation` が正準の順を 1 つ定めたので、「`html.h` の後」ではなく「正準の順に従い、`markdown.h` を最後」と書いた。
 - **10. 生成の手順の重複**：`gen_md_cases.cmake` は `html-renderer` の `gen_html_cases.cmake` の形式を作り直すものだった。`html-renderer` が共有の契約（`### name [options]`、S 式、`---`、期待する出力、`===`。オプションは解釈せず 1 つの文字列。ARGS `CHECK=`、`INCLUDE=`。`CHECK(name, options, sexpr, sexpr_length, expected, expected_length)`）を定めたので、`gen_md_cases.cmake` を削り、`CHECK=amark_test_md_check_case INCLUDE=md_check.h` で再利用する。検査の関数が未知のオプションを拒否する。spec.txt の版と SHA-256 は `inline-parser` の `tests/spec/spec_version.cmake` を include して同じ規則で照合・スキップし、この spec で持たない。
-- **13. 照合の対応**：`amark_markdown_run(_match)` と `amark_inline_run(_match)` は別の型で、上限の表し方（`max_run_length` と `use_mask`）と `capacity` の規則が違う。MdDispatch に要素ごとの対応の表（添字・`struct_size`・`rule` の値・上限から `use_mask` への変換・照合の結果の写し）と、`capacity`（エンジンは長さの合計以上を渡し、上流の半分以上の要求を満たす）・作業の配列（文書のアロケータ、状態に持って使い回し `finish` で解放）・失敗の規則を書いた。`amark_markdown_run` の公開の形は変えない（拡張が別の照合を提供できる形を保つ）。
-- **Implications**：Revalidation Triggers に、`amark_inline_run(_match)` の形と `capacity`、拡張オートリンクの役割の定数、`gen_html_cases.cmake` の契約、`spec_version.cmake`、`foundation` の `amark.h` の順とファジングの規則、`amark_test_md`・`amark_test_md_gfm` が Naos に依存しないことを加えた。
+- **13. 照合の対応**：`amark_markdown_run(_match)_t` と `amark_inline_run(_match)_t` は別の型で、上限の表し方（`max_run_length` と `use_mask`）と `capacity` の規則が違う。MdDispatch に要素ごとの対応の表（添字・`struct_size`・`rule` の値・上限から `use_mask` への変換・照合の結果の写し）と、`capacity`（エンジンは長さの合計以上を渡し、上流の半分以上の要求を満たす）・作業の配列（文書のアロケータ、状態に持って使い回し `finish` で解放）・失敗の規則を書いた。`amark_markdown_run_t` の公開の形は変えない（拡張が別の照合を提供できる形を保つ）。
+- **Implications**：Revalidation Triggers に、`amark_inline_run(_match)_t` の形と `capacity`、拡張オートリンクの役割の定数、`gen_html_cases.cmake` の契約、`spec_version.cmake`、`foundation` の `amark.h` の順とファジングの規則、`amark_test_md`・`amark_test_md_gfm` が Naos に依存しないことを加えた。
 
 ### 2026-11-25：spec 間のレビュー（2 回目、cross-spec review r2）の反映
 - `tests/support/gen_examples.cmake` の所有の記述を直した：ファイルと基本の契約は `block-parser` が所有し、`inline-parser` は `EXPECT=html`・`FACTORY=`・`CHECK=` の追加だけを所有する（design の Allowed Dependencies と File Structure Plan の該当箇所）。この spec は引き続きこのファイルを編集しない。承認の状態は変えない。

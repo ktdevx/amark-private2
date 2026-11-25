@@ -55,7 +55,7 @@
 - **Sources Consulted**：`.kiro/specs/foundation/design.md`
 - **Findings**：
   - 状態コード（`AMARK_OK`、`OUT_OF_MEMORY`、`INVALID_ARGUMENT`、`OVERFLOW`、`LIMIT_EXCEEDED`、`INVALID_STATE`）、出力引数は最後で `out_` で始める、失敗時は強い保証、解放の関数は NULL を受け付ける、公開の構造体は先頭に `struct_size`。
-  - `amark_allocator` はオブジェクトに値でコピーして持つ（`amark__allocator_resolve`）。`amark_buffer` は内部で埋め込める（`buffer_internal.h` の `amark__buffer_init` / `amark__buffer_destroy`）。
+  - `amark_allocator_t` はオブジェクトに値でコピーして持つ（`amark__allocator_resolve`）。`amark_buffer_t` は内部で埋め込める（`buffer_internal.h` の `amark__buffer_init` / `amark__buffer_destroy`）。
   - `amark_utf8_validate` で UTF-8 を検査できる。
   - テストは `amark_add_test(... [INTERNAL] [LIBRARIES ...])`、確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP`、比較は `AMARK_CHECK_BYTES_EQ` / `AMARK_CHECK_BUFFER_EQ`。ファジングは `amark_add_fuzzer`。
   - `amark_test_support` は Amark の関数を呼ばない約束（`amark` と `amark_internal` の両方と組み合わせるため）。
@@ -78,7 +78,7 @@
 - **Context**：メモリの所有、ソース、構文セット、編集の追跡の切り替えを 1 か所に置く必要がある（1.1–1.5、7.8）。
 - **Alternatives Considered**：
   1. cmark と同じく、文書ノードが根であり所有者でもある
-  2. 不透明型の `amark_document` が所有者で、根は型 document のノード
+  2. 不透明型の `amark_document_t` が所有者で、根は型 document のノード
 - **Selected Approach**：2。`amark_document_root()` が根のノードを返す。
 - **Rationale**：ソースの一覧やアロケータをノードの型のデータに混ぜずに済む。切り離したノードの所有者が明確になる。
 - **Trade-offs**：オブジェクトが 1 つ増える。
@@ -134,7 +134,7 @@
 
 ### Decision: スロットは種類の番号つきの見出しを先頭に持つ構造体への参照の一覧
 - **Context**：8.2、8.8、8.9。下流の spec がスロットを足しても、レジストリの API を変えないため。
-- **Selected Approach**：`amark_slot_header { struct_size; kind; }` を先頭のメンバーに持つ構造体を、構文拡張が `const amark_slot_header *const *` の一覧で持つ。レジストリは凍結時に種類ごとの索引を作り、順に列挙する。番号の範囲は 1–0xFFFF を Amark、0x10000 以上を利用者とする。
+- **Selected Approach**：`amark_slot_header_t { struct_size; kind; }` を先頭のメンバーに持つ構造体を、構文拡張が `const amark_slot_header_t *const *` の一覧で持つ。レジストリは凍結時に種類ごとの索引を作り、順に列挙する。番号の範囲は 1–0xFFFF を Amark、0x10000 以上を利用者とする。
 - **Rationale**：利用者が独自のレンダラ（HTML と Markdown 以外）のスロットを定義できる。配列の要素の大きさが将来変わる問題が起きない（ポインタの配列）。
 - **Trade-offs**：型の安全はスロットの種類ごとの規約に頼る（種類の番号と `struct_size` の検査はエンジンの責任）。
 
@@ -199,7 +199,7 @@
 - **Context**：全 spec を横断したレビューで、この spec に関わる指摘が 3 つあった（#7、#8、#9）。承認済みの要件・設計・タスクの意味は変えず、記述をそろえる修正だけを行う。
 - **#9 スロットの種類の範囲の表が古い**：表の右の列が「各 spec の design が定める」のままだった。承認済みの下流の design に合わせ、具体的な種類を記した：`block-parser` 0x0100–0x0103（`BLOCK_SYNTAX`、`PARAGRAPH_CONSUMER`、`POSTPROCESS`、`PARSE_STATE`）、`inline-parser` 0x0201–0x0206（`INLINE_SYNTAX`、`INLINE_DELIMITER`、`INLINE_BRACKET`、`INLINE_TEXT_SCANNER`、`INLINE_NODE_TRAITS`、`INLINE_SPECIAL`）、`html-renderer` 0x0301–0x0302（`HTML_NODE`、`HTML_HOOKS`）、`markdown-renderer` 0x0401–0x0402（`MARKDOWN_NODE`、`MARKDOWN_HOOKS`）。`extension.h` の範囲の節の注記にも同じ一覧を置き、タスク 1.1 に反映した。定義の正本は各 spec の design のままとし、種類を足す・変える spec が表と注記を更新することを Revalidation Triggers に加えた。要件 8.13 の文言は変えない（表を公開ヘッダに置く、という要件のまま）。
 - **#7 `amark.h` の include の順**：`amark.h` は `foundation` が所有し、正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）を定める。この spec の「`unicode.h` の後に追加する」という書き方をやめ、`foundation` の正規の順の「木のヘッダ」の位置に 6 つのヘッダを置く、という参照に改めた（File Structure Plan、公開ヘッダの構成、タスク 1.1）。正規の順の変更を Revalidation Triggers に加えた。
-- **#8 `amark_document_take_syntax_set` の `const`**：`block-parser` の `amark_parser_new(const amark_syntax_set *)` から非 `const` の `take` を呼ぶと `const` を外すキャストが要る、という指摘。所有権の受け渡し（解放の責任の移動）は `const` のポインタでは表せないため、この関数の引数は非 `const` のままとする。設計に「`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストをしない）」と明記した。`const` でないポインタを持つ経路だけで受け渡すよう直すのは `block-parser` の側で行う。
+- **#8 `amark_document_take_syntax_set` の `const`**：`block-parser` の `amark_parser_new(const amark_syntax_set_t *)` から非 `const` の `take` を呼ぶと `const` を外すキャストが要る、という指摘。所有権の受け渡し（解放の責任の移動）は `const` のポインタでは表せないため、この関数の引数は非 `const` のままとする。設計に「`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストをしない）」と明記した。`const` でないポインタを持つ経路だけで受け渡すよう直すのは `block-parser` の側で行う。
 - **Implications**：API・要件の受け入れ基準・タスクの範囲は変わらない。承認は維持する。
 
 ### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
