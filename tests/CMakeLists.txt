@@ -16,7 +16,8 @@ if(AMARK_BUILD_TESTS)
   # goes with either amark or amark_internal: its include directories are those of
   # the public headers, not a link to either library. It links Naos, so fuzz
   # targets must not link it.
-  #   support/test_check.h      comparison macros (AMARK_CHECK_BYTES_EQ)
+  #   support/test_check.h      comparison macros (AMARK_CHECK_BYTES_EQ,
+  #                             AMARK_CHECK_BUFFER_EQ)
   #   support/test_allocator.h  the test allocator and AMARK_CHECK_OOM_SWEEP
   add_library(amark_test_support STATIC support/test_allocator.c)
   amark_target_defaults(amark_test_support)

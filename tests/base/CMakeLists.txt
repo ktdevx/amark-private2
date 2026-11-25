@@ -16,3 +16,8 @@ amark_add_test(allocator_internal_test SOURCES allocator_internal_test.c INTERNA
 amark_add_test(utf8_test SOURCES utf8_test.c)
 
 amark_add_test(unicode_test SOURCES unicode_test.c)
+
+# The public API (amark), and the embedding functions of the internal definition
+# (amark_internal).
+amark_add_test(buffer_test SOURCES buffer_test.c)
+amark_add_test(buffer_internal_test SOURCES buffer_internal_test.c INTERNAL)

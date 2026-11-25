@@ -26,6 +26,7 @@
 #include <amark/version.h>
 #include <amark/error.h>
 #include <amark/allocator.h>
+#include <amark/buffer.h>
 #include <amark/utf8.h>
 #include <amark/unicode.h>
 
