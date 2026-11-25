@@ -35,7 +35,7 @@
   - _Boundary: BuildCore_
   - _Requirements: 1.3, 1.7, 2.1, 2.2, 2.3, 2.5, 2.6, 3.3, 4.3, 7.7, 9.5_
 
-- [ ] 1.5 Naos によるテストの仕組みと最初のテストを作る
+- [x] 1.5 Naos によるテストの仕組みと最初のテストを作る
   - テストを作るときだけ、Naos をタグ v0.4.0 に固定して取得する。タグの値は 1 か所にだけ書く
   - テストの実行ファイルを作り、警告設定を適用し、出力先をライブラリと揃え、公開 API 用か内部用のどちらか一方のライブラリをリンクして、各テストを CTest に登録する関数を作る
   - テストを作らない構成（ファジングだけを有効にした構成を含む）では Naos を取得せず、テストを登録する関数は何もしないようにする
@@ -228,3 +228,4 @@
 - 1.3: このコンテナの clang にはサニタイザのランタイムがない。サニタイザの成功経路は gcc で確かめる
 - 1.4: 最上位の CMakeLists.txt の `include(AmarkTesting OPTIONAL)` と `if(EXISTS tests/CMakeLists.txt)` の囲みは暫定。1.5 で外す。`include(AmarkFuzz OPTIONAL)` と `if(EXISTS fuzz/CMakeLists.txt)` は 3.5 で外す。この目的に限り、1.5 と 3.5 は最上位の CMakeLists.txt を編集してよい
 - 1.4: ターゲットは `amark_objects`（OBJECT、`amark_target_defaults` を適用）、`amark`、`Amark::amark`、`amark_internal`（テストかファジングのときだけ、include/ と src/ を PUBLIC に持つ）。テストを作るときの実行時の出力先は `${PROJECT_BINARY_DIR}/bin`
+- 1.5: テストは `amark_add_test(<target> SOURCES … [INTERNAL] [LIBRARIES …] [LABELS …])` で登録し、各テストは CTest に `<target>.<suite>.<test>` として載る。`amark_test_support` は今は INTERFACE ライブラリ（tests/support と Naos::naos）。2.3 で test_allocator.c を加えるときに STATIC に変える
