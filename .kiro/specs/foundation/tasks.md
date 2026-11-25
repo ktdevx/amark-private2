@@ -83,7 +83,7 @@
   - _Boundary: Utf8_
   - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7_
 
-- [ ] 2.5 (P) Unicode の表の生成スクリプトと生成した表を用意する
+- [x] 2.5 (P) Unicode の表の生成スクリプトと生成した表を用意する
   - Unicode 17.0.0 の `UnicodeData.txt` を読み（範囲の項目を展開し）、Zs と P・S の一般カテゴリの範囲の表を、隣接する範囲を結合して書き出す保守者用のスクリプトを作る
   - 固定の版のデータの取得、生成結果と既存のファイルの比較（不一致なら非 0）、表の定義を名前とカテゴリの一覧で追加できる構造を持たせる
   - 出力にはライセンスヘッダ、Unicode の版、生成の手順を書く
@@ -230,3 +230,4 @@
 - 1.4: ターゲットは `amark_objects`（OBJECT、`amark_target_defaults` を適用）、`amark`、`Amark::amark`、`amark_internal`（テストかファジングのときだけ、include/ と src/ を PUBLIC に持つ）。テストを作るときの実行時の出力先は `${PROJECT_BINARY_DIR}/bin`
 - 1.5: テストは `amark_add_test(<target> SOURCES … [INTERNAL] [LIBRARIES …] [LABELS …])` で登録し、各テストは CTest に `<target>.<suite>.<test>` として載る。`amark_test_support` は今は INTERFACE ライブラリ（tests/support と Naos::naos）。2.3 で test_allocator.c を加えるときに STATIC に変える
 - 2.3: 確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP(scenario, ctx)`（tests/support/test_allocator.h）。結果の構造体に設計にない `truncated` を加えた。総当たりの中で `NAOS_FAIL` が起きると既定のアロケータに戻らないので、テストの teardown で `amark_allocator_set(NULL)` を呼ぶ
+- 2.5: `src/base/unicode_tables.inc` は `amark_unicode_range_t` を定義しない。2.6 の unicode.c は `<stdint.h>` と `typedef struct { uint32_t first; uint32_t last; } amark_unicode_range_t;` を include より前に置く。生成スクリプトは `include/amark/unicode.h` がないと版の照合を警告で飛ばすので、2.6 でヘッダを加えたらエラーに変える（この目的に限り 2.6 は tools/gen_unicode_tables.py を編集してよい）
