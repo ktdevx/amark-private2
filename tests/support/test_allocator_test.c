@@ -59,7 +59,7 @@ NAOS_TEST(counts_calls_blocks_and_bytes)
     {
         for (i = 0; i < 20; i++)
         {
-            zeroed = zeroed && z[i] == 0;
+            zeroed = zeroed && (z[i] == 0);
         }
     }
     q = amark_realloc(p, 100);
@@ -205,7 +205,7 @@ NAOS_TEST(fail_at_zero_never_fails)
     for (i = 0; i < 5; i++)
     {
         p[i] = amark_malloc(i + 1);
-        all = all && p[i] != NULL;
+        all = all && (p[i] != NULL);
     }
     for (i = 0; i < 5; i++)
     {

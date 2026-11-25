@@ -118,7 +118,7 @@ static int inject_failure(void)
         NAOS_FAIL("test allocator: used without amark_test_allocator_activate");
     }
     current->calls++;
-    if (current->fail_at != 0 && current->calls == current->fail_at)
+    if ((current->fail_at != 0) && (current->calls == current->fail_at))
     {
         current->failures++;
         return 1;
@@ -163,7 +163,7 @@ static void *test_calloc(size_t count, size_t size)
     {
         return NULL;
     }
-    if (size != 0 && count > SIZE_MAX / size)
+    if ((size != 0) && (count > SIZE_MAX / size))
     {
         return NULL;
     }
@@ -302,7 +302,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
             break;
         }
         result.iterations++;
-        if (error != AMARK_ERROR_OUT_OF_MEMORY && result.wrong_error_at == 0)
+        if ((error != AMARK_ERROR_OUT_OF_MEMORY) && (result.wrong_error_at == 0))
         {
             result.wrong_error_at = fail_at;
         }
@@ -315,8 +315,8 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 int amark_test_oom_check(amark_test_oom_result_t result, const char *expr, const char *file,
                          int line)
 {
-    int ok = result.final_error == AMARK_ERROR_NONE && result.wrong_error_at == 0 &&
-             result.leak_at == 0 && !result.truncated;
+    int ok = (result.final_error == AMARK_ERROR_NONE) && (result.wrong_error_at == 0) &&
+             (result.leak_at == 0) && !result.truncated;
 
     NAOS_NOTE("runs with a failure: %lu, wrong error at run: %lu, leak at run: %lu, "
               "final error: %d, truncated: %d",

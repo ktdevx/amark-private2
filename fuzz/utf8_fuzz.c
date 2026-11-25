@@ -53,7 +53,7 @@ static const unsigned char replacement_bytes[3] = {0xEF, 0xBF, 0xBD};
 
 static bool is_scalar_value(uint32_t codepoint)
 {
-    return codepoint <= 0x10FFFFu && (codepoint < 0xD800u || codepoint > 0xDFFFu);
+    return (codepoint <= 0x10FFFFu) && ((codepoint < 0xD800u) || (codepoint > 0xDFFFu));
 }
 
 /* Checks the forward decoding, the backward decoding at its boundaries, the
@@ -86,7 +86,7 @@ static void check_decoding(const char *text, size_t size)
         bool is_invalid;
 
         /* Covers the input without overlap or gap. */
-        CHECK(length >= 1 && length <= AMARK_UTF8_MAX_LENGTH);
+        CHECK((length >= 1) && (length <= AMARK_UTF8_MAX_LENGTH));
         CHECK(length <= size - position);
         CHECK(is_scalar_value(codepoint));
         CHECK(amark_utf8_decode(text + position, size - position, NULL) == length);
@@ -97,14 +97,14 @@ static void check_decoding(const char *text, size_t size)
         CHECK(before_codepoint == codepoint);
         CHECK(amark_utf8_decode_before(text, position + length, NULL) == length);
 
-        is_invalid = codepoint == AMARK_UTF8_REPLACEMENT &&
-                     !(length == 3 && memcmp(text + position, replacement_bytes, 3) == 0);
+        is_invalid = (codepoint == AMARK_UTF8_REPLACEMENT) &&
+                     !((length == 3) && (memcmp(text + position, replacement_bytes, 3) == 0));
 
         encoded_length = amark_utf8_encode(codepoint, encoded);
-        CHECK(encoded_length >= 1 && encoded_length <= AMARK_UTF8_MAX_LENGTH);
+        CHECK((encoded_length >= 1) && (encoded_length <= AMARK_UTF8_MAX_LENGTH));
         if (is_invalid)
         {
-            CHECK(encoded_length == 3 && memcmp(encoded, replacement_bytes, 3) == 0);
+            CHECK((encoded_length == 3) && (memcmp(encoded, replacement_bytes, 3) == 0));
             if (first_invalid == size)
             {
                 first_invalid = position;
@@ -144,7 +144,7 @@ static void check_decoding(const char *text, size_t size)
     CHECK(error_offset == replaced_length);
     if (valid)
     {
-        CHECK(replaced_length == size && memcmp(replaced, text, size) == 0);
+        CHECK((replaced_length == size) && (memcmp(replaced, text, size) == 0));
     }
     free(replaced);
 }
@@ -194,7 +194,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     char *text = (char *)malloc(size > 0 ? size : 1);
     char *original = (char *)malloc(size > 0 ? size : 1);
 
-    CHECK(text != NULL && original != NULL);
+    CHECK((text != NULL) && (original != NULL));
     if (size > 0)
     {
         memcpy(text, data, size);
@@ -214,7 +214,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     check_decoding(text, size);
     check_encoding(data, size);
 
-    CHECK(size == 0 || memcmp(text, original, size) == 0);
+    CHECK((size == 0) || (memcmp(text, original, size) == 0));
     free(original);
     free(text);
     return 0;

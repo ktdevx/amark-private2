@@ -686,7 +686,7 @@ NAOS_TEST(appending_byte_by_byte_allocates_logarithmically)
         {
             break;
         }
-        if (worst_at == 0 && counting.calls > growth_bound(i))
+        if ((worst_at == 0) && (counting.calls > growth_bound(i)))
         {
             worst_at = i;
             calls = counting.calls;
@@ -714,7 +714,7 @@ NAOS_TEST(appending_mixed_small_pieces_allocates_logarithmically)
     SET_COUNTING();
     CHECK_CREATE(b);
     amark_test_allocator_reset_counters(&counting);
-    while (total < GROWTH_TOTAL && err == AMARK_ERROR_NONE)
+    while ((total < GROWTH_TOTAL) && (err == AMARK_ERROR_NONE))
     {
         switch (step % 5)
         {
@@ -740,7 +740,7 @@ NAOS_TEST(appending_mixed_small_pieces_allocates_logarithmically)
             break;
         }
         step++;
-        if (worst_at == 0 && counting.calls > growth_bound(total))
+        if ((worst_at == 0) && (counting.calls > growth_bound(total)))
         {
             worst_at = total;
             calls = counting.calls;
@@ -768,7 +768,7 @@ NAOS_TEST(reserving_a_little_more_each_time_allocates_logarithmically)
     for (i = 1; i <= GROWTH_TOTAL; i++)
     {
         NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(b, i));
-        if (worst_at == 0 && counting.calls > growth_bound(i))
+        if ((worst_at == 0) && (counting.calls > growth_bound(i)))
         {
             worst_at = i;
         }
@@ -781,8 +781,8 @@ NAOS_TEST(reserving_a_little_more_each_time_allocates_logarithmically)
     amark_test_allocator_reset_counters(&counting);
     for (i = 0; i < 2 * GROWTH_TOTAL; i++)
     {
-        if (amark_buffer_reserve(b, 1) != AMARK_ERROR_NONE ||
-            amark_buffer_append_byte(b, 'r') != AMARK_ERROR_NONE)
+        if ((amark_buffer_reserve(b, 1) != AMARK_ERROR_NONE) ||
+            (amark_buffer_append_byte(b, 'r') != AMARK_ERROR_NONE))
         {
             break;
         }
@@ -920,7 +920,7 @@ static void sweep_every_operation(const char *prefix, size_t prefix_length)
     {
         grow_case_t c;
 
-        if (ops[i].op == GROW_APPEND_OWN && prefix_length == 0)
+        if ((ops[i].op == GROW_APPEND_OWN) && (prefix_length == 0))
         {
             continue; /* appends nothing, so cannot fail */
         }
@@ -968,12 +968,12 @@ static amark_error_t sequence_scenario(void *context)
     {
         return err;
     }
-    for (op = GROW_RESERVE; op <= GROW_APPEND_CODEPOINT && err == AMARK_ERROR_NONE;
+    for (op = GROW_RESERVE; (op <= GROW_APPEND_CODEPOINT) && (err == AMARK_ERROR_NONE);
          op = (grow_op_t)(op + 1))
     {
         int round;
 
-        for (round = 0; round < 2 && err == AMARK_ERROR_NONE; round++)
+        for (round = 0; (round < 2) && (err == AMARK_ERROR_NONE); round++)
         {
             length_before = amark_buffer_length(b);
             if (length_before >= SNAPSHOT_SIZE / 2)
@@ -1196,7 +1196,7 @@ static int contents_overlap(const amark_buffer_t *a, const amark_buffer_t *b)
     uintptr_t a_end = a_start + amark_buffer_length(a) + 1;
     uintptr_t b_end = b_start + amark_buffer_length(b) + 1;
 
-    return a_start < b_end && b_start < a_end;
+    return (a_start < b_end) && (b_start < a_end);
 }
 
 NAOS_TEST(two_buffers_in_turn_do_not_interfere)
@@ -1224,7 +1224,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
     NAOS_CHECK_UINT_EQ(3000, amark_buffer_length(a));
     NAOS_CHECK_UINT_EQ(6000, amark_buffer_length(b));
     data = (const unsigned char *)amark_buffer_data(a);
-    for (i = 0; i < 3000 && i < amark_buffer_length(a); i++)
+    for (i = 0; (i < 3000) && (i < amark_buffer_length(a)); i++)
     {
         if (data[i] != (unsigned char)i)
         {
@@ -1232,7 +1232,7 @@ NAOS_TEST(two_buffers_in_turn_do_not_interfere)
         }
     }
     data = (const unsigned char *)amark_buffer_data(b);
-    for (i = 0; i < 6000 && i < amark_buffer_length(b); i++)
+    for (i = 0; (i < 6000) && (i < amark_buffer_length(b)); i++)
     {
         if (data[i] != (unsigned char)(255 - (i / 2) % 256))
         {

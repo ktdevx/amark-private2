@@ -219,7 +219,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
     {
         return expected;
     }
-    if (additional > SIZE_MAX - model->length || model->length + additional == SIZE_MAX)
+    if ((additional > SIZE_MAX - model->length) || (model->length + additional == SIZE_MAX))
     {
         expected.error = AMARK_ERROR_OVERFLOW;
         return expected;
@@ -236,7 +236,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
         expected.error = AMARK_ERROR_OUT_OF_MEMORY;
         return expected;
     }
-    if (model->capacity <= SIZE_MAX / 2 && model->capacity * 2 >= required)
+    if ((model->capacity <= SIZE_MAX / 2) && (model->capacity * 2 >= required))
     {
         expected.capacity = model->capacity * 2;
     }
@@ -258,7 +258,7 @@ static void check_buffer(const amark_buffer_t *buffer, const model_t *model)
     CHECK(length == model->length);
     CHECK(content[length] == '\0');
     CHECK(memcmp(content, model->bytes, length) == 0);
-    CHECK(buffer->data == content && buffer->length == length);
+    CHECK((buffer->data == content) && (buffer->length == length));
     CHECK(buffer->capacity == model->capacity);
     if (buffer->capacity == 0)
     {
@@ -416,7 +416,7 @@ static void run_operation(state_t *state, reader_t *reader)
         char text[256];
         size_t size = read_byte(reader);
         size_t i;
-        for (i = 0; i < size && i < sizeof(text) - 1; i++)
+        for (i = 0; (i < size) && (i < sizeof(text) - 1); i++)
         {
             text[i] = (char)read_byte(reader);
         }
@@ -489,7 +489,7 @@ static void run_operation(state_t *state, reader_t *reader)
         char sentinel = 'x';
         char *detached = &sentinel;
         size_t detached_length = 1;
-        expected.error = model->capacity == 0 && inject ? AMARK_ERROR_OUT_OF_MEMORY
+        expected.error = (model->capacity == 0) && inject ? AMARK_ERROR_OUT_OF_MEMORY
                                                         : AMARK_ERROR_NONE;
         expected.calls = model->capacity == 0 ? 1 : 0;
         RUN(expected, amark_buffer_detach(buffer, &detached, &detached_length));
@@ -505,7 +505,7 @@ static void run_operation(state_t *state, reader_t *reader)
         }
         else
         {
-            CHECK(detached == NULL && detached_length == 0);
+            CHECK((detached == NULL) && (detached_length == 0));
         }
         break;
     }
@@ -669,7 +669,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     model_init(&state.models[1]);
     check_buffer(state.created, &state.models[0]);
     check_buffer(&state.embedded, &state.models[1]);
-    CHECK(amark_buffer_data(NULL)[0] == '\0' && amark_buffer_length(NULL) == 0);
+    CHECK((amark_buffer_data(NULL)[0] == '\0') && (amark_buffer_length(NULL) == 0));
 
     while (reader.position < reader.size)
     {

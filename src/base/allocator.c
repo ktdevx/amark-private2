@@ -46,8 +46,8 @@ amark_error_t amark_allocator_set(const amark_allocator_t *allocator)
         current_allocator = default_allocator;
         return AMARK_ERROR_NONE;
     }
-    if (allocator->malloc_fn == NULL || allocator->calloc_fn == NULL ||
-        allocator->realloc_fn == NULL || allocator->free_fn == NULL)
+    if ((allocator->malloc_fn == NULL) || (allocator->calloc_fn == NULL) ||
+        (allocator->realloc_fn == NULL) || (allocator->free_fn == NULL))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -68,7 +68,7 @@ void *amark_calloc(size_t count, size_t size)
 {
     size_t total;
 
-    if (count == 0 || size == 0)
+    if ((count == 0) || (size == 0))
     {
         return NULL;
     }

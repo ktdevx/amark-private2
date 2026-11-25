@@ -51,13 +51,13 @@ static bool in_ranges(const amark_unicode_range_t *table, size_t count, uint32_t
 /* A surrogate (U+D800..U+DFFF) or a value above U+10FFFF. */
 static bool is_out_of_range(uint32_t codepoint)
 {
-    return codepoint > AMARK_UNICODE_MAX || (codepoint >= 0xD800u && codepoint <= 0xDFFFu);
+    return (codepoint > AMARK_UNICODE_MAX) || ((codepoint >= 0xD800u) && (codepoint <= 0xDFFFu));
 }
 
 bool amark_ascii_is_punctuation(uint32_t codepoint)
 {
-    return (codepoint >= 0x21u && codepoint <= 0x2Fu) || (codepoint >= 0x3Au && codepoint <= 0x40u)
-        || (codepoint >= 0x5Bu && codepoint <= 0x60u) || (codepoint >= 0x7Bu && codepoint <= 0x7Eu);
+    return ((codepoint >= 0x21u) && (codepoint <= 0x2Fu)) || ((codepoint >= 0x3Au) && (codepoint <= 0x40u))
+        || ((codepoint >= 0x5Bu) && (codepoint <= 0x60u)) || ((codepoint >= 0x7Bu) && (codepoint <= 0x7Eu));
 }
 
 bool amark_unicode_is_whitespace(uint32_t codepoint)
@@ -65,8 +65,8 @@ bool amark_unicode_is_whitespace(uint32_t codepoint)
     if (codepoint < 0x80u)
     {
         /* Zs in ASCII is only U+0020. */
-        return codepoint == 0x20u || codepoint == 0x09u || codepoint == 0x0Au || codepoint == 0x0Cu
-            || codepoint == 0x0Du;
+        return (codepoint == 0x20u) || (codepoint == 0x09u) || (codepoint == 0x0Au) || (codepoint == 0x0Cu)
+            || (codepoint == 0x0Du);
     }
     if (is_out_of_range(codepoint))
     {

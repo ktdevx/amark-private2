@@ -29,12 +29,12 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
         *out_valid = true;
         return 1;
     }
-    if (lead >= 0xC2 && lead <= 0xDF)
+    if ((lead >= 0xC2) && (lead <= 0xDF))
     {
         needed = 2;
         cp = lead & 0x1Fu;
     }
-    else if (lead >= 0xE0 && lead <= 0xEF)
+    else if ((lead >= 0xE0) && (lead <= 0xEF))
     {
         needed = 3;
         cp = lead & 0x0Fu;
@@ -47,7 +47,7 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
             high = 0x9F; /* no surrogates */
         }
     }
-    else if (lead >= 0xF0 && lead <= 0xF4)
+    else if ((lead >= 0xF0) && (lead <= 0xF4))
     {
         needed = 4;
         cp = lead & 0x07u;
@@ -70,7 +70,7 @@ static size_t decode_one(const unsigned char *s, size_t length, uint32_t *out_co
 
     for (i = 1; i < needed; i++)
     {
-        if (i >= length || s[i] < low || s[i] > high)
+        if ((i >= length) || (s[i] < low) || (s[i] > high))
         {
             *out_codepoint = AMARK_UTF8_REPLACEMENT;
             *out_valid = false;
@@ -96,7 +96,7 @@ size_t amark_utf8_decode(const char *text, size_t length, uint32_t *out_codepoin
     bool valid;
     size_t n;
 
-    if (text == NULL || length == 0)
+    if ((text == NULL) || (length == 0))
     {
         return 0;
     }
@@ -123,12 +123,12 @@ size_t amark_utf8_decode_before(const char *text, size_t position, uint32_t *out
     uint32_t cp = AMARK_UTF8_REPLACEMENT;
     size_t n = 1;
 
-    if (text == NULL || position == 0)
+    if ((text == NULL) || (position == 0))
     {
         return 0;
     }
     start = position - 1;
-    while (start > 0 && position - start < AMARK_UTF8_MAX_LENGTH && is_continuation(s[start]))
+    while ((start > 0) && (position - start < AMARK_UTF8_MAX_LENGTH) && is_continuation(s[start]))
     {
         start--;
     }
@@ -156,7 +156,7 @@ bool amark_utf8_validate(const char *text, size_t length, size_t *out_error_offs
     const unsigned char *s = (const unsigned char *)text;
     size_t offset = 0;
 
-    if (text == NULL && length != 0)
+    if ((text == NULL) && (length != 0))
     {
         if (out_error_offset != NULL)
         {
@@ -199,7 +199,7 @@ size_t amark_utf8_encode(uint32_t codepoint, char out[AMARK_UTF8_MAX_LENGTH])
     {
         return 0;
     }
-    if ((codepoint >= 0xD800u && codepoint <= 0xDFFFu) || codepoint > 0x10FFFFu)
+    if (((codepoint >= 0xD800u) && (codepoint <= 0xDFFFu)) || (codepoint > 0x10FFFFu))
     {
         codepoint = AMARK_UTF8_REPLACEMENT;
     }

@@ -42,7 +42,7 @@ int main(void)
     check(amark_version_number() == AMARK_VERSION_NUMBER,
           "amark_version_number() equals AMARK_VERSION_NUMBER");
 
-    if (amark_buffer_create(&buffer) != AMARK_ERROR_NONE || buffer == NULL)
+    if ((amark_buffer_create(&buffer) != AMARK_ERROR_NONE) || (buffer == NULL))
     {
         fprintf(stderr, "amark_consumer: amark_buffer_create failed\n");
         return 1;

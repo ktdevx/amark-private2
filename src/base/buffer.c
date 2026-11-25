@@ -62,7 +62,7 @@ static amark_error_t ensure_room(amark_buffer_t *buffer, size_t additional)
     {
         return AMARK_ERROR_NONE;
     }
-    if (!amark_size_mul(buffer->capacity, 2, &new_capacity) || new_capacity < required)
+    if (!amark_size_mul(buffer->capacity, 2, &new_capacity) || (new_capacity < required))
     {
         new_capacity = required;
     }
@@ -96,7 +96,7 @@ static int points_into(const amark_buffer_t *buffer, const void *data)
     uintptr_t start = (uintptr_t)buffer->data;
     uintptr_t p = (uintptr_t)data;
 
-    return buffer->capacity > 0 && p >= start && p - start < buffer->capacity;
+    return (buffer->capacity > 0) && (p >= start) && (p - start < buffer->capacity);
 }
 
 amark_error_t amark_buffer_create(amark_buffer_t **out_buffer)
@@ -160,7 +160,7 @@ amark_error_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size
     amark_error_t err;
     const char *source = data;
 
-    if (buffer == NULL || (data == NULL && size != 0))
+    if ((buffer == NULL) || ((data == NULL) && (size != 0)))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -226,7 +226,7 @@ amark_error_t amark_buffer_append_repeat(amark_buffer_t *buffer, unsigned char b
 
 amark_error_t amark_buffer_append_cstr(amark_buffer_t *buffer, const char *text)
 {
-    if (buffer == NULL || text == NULL)
+    if ((buffer == NULL) || (text == NULL))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -248,7 +248,7 @@ amark_error_t amark_buffer_append_codepoint(amark_buffer_t *buffer, uint32_t cod
 
 amark_error_t amark_buffer_truncate(amark_buffer_t *buffer, size_t length)
 {
-    if (buffer == NULL || length > buffer->length)
+    if ((buffer == NULL) || (length > buffer->length))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -273,7 +273,7 @@ amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_
 {
     char *data;
 
-    if (buffer == NULL || out_data == NULL || out_length == NULL)
+    if ((buffer == NULL) || (out_data == NULL) || (out_length == NULL))
     {
         if (out_data != NULL)
         {

@@ -55,7 +55,7 @@ static exact_t exact_copy(const char *bytes, size_t size)
 /* Frees the copy and returns 1 when the input was changed (or not allocated). */
 static int exact_release(exact_t *e, const char *original)
 {
-    int changed = e->block == NULL || (e->size > 0 && memcmp(e->text, original, e->size) != 0);
+    int changed = (e->block == NULL) || ((e->size > 0) && (memcmp(e->text, original, e->size) != 0));
 
     free(e->block);
     e->block = NULL;
@@ -95,13 +95,13 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
         size_t n = amark_utf8_decode(e.text + offset, size - offset, &cp);
         size_t n_without_out = amark_utf8_decode(e.text + offset, size - offset, NULL);
 
-        if (n == 0 || n > AMARK_UTF8_MAX_LENGTH || n > size - offset || n != n_without_out)
+        if ((n == 0) || (n > AMARK_UTF8_MAX_LENGTH) || (n > size - offset) || (n != n_without_out))
         {
             NAOS_CHECK_UINT_EQ(i < count ? expected[i].length : 0, n);
             failures++;
             break;
         }
-        if (i >= count || expected[i].codepoint != cp || expected[i].length != n)
+        if ((i >= count) || (expected[i].codepoint != cp) || (expected[i].length != n))
         {
             NAOS_CHECK_UINT_EQ(i < count ? expected[i].codepoint : 0xFFFFFFFFu, cp);
             NAOS_CHECK_UINT_EQ(i < count ? expected[i].length : 0, n);
@@ -119,13 +119,13 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
     /* Backward from the end: the same characters in reverse order (13.3). */
     offset = size;
     i = count;
-    while (offset > 0 && i > 0)
+    while ((offset > 0) && (i > 0))
     {
         uint32_t cp = 0x12345678u;
         size_t n = amark_utf8_decode_before(e.text, offset, &cp);
 
         i--;
-        if (n != expected[i].length || cp != expected[i].codepoint)
+        if ((n != expected[i].length) || (cp != expected[i].codepoint))
         {
             NAOS_CHECK_UINT_EQ(expected[i].codepoint, cp);
             NAOS_CHECK_UINT_EQ(expected[i].length, n);
@@ -139,7 +139,7 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
         }
         offset -= n;
     }
-    if (offset != 0 || i != 0)
+    if ((offset != 0) || (i != 0))
     {
         NAOS_CHECK_UINT_EQ(0, offset);
         failures++;
@@ -454,12 +454,12 @@ static int check_properties(const char *text, size_t size)
         size_t n = amark_utf8_decode(text + offset, size - offset, &cp);
         size_t m;
 
-        if (n == 0 || n > AMARK_UTF8_MAX_LENGTH || n > size - offset)
+        if ((n == 0) || (n > AMARK_UTF8_MAX_LENGTH) || (n > size - offset))
         {
             return 1;
         }
         m = amark_utf8_encode(cp, encoded);
-        if (first_invalid == size && (m != n || memcmp(encoded, text + offset, n) != 0))
+        if ((first_invalid == size) && ((m != n) || (memcmp(encoded, text + offset, n) != 0)))
         {
             if (cp != R)
             {
@@ -477,13 +477,13 @@ static int check_properties(const char *text, size_t size)
         size_t start = i > 1 ? boundaries[i - 2] : 0;
         size_t n = amark_utf8_decode_before(text, boundaries[i - 1], &cp);
 
-        if (n != boundaries[i - 1] - start || cp != codepoints[i - 1])
+        if ((n != boundaries[i - 1] - start) || (cp != codepoints[i - 1]))
         {
             return 3;
         }
     }
     valid = amark_utf8_validate(text, size, &validate_offset);
-    if (valid != (first_invalid == size) || validate_offset != first_invalid)
+    if ((valid != (first_invalid == size)) || (validate_offset != first_invalid))
     {
         return 4;
     }
@@ -638,14 +638,14 @@ NAOS_TEST(every_code_point_round_trips)
         size_t n = amark_utf8_encode(cp, out);
         size_t expected = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
 
-        if (cp >= 0xD800 && cp <= 0xDFFF)
+        if ((cp >= 0xD800) && (cp <= 0xDFFF))
         {
-            failures += n != 3 || memcmp(out, "\xEF\xBF\xBD", 3) != 0;
+            failures += (n != 3) || (memcmp(out, "\xEF\xBF\xBD", 3) != 0);
             continue;
         }
         failures += n != expected;
-        failures += amark_utf8_decode(out, n, &decoded) != n || decoded != cp;
-        failures += amark_utf8_decode_before(out, n, &before) != n || before != cp;
+        failures += (amark_utf8_decode(out, n, &decoded) != n) || (decoded != cp);
+        failures += (amark_utf8_decode_before(out, n, &before) != n) || (before != cp);
         failures += !amark_utf8_validate(out, n, NULL);
     }
     NAOS_CHECK_INT_EQ(0, failures);

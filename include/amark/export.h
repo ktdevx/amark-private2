@@ -30,7 +30,7 @@
 #  else
 #    define AMARK_API
 #  endif
-#elif defined(__GNUC__) && __GNUC__ >= 4
+#elif defined(__GNUC__) && (__GNUC__ >= 4)
 #  define AMARK_API __attribute__((visibility("default")))
 #else
 #  define AMARK_API
