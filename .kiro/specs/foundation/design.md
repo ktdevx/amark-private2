@@ -787,7 +787,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
     "." AMARK_VERSION_STRINGIFY(AMARK_VERSION_MINOR) \
     "." AMARK_VERSION_STRINGIFY(AMARK_VERSION_PATCH) /* "0.1.0" */
 #define AMARK_VERSION_ENCODE(major, minor, patch) \
-    ((long)(major) * 1000000L + (long)(minor) * 1000L + (long)(patch))
+    ((major) * 1000000L + (minor) * 1000L + (patch)) /* キャストを使わないので #if でも使える */
 #define AMARK_VERSION_NUMBER \
     AMARK_VERSION_ENCODE(AMARK_VERSION_MAJOR, AMARK_VERSION_MINOR, AMARK_VERSION_PATCH)
 

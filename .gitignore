@@ -1,0 +1,8 @@
+# ビルドディレクトリ
+/build*/
+/out/
+
+# IDE とツールが作るファイル
+/.vs/
+/.cache/
+/CMakeUserPresets.json

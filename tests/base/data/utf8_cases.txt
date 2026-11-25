@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) The Amark Authors
+#
+# The UTF-8 test vectors of amark_utf8_decode (13.1, 13.2). gen_utf8_cases.cmake
+# turns every data line into one test of the suite utf8_cases_test_utf8_cases.
+#
+# A data line is
+#   <name> | <input> | <expected>
+# <name>      the test name: [a-z_][a-z0-9_]*, unique in this file.
+# <input>     the input bytes, as two hexadecimal digits each, separated by spaces
+#             (at least one byte).
+# <expected>  what decoding the input from its start, one character after the
+#             other, gives: U+<code point>/<consumed bytes> for each character,
+#             separated by spaces. The consumed bytes add up to the input length.
+# Lines that start with "#" and empty lines are ignored. A data line holds only
+# printable ASCII other than ";", "[", "]", "\" and '"'.
+#
+# The expectations follow the Unicode Standard, chapter 3, section 3.9: the
+# well-formed sequences of Table 3-7, and for an ill-formed sequence one U+FFFD
+# for each maximal subpart (the longest initial part of a well-formed sequence,
+# or else one byte). A byte that can never start a well-formed sequence (80-C1,
+# F5-FF) is a maximal subpart of one byte by itself.
+
+# --- Well-formed: the boundaries of each length (Table 3-7) ---
+one_byte_nul           | 00          | U+0000/1
+one_byte_letter        | 41          | U+0041/1
+one_byte_max           | 7f          | U+007F/1
+two_byte_min           | c2 80       | U+0080/2
+two_byte_latin         | c3 a9       | U+00E9/2
+two_byte_max           | df bf       | U+07FF/2
+three_byte_min         | e0 a0 80    | U+0800/3
+three_byte_e0_max      | e0 bf bf    | U+0FFF/3
+three_byte_e1_min      | e1 80 80    | U+1000/3
+three_byte_ec_max      | ec bf bf    | U+CFFF/3
+three_byte_ed_min      | ed 80 80    | U+D000/3
+three_byte_before_surrogates | ed 9f bf | U+D7FF/3
+three_byte_after_surrogates  | ee 80 80 | U+E000/3
+three_byte_bom         | ef bb bf    | U+FEFF/3
+three_byte_replacement | ef bf bd    | U+FFFD/3
+three_byte_max         | ef bf bf    | U+FFFF/3
+four_byte_min          | f0 90 80 80 | U+10000/4
+four_byte_f0_max       | f0 bf bf bf | U+3FFFF/4
+four_byte_f1_min       | f1 80 80 80 | U+40000/4
+four_byte_f3_max       | f3 bf bf bf | U+FFFFF/4
+four_byte_f4_min       | f4 80 80 80 | U+100000/4
+four_byte_max          | f4 8f bf bf | U+10FFFF/4
+mixed_lengths          | 41 c3 a9 e6 97 a5 f0 9f 98 80 | U+0041/1 U+00E9/2 U+65E5/3 U+1F600/4
+embedded_nul           | 41 00 42    | U+0041/1 U+0000/1 U+0042/1
+
+# --- Overlong forms: C0, C1 never start a sequence; E0 needs A0-BF, F0 90-BF ---
+overlong_two_byte_nul  | c0 80       | U+FFFD/1 U+FFFD/1
+overlong_two_byte_slash | c0 af      | U+FFFD/1 U+FFFD/1
+overlong_two_byte_max  | c1 bf       | U+FFFD/1 U+FFFD/1
+overlong_three_byte_nul | e0 80 80   | U+FFFD/1 U+FFFD/1 U+FFFD/1
+overlong_three_byte_max | e0 9f bf   | U+FFFD/1 U+FFFD/1 U+FFFD/1
+overlong_four_byte_nul | f0 80 80 80 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+overlong_four_byte_max | f0 8f bf bf | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+overlong_five_byte     | f8 88 80 80 80 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+overlong_six_byte      | fc 84 80 80 80 80 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+
+# --- Surrogates: ED needs 80-9F ---
+surrogate_high_min     | ed a0 80    | U+FFFD/1 U+FFFD/1 U+FFFD/1
+surrogate_high_max     | ed af bf    | U+FFFD/1 U+FFFD/1 U+FFFD/1
+surrogate_low_min      | ed b0 80    | U+FFFD/1 U+FFFD/1 U+FFFD/1
+surrogate_low_max      | ed bf bf    | U+FFFD/1 U+FFFD/1 U+FFFD/1
+surrogate_pair_cesu    | ed a0 bd ed b8 80 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+surrogate_truncated    | ed a0       | U+FFFD/1 U+FFFD/1
+
+# --- Above U+10FFFF: F4 needs 80-8F; F5-F7 never start a sequence ---
+above_max_f4_90        | f4 90 80 80 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+above_max_f4_bf        | f4 bf bf bf | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+above_max_f5           | f5 80 80 80 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+above_max_f7           | f7 bf bf bf | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1
+above_max_truncated    | f4 90       | U+FFFD/1 U+FFFD/1
+
+# --- Bytes that never appear in UTF-8 ---
+invalid_lead_f8        | f8          | U+FFFD/1
+invalid_lead_fe        | fe          | U+FFFD/1
+invalid_lead_ff        | ff          | U+FFFD/1
+invalid_lead_ff_then_letter | ff 41  | U+FFFD/1 U+0041/1
+
+# --- Truncated sequences: the maximal subpart is replaced as one ---
+truncated_two_byte_at_end   | c2       | U+FFFD/1
+truncated_two_byte_before_letter | c2 41 | U+FFFD/1 U+0041/1
+truncated_two_byte_before_ascii_max | c2 7f | U+FFFD/1 U+007F/1
+truncated_two_byte_before_lead | c2 c0 | U+FFFD/1 U+FFFD/1
+truncated_three_byte_lead_only | e1  | U+FFFD/1
+truncated_three_byte_e0     | e0 a0    | U+FFFD/2
+truncated_three_byte_e1     | e1 80    | U+FFFD/2
+truncated_three_byte_ed     | ed 9f    | U+FFFD/2
+truncated_three_byte_ef     | ef bf    | U+FFFD/2
+truncated_three_byte_before_letter | e0 a0 41 | U+FFFD/2 U+0041/1
+truncated_three_byte_before_lead | e0 a0 c0 | U+FFFD/2 U+FFFD/1
+truncated_three_byte_before_three_byte | e1 80 e2 82 ac | U+FFFD/2 U+20AC/3
+truncated_four_byte_lead_only | f1   | U+FFFD/1
+truncated_four_byte_f0_two  | f0 90    | U+FFFD/2
+truncated_four_byte_f0_three | f0 90 80 | U+FFFD/3
+truncated_four_byte_f1_two  | f1 80    | U+FFFD/2
+truncated_four_byte_f3_three | f3 bf bf | U+FFFD/3
+truncated_four_byte_f4_three | f4 8f bf | U+FFFD/3
+truncated_four_byte_before_letter | f0 90 80 41 | U+FFFD/3 U+0041/1
+truncated_four_byte_before_four_byte | f1 80 80 f0 90 80 80 | U+FFFD/3 U+10000/4
+
+# --- Lone continuation bytes ---
+lone_continuation_min       | 80       | U+FFFD/1
+lone_continuation_max       | bf       | U+FFFD/1
+lone_continuations          | 80 bf 80 | U+FFFD/1 U+FFFD/1 U+FFFD/1
+continuation_after_two_byte | c3 a9 a9 | U+00E9/2 U+FFFD/1
+continuation_after_four_byte | f4 8f bf bf 80 | U+10FFFF/4 U+FFFD/1
+continuation_between_letters | 41 80 42 | U+0041/1 U+FFFD/1 U+0042/1
+
+# --- The examples of the Unicode Standard, section 3.9 (U+FFFD substitution) ---
+unicode_example_truncated   | 61 f1 80 80 e1 80 c2 62 80 63 80 bf 64 | U+0061/1 U+FFFD/3 U+FFFD/2 U+FFFD/1 U+0062/1 U+FFFD/1 U+0063/1 U+FFFD/1 U+FFFD/1 U+0064/1
+unicode_example_non_shortest | c0 af e0 80 bf f0 81 82 41 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+0041/1
+unicode_example_surrogates  | ed a0 80 ed bf bf ed af 41 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+0041/1
+unicode_example_above_max   | f4 91 92 93 ff 41 80 bf 42 | U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+FFFD/1 U+0041/1 U+FFFD/1 U+FFFD/1 U+0042/1
+unicode_example_mixed       | e1 80 e2 f0 91 92 f1 bf 41 | U+FFFD/2 U+FFFD/1 U+FFFD/3 U+FFFD/2 U+0041/1
