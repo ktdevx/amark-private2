@@ -172,3 +172,9 @@
 - [Unicode Standard Chapter 3, U+FFFD Substitution of Maximal Subparts](https://www.unicode.org/versions/latest/core-spec/chapter-3/) — 不正な UTF-8 の置き換え
 - [Building a Dual Shared and Static Library with CMake](https://alexreinking.com/blog/building-a-dual-shared-and-static-library-with-cmake.html) — 静的版・動的版を並べるパッケージ設定
 - [libFuzzer](https://llvm.org/docs/LibFuzzer.html) — ファジングの入口と実行の方法
+
+### 2026-11-25：エラーコードの定義を X マクロにする
+- **Context**：`amark_error_t` の列挙と `amark_error_string` の説明が別の場所にあり、二重の管理になっていた。
+- **Selected Approach**：`X(AMARK_ERROR_NONE, "no error")` の形の一覧 `AMARK_ERROR_LIST` から、列挙と説明の両方を展開する。名前を完全な形で書くので、検索で定義が見つかる。値は明示せず、一覧の順で決める。具体的な値は重要ではないため。
+- **Alternatives**：値を引数に持つ `X(NONE, 0, "no error")` は、`##` による組み立てで検索に掛からず、重要でない値を書くことになるので採らなかった。列挙と、`default` のない `switch` を別々に書く案は、二重の管理が残るので採らなかった。
+- **Trade-offs**：途中への挿入や並べ替えで値が黙って変わりうる。末尾にだけ追加する規則と、値を直接検査するテスト（10.7）で防ぐ。期待値は一覧から生成せず、テストに直接書く。要件と各コードの値は変わらない。

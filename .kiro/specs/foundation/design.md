@@ -804,21 +804,28 @@ AMARK_API const char *amark_version_string(void); /* 静的な文字列。解放
 
 **Contracts**: Service [x]
 ```c
+/* include/amark/error.h — エラーコードと説明の唯一の定義。新しいコードは末尾にだけ足す */
+#define AMARK_ERROR_LIST(X)                                                               \
+    X(AMARK_ERROR_NONE, "no error")                                                       \
+    X(AMARK_ERROR_OUT_OF_MEMORY, "out of memory")        /* アロケータが確保に失敗した */ \
+    X(AMARK_ERROR_INVALID_ARGUMENT, "invalid argument")  /* NULL の必須引数、範囲外の値、不完全なアロケータ */ \
+    X(AMARK_ERROR_OVERFLOW, "overflow")                  /* サイズの計算が size_t を超える */ \
+    X(AMARK_ERROR_LIMIT_EXCEEDED, "limit exceeded")      /* 文書化された上限（入れ子の深さなど）を超えた */ \
+    X(AMARK_ERROR_INVALID_STATE, "invalid state")        /* オブジェクトの状態がその操作を許さない */ \
+    X(AMARK_ERROR_UNREPRESENTABLE, "unrepresentable")    /* 対象を要求された形式で意味を変えずに表せない（例：Markdown の出力） */
+
 typedef enum amark_error {
-    AMARK_ERROR_NONE = 0,
-    AMARK_ERROR_OUT_OF_MEMORY = 1,     /* アロケータが確保に失敗した */
-    AMARK_ERROR_INVALID_ARGUMENT = 2,  /* NULL の必須引数、範囲外の値、不完全なアロケータ */
-    AMARK_ERROR_OVERFLOW = 3,          /* サイズの計算が size_t を超える */
-    AMARK_ERROR_LIMIT_EXCEEDED = 4,    /* 文書化された上限（入れ子の深さなど）を超えた */
-    AMARK_ERROR_INVALID_STATE = 5,     /* オブジェクトの状態がその操作を許さない */
-    AMARK_ERROR_UNREPRESENTABLE = 6    /* 対象を要求された形式で意味を変えずに表せない（例：Markdown の出力） */
+#define AMARK_ERROR_ENUM(name, text) name,
+    AMARK_ERROR_LIST(AMARK_ERROR_ENUM)
+#undef AMARK_ERROR_ENUM
 } amark_error_t;
 
 AMARK_API const char *amark_error_string(amark_error_t error);
-/* 例："out of memory"、"unrepresentable"。未知の値には "unknown error"。静的な文字列で、NULL を返さない */
+/* AMARK_ERROR_LIST の説明を返す。未知の値には "unknown error"。静的な文字列で、NULL を返さない */
 ```
-- 値は固定し、変更しない。新しいコードは末尾に追加する（追加は Revalidation Trigger）。利用者は未知の非 0 の値を一般的な失敗として扱う。
-- `AMARK_ERROR_UNREPRESENTABLE`（10.9）は 2026-11-25 に `markdown-renderer` の依頼で追加した。0–5 の次の空き値 6 を使う。説明の文字列は `"unrepresentable"`。共通ランタイム自身はこのコードを返さない。どの操作がいつ返すか（`amark_markdown_render` など）と、理由の報告は、返す spec が定める。
+- コードと説明は `AMARK_ERROR_LIST` の X マクロで 1 か所に定義する。検索で定義が見つかるように、名前は `##` で組み立てず完全な形で書く。`amark_error_string` は `error.c` の `switch` に同じ一覧を `case name: return text;` として展開し、`switch` の後で `"unknown error"` を返す（`default` は書かない）。
+- 値は明示せず、一覧の順で決まる（先頭の `AMARK_ERROR_NONE` が 0）。具体的な値に意味はなく、利用者は名前で比較する。既存の値を変えない（10.7）ため、並べ替え、途中への挿入、削除をせず、新しいコードは末尾に追加する（追加は Revalidation Trigger）。利用者は未知の非 0 の値を一般的な失敗として扱う。
+- `AMARK_ERROR_UNREPRESENTABLE`（10.9）は 2026-11-25 に `markdown-renderer` の依頼で追加した。一覧の末尾（値は 6）に置く。説明の文字列は `"unrepresentable"`。共通ランタイム自身はこのコードを返さない。どの操作がいつ返すか（`amark_markdown_render` など）と、理由の報告は、返す spec が定める。
 
 #### Allocator
 
