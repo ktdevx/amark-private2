@@ -51,18 +51,25 @@ NAOS_TEST(counts_calls_blocks_and_bytes)
     size_t calls;
     size_t peak;
 
-    if (p != NULL) {
+    if (p != NULL)
+    {
         memcpy(p, "0123456789", 10);
     }
-    if (z != NULL) {
-        for (i = 0; i < 20; i++) {
-            zeroed = zeroed && z[i] == 0;
+
+    if (z != NULL)
+    {
+        for (i = 0; i < 20; i++)
+        {
+            zeroed = zeroed && (z[i] == 0);
         }
     }
+
     q = amark_realloc(p, 100);
+
     blocks_before_free = t.live_blocks;
     peak = t.peak_bytes;
     calls = t.calls;
+
     amark_free(z);
     amark_free(q);
     amark_allocator_set(NULL);
@@ -91,22 +98,30 @@ NAOS_TEST(realloc_keeps_contents_and_shrinks_bytes)
     size_t bytes_after_grow = 0;
     size_t bytes_after_shrink = 0;
 
-    if (p != NULL) {
+    if (p != NULL)
+    {
         memcpy(p, "abcdefgh", 8);
         q = amark_realloc(p, 4096);
         bytes_after_grow = t.live_bytes;
     }
-    if (q != NULL) {
+
+    if (q != NULL)
+    {
         p = q;
         q = amark_realloc(p, 3);
         bytes_after_shrink = t.live_bytes;
     }
-    if (q != NULL) {
+
+    if (q != NULL)
+    {
         kept = memcmp(q, "abc", 3) == 0;
         amark_free(q);
-    } else {
+    }
+    else
+    {
         amark_free(p);
     }
+
     amark_allocator_set(NULL);
 
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, set);
@@ -126,9 +141,11 @@ NAOS_TEST(fail_at_fails_only_that_malloc)
 
     use_test_allocator();
     t.fail_at = 2;
+
     a = amark_malloc(1);
     b = amark_malloc(1);
     c = amark_malloc(1);
+
     amark_free(a);
     amark_free(c);
     amark_allocator_set(NULL);
@@ -147,7 +164,9 @@ NAOS_TEST(fail_at_fails_calloc)
 
     use_test_allocator();
     t.fail_at = 1;
+
     z = amark_calloc(2, 2);
+
     amark_allocator_set(NULL);
 
     NAOS_CHECK_NULL(z);
@@ -166,14 +185,18 @@ NAOS_TEST(fail_at_fails_realloc_and_keeps_the_block)
 
     use_test_allocator();
     t.fail_at = 2;
+
     p = amark_malloc(4);
-    if (p != NULL) {
+    if (p != NULL)
+    {
         memcpy(p, "wxyz", 4);
         q = amark_realloc(p, 1000);
         kept = memcmp(p, "wxyz", 4) == 0;
     }
+
     blocks = t.live_blocks;
     bytes = t.live_bytes;
+
     amark_free(q != NULL ? q : p);
     amark_allocator_set(NULL);
 
@@ -193,13 +216,18 @@ NAOS_TEST(fail_at_zero_never_fails)
     int all = 1;
 
     use_test_allocator();
-    for (i = 0; i < 5; i++) {
+
+    for (i = 0; i < 5; i++)
+    {
         p[i] = amark_malloc(i + 1);
-        all = all && p[i] != NULL;
+        all = all && (p[i] != NULL);
     }
-    for (i = 0; i < 5; i++) {
+
+    for (i = 0; i < 5; i++)
+    {
         amark_free(p[i]);
     }
+
     amark_allocator_set(NULL);
 
     NAOS_CHECK_TRUE(all);
@@ -216,13 +244,16 @@ NAOS_TEST(reset_counters_keeps_the_live_blocks)
 
     use_test_allocator();
     t.fail_at = 1;
+
     a = amark_malloc(5);   /* fails */
     a = amark_malloc(100);
     b = amark_malloc(7);
     amark_free(a);
+
     amark_test_allocator_reset_counters(&t);
     live_blocks = t.live_blocks;
     live_bytes = t.live_bytes;
+
     amark_free(b);
     amark_allocator_set(NULL);
 
@@ -273,6 +304,7 @@ static amark_error_t recording_set(const amark_allocator_t *allocator)
 {
     set_calls++;
     last_set = allocator;
+
     return amark_allocator_set(allocator);
 }
 
@@ -284,23 +316,31 @@ static amark_error_t correct_scenario(void *context)
     void *c;
 
     (void)context;
+
     a = amark_malloc(10);
-    if (a == NULL) {
+    if (a == NULL)
+    {
         return AMARK_ERROR_OUT_OF_MEMORY;
     }
+
     b = amark_calloc(3, 4);
-    if (b == NULL) {
+    if (b == NULL)
+    {
         amark_free(a);
         return AMARK_ERROR_OUT_OF_MEMORY;
     }
+
     c = amark_realloc(a, 100);
-    if (c == NULL) {
+    if (c == NULL)
+    {
         amark_free(a);
         amark_free(b);
         return AMARK_ERROR_OUT_OF_MEMORY;
     }
+
     amark_free(b);
     amark_free(c);
+
     return AMARK_ERROR_NONE;
 }
 
@@ -311,16 +351,22 @@ static amark_error_t leaking_scenario(void *context)
     void *b;
 
     (void)context;
+
     a = amark_malloc(10);
-    if (a == NULL) {
+    if (a == NULL)
+    {
         return AMARK_ERROR_OUT_OF_MEMORY;
     }
+
     b = amark_malloc(20);
-    if (b == NULL) {
+    if (b == NULL)
+    {
         return AMARK_ERROR_OUT_OF_MEMORY; /* a leaks */
     }
+
     amark_free(a);
     amark_free(b);
+
     return AMARK_ERROR_NONE;
 }
 
@@ -330,10 +376,13 @@ static amark_error_t leaking_on_success_scenario(void *context)
     void *a;
 
     (void)context;
+
     a = amark_malloc(10);
-    if (a == NULL) {
+    if (a == NULL)
+    {
         return AMARK_ERROR_OUT_OF_MEMORY;
     }
+
     return AMARK_ERROR_NONE; /* a leaks */
 }
 
@@ -344,17 +393,23 @@ static amark_error_t wrong_error_scenario(void *context)
     void *b;
 
     (void)context;
+
     a = amark_malloc(10);
-    if (a == NULL) {
+    if (a == NULL)
+    {
         return AMARK_ERROR_OUT_OF_MEMORY;
     }
+
     b = amark_malloc(20);
-    if (b == NULL) {
+    if (b == NULL)
+    {
         amark_free(a);
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+
     amark_free(a);
     amark_free(b);
+
     return AMARK_ERROR_NONE;
 }
 
@@ -369,6 +424,7 @@ static amark_error_t failing_scenario(void *context)
 static amark_error_t no_allocation_scenario(void *context)
 {
     int *runs = context;
+
     (*runs)++;
     return AMARK_ERROR_NONE;
 }
@@ -379,13 +435,17 @@ static amark_error_t many_allocations_scenario(void *context)
     size_t count = *(const size_t *)context;
     size_t i;
 
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < count; i++)
+    {
         void *p = amark_malloc(1);
-        if (p == NULL) {
+        if (p == NULL)
+        {
             return AMARK_ERROR_OUT_OF_MEMORY;
         }
+
         amark_free(p);
     }
+
     return AMARK_ERROR_NONE;
 }
 
@@ -416,6 +476,7 @@ NAOS_TEST(sweep_sets_the_allocator_each_run_and_restores_the_default)
     NAOS_CHECK_UINT_EQ(3, r.iterations);
     NAOS_CHECK_UINT_GE(set_calls, 5);
     NAOS_CHECK_NULL(last_set);
+
     /* The default allocator is set again: its memory can go to free(). */
     p = amark_malloc(8);
     NAOS_CHECK_NOT_NULL(p);

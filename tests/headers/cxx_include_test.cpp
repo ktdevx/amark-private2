@@ -41,17 +41,20 @@ NAOS_TEST(buffer_appends_and_detaches)
 
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&buffer));
     NAOS_REQUIRE_NOT_NULL(buffer);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(buffer, "C++"));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(buffer, ' '));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(buffer, "ok", 2));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(buffer, 0x00E9u));
     NAOS_CHECK_UINT_EQ(8, amark_buffer_length(buffer));
     NAOS_CHECK_INT_EQ(0, std::memcmp(amark_buffer_data(buffer), "C++ ok\xC3\xA9", 9));
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_detach(buffer, &data, &length));
     amark_buffer_destroy(buffer);
     NAOS_REQUIRE_NOT_NULL(data);
     NAOS_CHECK_UINT_EQ(8, length);
     NAOS_CHECK_STR_EQ("C++ ok\xC3\xA9", data);
+
     amark_free(data);
 }
 
@@ -61,6 +64,7 @@ NAOS_TEST(allocator_functions_link)
 
     NAOS_CHECK_NOT_NULL(block);
     amark_free(block);
+
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_allocator_set(NULL));
 }
 
@@ -73,6 +77,7 @@ NAOS_TEST(utf8_and_unicode_functions_link)
     NAOS_CHECK_UINT_EQ(2, amark_utf8_decode(out, 2, &codepoint));
     NAOS_CHECK_UINT_EQ(0x00E9u, codepoint);
     NAOS_CHECK_TRUE(amark_utf8_validate(out, 2, NULL));
+
     NAOS_CHECK_TRUE(amark_unicode_is_whitespace(0x3000u));
     NAOS_CHECK_TRUE(amark_unicode_is_punctuation(0x00A1u));
     NAOS_CHECK_TRUE(amark_ascii_is_punctuation('!'));

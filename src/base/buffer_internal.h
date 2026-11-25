@@ -18,7 +18,8 @@
  * length is 0 and data points to a static, read-only "" that is never written to
  * nor freed.
  */
-struct amark_buffer {
+struct amark_buffer
+{
     char *data;
     size_t length;
     size_t capacity;

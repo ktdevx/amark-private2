@@ -58,7 +58,8 @@ AMARK_BEGIN_DECLS
  * are never added, removed, reordered or retyped. All four callbacks are
  * required.
  */
-typedef struct amark_allocator {
+typedef struct amark_allocator
+{
     void *(*malloc_fn)(size_t size);
     void *(*calloc_fn)(size_t count, size_t size);
     void *(*realloc_fn)(void *ptr, size_t new_size);

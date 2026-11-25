@@ -25,7 +25,8 @@ NAOS_TEARDOWN(restore)
 }
 
 /* An internal structure that embeds two buffers by value. */
-typedef struct holder {
+typedef struct holder
+{
     int tag;
     amark_buffer_t first;
     amark_buffer_t second;
@@ -38,7 +39,9 @@ NAOS_TEST(init_gives_an_empty_buffer_without_allocating)
     amark_test_allocator_init(&counting);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
                         amark_allocator_set(amark_test_allocator_activate(&counting)));
+
     amark_buffer_init(&h.first);
+
     amark_allocator_set(NULL);
 
     NAOS_CHECK_UINT_EQ(0, counting.calls);
@@ -48,6 +51,7 @@ NAOS_TEST(init_gives_an_empty_buffer_without_allocating)
     NAOS_CHECK_INT_EQ(0, h.first.data[0]);
     NAOS_CHECK_NOT_NULL(amark_buffer_data(&h.first));
     AMARK_CHECK_BUFFER_EQ(&h.first, "");
+
     /* Deinit of a buffer that never allocated frees nothing. */
     amark_buffer_deinit(&h.first);
 }
@@ -63,6 +67,7 @@ NAOS_TEST(embedded_buffers_work_with_the_public_functions)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(&h.first, "a\0b", 3));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(&h.second, 'z', 100));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_codepoint(&h.first, 0x3042));
+
     AMARK_CHECK_BUFFER_EQ(&h.first, "a\0b\xE3\x81\x82");
     NAOS_CHECK_UINT_EQ(6, h.first.length);
     NAOS_CHECK_UINT_GT(h.first.capacity, h.first.length);
@@ -83,10 +88,13 @@ NAOS_TEST(deinit_frees_the_content_and_leaves_an_empty_buffer)
     amark_test_allocator_init(&counting);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
                         amark_allocator_set(amark_test_allocator_activate(&counting)));
+
     amark_buffer_init(&h.first);
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(&h.first, "content"));
+
     live_before_deinit = counting.live_blocks;
     amark_buffer_deinit(&h.first);
+
     amark_allocator_set(NULL);
 
     NAOS_CHECK_UINT_EQ(1, live_before_deinit);
@@ -98,6 +106,7 @@ NAOS_TEST(deinit_frees_the_content_and_leaves_an_empty_buffer)
     /* Usable again after deinit, and deinit is safe to repeat. */
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(&h.first, "again"));
     AMARK_CHECK_BUFFER_EQ(&h.first, "again");
+
     amark_buffer_deinit(&h.first);
     amark_buffer_deinit(&h.first);
     AMARK_CHECK_BUFFER_EQ(&h.first, "");
@@ -117,13 +126,16 @@ NAOS_TEST(detach_from_an_embedded_buffer)
 
     amark_buffer_init(&h.first);
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append(&h.first, "out", 3));
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_detach(&h.first, &data, &length));
     NAOS_CHECK_UINT_EQ(3, length);
     NAOS_CHECK_STR_EQ("out", data);
+
     /* Detaching leaves the buffer as after init. */
     NAOS_CHECK_UINT_EQ(0, h.first.length);
     NAOS_CHECK_UINT_EQ(0, h.first.capacity);
     AMARK_CHECK_BUFFER_EQ(&h.first, "");
+
     amark_free(data);
     amark_buffer_deinit(&h.first);
 }
@@ -135,24 +147,33 @@ NAOS_TEST(growth_follows_the_doubling_rule)
     amark_buffer_t b;
 
     amark_buffer_init(&b);
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(&b, 'a'));
     NAOS_CHECK_UINT_EQ(2, b.capacity); /* max(0, 1 + 1) */
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(&b, 'b'));
     NAOS_CHECK_UINT_EQ(4, b.capacity); /* max(4, 3) */
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_byte(&b, 'c'));
     NAOS_CHECK_UINT_EQ(4, b.capacity); /* 4 bytes fit: no growth */
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_repeat(&b, 'd', 20));
     NAOS_CHECK_UINT_EQ(24, b.capacity); /* max(8, 3 + 20 + 1) */
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(&b, 0));
     NAOS_CHECK_UINT_EQ(24, b.capacity); /* nothing to add */
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(&b, 1));
     NAOS_CHECK_UINT_EQ(48, b.capacity); /* max(48, 23 + 1 + 1) */
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_reserve(&b, 100));
     NAOS_CHECK_UINT_EQ(124, b.capacity); /* max(96, 23 + 100 + 1) */
     NAOS_CHECK_UINT_EQ(23, b.length);
+
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_truncate(&b, 1));
     amark_buffer_clear(&b);
     NAOS_CHECK_UINT_EQ(124, b.capacity);
+
     amark_buffer_deinit(&b);
 }
 

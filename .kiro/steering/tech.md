@@ -55,8 +55,53 @@
 - パーサには libFuzzer のファジングターゲットを用意する。
 - 計算量について：病的な入力（深い入れ子、大量の区切り文字）に対しても、二次以上の計算量にならないようにする。入れ子の深さには上限を設ける。
 
+### Code Style
+自動整形ツール（`.clang-format` など）は置いていない。次の規約に手で従う。
+
+- **波括弧は Allman 方式**とする。関数だけでなく、制御文（`if`/`else`/`for`/`while`/`switch`/`case`）、`struct`/`enum`/`union`、`extern "C"` の開き括弧も独立した行に置く。`else` も `}` とは別の行に書く。
+- 例外：集成体の初期化子（`= {`）、マクロの本体（`do { ... } while (0)`）、プリプロセッサ行（`#define AMARK_BEGIN_DECLS extern "C" {`）は 1 行の中に書く。
+- **演算の順序は括弧で明示する**。`&&`/`||` のオペランドになる比較は括弧で囲む。比較の左右に算術式（`+ - * / % << >>`）があれば、それも括弧で囲む。比較でないオペランド（変数、関数呼び出し、`!x`）には付けない。
+- インデントは空白 4 つ（タブは使わない）。`if (`・`for (` のように、キーワードと `(` の間に空白を 1 つ置く。ポインタの `*` は名前の側に付ける（`amark_buffer_t *buffer`）。
+- **処理のまとまり（ステップ）が変わるところに空行を 1 つ入れる**。1 つのステップの文は空行を挟まずに続ける。
+  - 引数の検査、準備、本処理、結果の書き出し、後始末、といった区切りで空ける。テストでは「準備 / 操作とその確認 / 後始末」で区切る。
+  - 制御文のブロックを閉じる `}` の次に同じ階層の文が続くときは、原則として空ける（次の行が `}`・`else`・プリプロセッサ行のときは空けない）。
+  - 直前の文の結果を確かめる文は続けて書く（`p = amark_malloc(n);` と `if (p == NULL)`、`err = f();` と `CHECK(err == ...)`）。
+  - 関数の最後で状態だけを返す `return`（`return AMARK_ERROR_NONE;` など）は、2 文以上の処理の後なら空行で分ける。直前の文で作った結果を返す `return` や、1 文だけの後の `return` は続けてよい。
+  - `{` の直後と `}` の直前には空行を置かない。空行を 2 行続けない。
+- コメントは `/* */` だけを使う（C99 でも `//` は使わない）。1 行は 100 字程度までを目安にする。
+
+```c
+amark_error_t amark_buffer_append_repeat(amark_buffer_t *buffer, unsigned char byte,
+                                         size_t count)
+{
+    amark_error_t err;
+
+    if (buffer == NULL)
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+
+    err = ensure_room(buffer, count);
+    if (err != AMARK_ERROR_NONE)
+    {
+        return err;
+    }
+
+    memset(buffer->data + buffer->length, byte, count);
+    buffer->length += count;
+    buffer->data[buffer->length] = '\0';
+
+    return AMARK_ERROR_NONE;
+}
+
+if ((b != 0) && (a > (SIZE_MAX / b)))
+{
+    return false;
+}
+```
+
 ### Testing
-- テストは Naos で書き、`naos_add_executable` で CTest に登録する。
+- テストは Naos で書き、`amark_add_test`（`naos_add_executable` を包み、共通のコンパイル設定とテスト支援ライブラリを付ける）で CTest に登録する。テストデータから生成するテストは `amark_add_generated_tests` を使う。
 - 正しさの基準は、次の 3 つとする。
   1. CommonMark spec の全例で、HTML 出力が 100% 一致すること
   2. 無編集の往復で、入力とバイト単位で同じ出力になること
@@ -88,3 +133,4 @@
 
 ---
 _依存関係を列挙するのではなく、判断の基準になる標準と決定を記す_
+_updated_at: 2026-11-25（Code Style を追加・ブロック後の空行を追記、テストの登録関数を実装に合わせた）_

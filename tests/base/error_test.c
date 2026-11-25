@@ -57,8 +57,10 @@ NAOS_TEST(descriptions_are_distinct)
     int i;
     int j;
 
-    for (i = 0; i < CODE_COUNT; i++) {
-        for (j = i + 1; j < CODE_COUNT; j++) {
+    for (i = 0; i < CODE_COUNT; i++)
+    {
+        for (j = i + 1; j < CODE_COUNT; j++)
+        {
             NAOS_CHECK_STR_NE(amark_error_string((amark_error_t)i),
                               amark_error_string((amark_error_t)j));
         }
