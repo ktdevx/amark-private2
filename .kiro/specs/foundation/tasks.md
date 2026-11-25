@@ -16,7 +16,7 @@
   - ヘッダの版の数の書式を意図的に崩す（例：先頭に 0 を付ける）と構成が失敗し、元に戻すと版が CMake の変数として読めることを確認できる
   - _Requirements: 2.6, 9.4, 9.6_
 
-- [ ] 1.3 コンパイラの設定を Amark のターゲットに適用する仕組みを作る
+- [x] 1.3 コンパイラの設定を Amark のターゲットに適用する仕組みを作る
   - C99 を必須にして言語拡張を無効にし、MSVC では C11 のモードと UTF-8 のソースを指定する
   - 警告をエラーにする設定を、最上位のときは既定で有効、組み込み時は既定で無効にし、明示の指定があればそれに従う。設定はターゲットの内部だけに適用し、利用者に伝えない
   - シンボルの可視性を既定で hidden にする
@@ -224,3 +224,5 @@
 - 1.2: 版の読み取りは `cmake/AmarkVersion.cmake` の `amark_read_version(<header>)`。出力は `AMARK_VERSION{,_MAJOR,_MINOR,_PATCH}`、`AMARK_SOVERSION`、`AMARK_PACKAGE_COMPATIBILITY`（SameMinorVersion/SameMajorVersion）。後続（1.4、3.3）はこの名前を使う
 - 1.2: `version.h` の `amark_version_number`/`amark_version_string` の宣言、`export.h` の include、宣言の囲みは 1.4 で追加する
 - 1.2: 設計どおりの `(long)` キャストのため、`AMARK_VERSION_NUMBER` は `#if` では使えない（C の定数式としては使える）。設計の改訂の要否は人の判断に委ねる
+- 1.3: `cmake/AmarkCompilerOptions.cmake` は `project()` とオプションの宣言の後、ターゲットを作る前に include する（サニタイザはディレクトリ単位で、include 以降のターゲットにだけ効く）。ターゲットには `amark_target_defaults(<target>)` を呼ぶ
+- 1.3: このコンテナの clang にはサニタイザのランタイムがない。サニタイザの成功経路は gcc で確かめる
