@@ -97,6 +97,15 @@
 - **Trade-offs**：共有版を共用する複数の利用者は設定を共有する。文書ごとのメモリの制限はできない。設定は未解放のメモリがなく他のスレッドが使っていないときだけ変えられる（検査しない）。後からオブジェクトごとの指定が必要になると、作成関数の追加が要る。
 - **検査と既定の取得の関数を置かない**：検査は `amark_allocator_set` が行い、既定へは NULL で戻せるため、`amark_allocator_check` と `amark_allocator_default` は廃止した。
 
+### Decision: サイズ 0 の確保は NULL を返す
+- **Context**：`amark_malloc(0)` などの扱い。C 標準では `malloc(0)` の戻り値は処理系定義で、C23 では `realloc(ptr, 0)` は未定義動作。
+- **Alternatives Considered**：
+  1. 0 を 1 として扱い、NULL でないポインタを返す
+  2. コールバックを呼ばずに NULL を返す
+- **Selected Approach**：2（2026-11-25 に 1 から変更）。`amark_realloc(ptr, 0)` は `ptr` を解放して NULL を返す。
+- **Rationale**：使わないメモリを確保せず、0 の確保が失敗しない。空を NULL と長さ 0 で表せる。どのアロケータを設定しても結果が同じになり、コールバックに 0 が渡らないことも保たれる。
+- **Trade-offs**：NULL だけでは失敗と判定できず、サイズが 0 になり得る呼び出し側は要求したサイズも確かめる必要がある。
+
 ### Decision: アロケータのコールバックに `user_data` を渡さない
 - **Context**：要件 11.1。グローバルの方式に変えた後も、オブジェクトごとの方式のときの `user_data` が残っていた。
 - **Alternatives Considered**：
