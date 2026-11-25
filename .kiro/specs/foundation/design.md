@@ -356,7 +356,7 @@ graph TB
 | 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | エラーコードと失敗の規約 | Error、Error conventions | `amark_error_t`、`amark_error_string()` | — |
 | 10.9 | 表現できないことのエラーコード | Error | `AMARK_ERROR_UNREPRESENTABLE`、`amark_error_string()` | — |
 | 10.8 | グローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
-| 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8 | アロケータ | Allocator | `amark_allocator_t`、`amark_alloc()` など | — |
+| 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8 | アロケータ | Allocator | `amark_allocator_t`、`amark_malloc()` など | — |
 | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8 | バッファ | Buffer | `amark_buffer_*` | — |
 | 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7 | UTF-8 | Utf8 | `amark_utf8_*` | — |
 | 14.1, 14.2, 14.3, 14.4, 14.5, 14.6 | 文字の分類 | Unicode | `amark_unicode_*`、`amark_ascii_is_punctuation()` | — |
@@ -727,7 +727,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_oom_scenario_t scenario,
 - 失敗しうる関数は `amark_error_t` を返す。結果は最後の引数の出力引数（名前は `out_` で始める）で返す。
 - 失敗したとき：操作の対象のオブジェクトは呼び出し前の有効な状態のまま（強い保証）。オブジェクトのポインタを返す出力引数には NULL を入れる。それ以外の出力引数は関数ごとに文書化する。
 - 必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT` を返す。解放の関数は NULL を受け付けて何もしない。
-- 失敗し得ない関数（問い合わせ、分類、復号）は値を直接返す。確保の関数（`amark_alloc` など）は `malloc` に倣い、失敗を NULL で示す。
+- 失敗し得ない関数（問い合わせ、分類、復号）は値を直接返す。確保の関数（`amark_malloc` など）は `malloc` に倣い、失敗を NULL で示す。
 - グローバルな可変状態を持たない。静的なデータはすべて `const`。同じオブジェクトを複数のスレッドから同時に使う場合の同期は利用者の責任。
 - 公開の構造体は、先頭に `size_t struct_size` を置く。ライブラリは `struct_size` が知っている最小のサイズ以上であることを確かめ、自分の知らない末尾のフィールドを読まない。
 - ソースの先頭にはライセンスヘッダを置く（LicenseCheck の書式）。
@@ -832,15 +832,15 @@ typedef struct amark_allocator {
 AMARK_API const amark_allocator_t *amark_allocator_default(void); /* malloc/realloc/free に基づく */
 AMARK_API amark_error_t amark_allocator_check(const amark_allocator_t *allocator);
 
-AMARK_API void *amark_alloc(const amark_allocator_t *allocator, size_t size);
-AMARK_API void *amark_alloc_array(const amark_allocator_t *allocator, size_t count, size_t size);
+AMARK_API void *amark_malloc(const amark_allocator_t *allocator, size_t size);
+AMARK_API void *amark_malloc_array(const amark_allocator_t *allocator, size_t count, size_t size);
 AMARK_API void *amark_realloc(const amark_allocator_t *allocator, void *ptr, size_t new_size);
 AMARK_API void amark_free(const amark_allocator_t *allocator, void *ptr);
 ```
 - `allocator` が NULL なら既定のアロケータ。
 - `amark_allocator_check`：NULL なら `AMARK_ERROR_NONE`。`struct_size` が v1 の最小のサイズ（`free_fn` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
 - コールバックへの保証：`size` と `new_size` は 0 にならない（0 は 1 として扱う）。`realloc_fn` と `free_fn` に NULL は渡らない（`amark_realloc(a, NULL, n)` は `malloc_fn` を、`amark_free(a, NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。
-- `amark_alloc_array`：`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す。
+- `amark_malloc_array`：`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す。
 - オブジェクトは作成時に受け取ったアロケータを検査し、内部に値でコピーして保持する（`user_data` の寿命は利用者の責任）。`realloc_fn` が失敗したとき、元のブロックは有効なまま。
 
 **内部の契約**（`src/runtime/alloc_internal.h`）
@@ -975,7 +975,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 ## Testing Strategy
 
 ### Unit Tests（Naos、`tests/runtime/`）
-- **allocator**：NULL で既定のアロケータになること、`struct_size` 不足とコールバックの欠落の拒否（11.5）、`amark_alloc_array` の桁あふれでコールバックが呼ばれないこと（11.7）、0 のサイズが 1 になりコールバックに 0 が渡らないこと。
+- **allocator**：NULL で既定のアロケータになること、`struct_size` 不足とコールバックの欠落の拒否（11.5）、`amark_malloc_array` の桁あふれでコールバックが呼ばれないこと（11.7）、0 のサイズが 1 になりコールバックに 0 が渡らないこと。
 - **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、`SIZE_MAX` 付近の予約が `AMARK_ERROR_OVERFLOW` で内容が変わらないこと（12.5）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
 - **unicode**：各 Zs の文字と 4 つの制御文字（14.1）、P と S の代表（`$`、`+`、`^`、`€`、`¡`、`「`、絵文字の記号）と非該当（文字、数字、結合文字）（14.2）、ASCII 句読点の 32 文字すべてと隣接する値（14.3）、サロゲートと U+110000 以上（14.4）、`AMARK_UNICODE_VERSION_*` が 17.0.0 であること（14.5）。
