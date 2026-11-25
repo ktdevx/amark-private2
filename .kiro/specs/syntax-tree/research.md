@@ -202,6 +202,9 @@
 - **#8 `amark_document_take_syntax_set` の `const`**：`block-parser` の `amark_parser_new(const amark_syntax_set *)` から非 `const` の `take` を呼ぶと `const` を外すキャストが要る、という指摘。所有権の受け渡し（解放の責任の移動）は `const` のポインタでは表せないため、この関数の引数は非 `const` のままとする。設計に「`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストをしない）」と明記した。`const` でないポインタを持つ経路だけで受け渡すよう直すのは `block-parser` の側で行う。
 - **Implications**：API・要件の受け入れ基準・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
+- **`amark_test_tree` の定義の条件**：`tree_builder.h` は Naos のマクロ `AMARK_CHECK_TREE_DUMP` を宣言するので `amark_test_tree` は Naos に依存する。`foundation` の規則 7.7 では `tests/` は `AMARK_FUZZ` だけが ON の構成でも入るため、`amark_test_tree` の定義と `add_subdirectory(tree)` を `if(AMARK_BUILD_TESTS)` の中に置くと明記した（design の Modified Files、TreeBuilder、タスクの該当箇所）。ファジングターゲットはこのライブラリをリンクしない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則

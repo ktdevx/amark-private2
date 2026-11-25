@@ -51,7 +51,7 @@
 - `render.h` の型の変更 → `markdown-renderer`
 - `syntax-tree` のスロットの見出し、構文セットの列挙、ソース上の範囲の API の変更 → この spec
 - `gen_html_cases.cmake` のケースの形式（見出し・区切りの行、オプションの語の扱い）、引数（`CHECK=`、`INCLUDE=`）、生成するテストが呼ぶ検査関数の形の変更 → `markdown-renderer`（同じスクリプトで `tests/markdown/data/*_cases.txt` を生成する）
-- `amark_test_html_gfm` の依存（Naos に依存しないこと）の変更 → `block-parser`、`inline-parser`、`markdown-renderer` のファジングターゲット（`amark_test_gfm` を通して間接にリンクする）
+- `amark_test_html_gfm` の依存（Naos に依存しないこと）の変更 → `inline-parser`（`inline_parse`）と `markdown-renderer`（`md_roundtrip`、`md_edit`）のファジングターゲット（中間のライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_gfm`（`inline-parser`）を通して間接にリンクする）
 - `foundation` の `amark.h` の正規の include の順の変更 → この spec（`amark.h` への追加の位置）
 
 ## Architecture

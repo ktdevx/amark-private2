@@ -162,6 +162,11 @@
 
 - **追記（block-parser の契約の確定を受けて）**：`block-parser` の design（SyntaxTests の「`gen_examples.cmake` の契約」）が基本の契約を定めた（データの形式、テストの名前 `ex<4 桁の番号>_<節>`、`n=<N>`、構成時の誤り、基本の ARGS `EXPECT=dump`・`DUMP_FLAGS=`、`FACTORY`・`CHECK`・`EXPECT=html` の予約）。この spec はファイルを作らず、予約済みの `EXPECT=html`・`FACTORY=`・`CHECK=` を追加だけで足し、`FACTORY=` も `CHECK=` もないときの生成ソースを `block-parser` の版とバイト単位で同じに保つ。`DUMP_FLAGS=` は `FACTORY=`／`CHECK=` と組み合わせると構成の誤りにした（`FACTORY=` の経路のダンプは常に `AMARK_DUMP_TOKENS`）。ベンチマークは `block-parser` の `amark_add_bench(<name> SOURCES ... [INTERNAL])` に 1 行を追記するだけにした。`amark_parser_new` は構文セットを借り、所有権の移転は `amark_parser_new_take_syntax_set` で行う（`AMARK_PARSE_TAKE_SYNTAX_SET` は廃止）ことを Integration に書いた（この spec に旧い印への参照はなかった）。
 
+
+### 2026-11-25：cross-spec review r2 の反映
+- **リンクの書式の分類**：LinkCommon の拡張が定義するリンクの記述、Requirements Traceability の 8.4、Integration の `markdown-renderer` への提供の記述を、`markdown-renderer` の design（MdCore の「リンクの書式の分類」）の規則に揃えた（組み込みのリンクと画像は必ず `LINK_OPEN`・`LINK_CLOSE` を持ち、`LINK_PAREN_OPEN` があればインラインの形、`LINK_PAREN_*` がなければ参照の形（完全・省略・短縮）、`AUTOLINK_*` があればオートリンク、`LINK_OPEN`・`LINK_PAREN_*`・`LINK_REF_*`・`AUTOLINK_*` のどれもなければ拡張が定義するリンク）。トークンの規則は変えない。
+- **ベンチマークの構成の置き場所**：`AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は最上位の `CMakeLists.txt`（`foundation` の拡張点。`block-parser` が追記する）にあり、`bench/CMakeLists.txt`（`block-parser`）は `amark_add_bench` の定義と登録だけを持つ、と Boundary Commitments、Modified Files、Integration の記述を直した。承認の状態は変えない。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — インライン構文と付録の手順
 - [spec.txt 0.31.2](https://raw.githubusercontent.com/commonmark/commonmark-spec/0.31.2/spec.txt) — 準拠テストのデータ（CC-BY-SA 4.0）

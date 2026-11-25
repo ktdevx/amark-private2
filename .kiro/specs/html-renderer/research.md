@@ -143,6 +143,9 @@
 - **#1 ファジングとテストの補助ライブラリ（間接）**：`amark_test_html_gfm` は `amark_test_parse_gfm`・`amark_test_gfm` を通してファジングターゲットに間接にリンクされる。`foundation` が定める規則（ファジングが使うテストの補助ライブラリは Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON のとき定義する）に合わせ、`amark_test_html_gfm` が Naos に依存しないことと、`AMARK_FUZZ` だけが ON の構成でも定義することを明記した（GfmHtmlExt、タスク 4.1）。
 - **Implications**：公開 API・要件・タスクの範囲は変わらない。承認は維持する。`syntax-tree` のスロットの種類の範囲の表（#9）は、この spec の `0x0301`、`0x0302` と一致する。
 
+### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
+- Revalidation Triggers の `amark_test_html_gfm` の依存の行で、影響先を `block-parser` のファジングターゲット（`amark_test_html_gfm` をリンクしない）から、`inline-parser`（`inline_parse`）と `markdown-renderer`（`md_roundtrip`、`md_edit`）のファジングターゲットに直し、中間のライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_gfm`（`inline-parser`）を明記した。承認の状態は変えない。
+
 ## References
 - cmark 0.31.1 `src/html.c`、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re` — 出力とエスケープと危険な URL の規則
 - CommonMark Spec 0.31.2 — 準拠の対象

@@ -41,7 +41,7 @@
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`extension.h`）。`src/tree/` の内部ヘッダは使わない
 - `html-renderer` の `render.h`（`amark_write_fn`）
 - `src/syntax/md_*.c` だけが、`block-parser` の公開 API（`parser.h` の `amark_label_normalize`・`amark_label_map_*`、`scan.h` の走査、`commonmark.h` の役割の番号）と `inline-parser` の公開 API（`inline.h` の文字の宣言・ノードの性質・flanking と照合の関数・raw HTML の走査、役割の番号）を使う
-- テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`amark_test_support`、`amark_test_tree`、`amark_test_parse`、`amark_test_inline`、`amark_test_gfm`、`tests/support/gen_examples.cmake`（`inline-parser`。`CHECK=`）、`html-renderer` の `gen_html_cases.cmake`（ケースの形式と生成の手順。`CHECK=`）、`inline-parser` の `tests/spec/spec_version.cmake`（spec.txt の版と SHA-256）、`inline-parser` の `tests/extensions/gfm_inline_ext.h`（拡張オートリンクの役割の定数）、`amark_add_fuzzer`
+- テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`amark_test_support`、`amark_test_tree`、`amark_test_parse`、`amark_test_inline`、`amark_test_gfm`、`tests/support/gen_examples.cmake`（ファイルと基本の契約は `block-parser`、`EXPECT=html`・`FACTORY=`・`CHECK=` の追加は `inline-parser`）、`html-renderer` の `gen_html_cases.cmake`（ケースの形式と生成の手順。`CHECK=`）、`inline-parser` の `tests/spec/spec_version.cmake`（spec.txt の版と SHA-256）、`inline-parser` の `tests/extensions/gfm_inline_ext.h`（拡張オートリンクの役割の定数）、`amark_add_fuzzer`
 - ファジングの規則（`foundation`）：ファジングのターゲットがリンクするテストの補助ライブラリは Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義される。この spec の `amark_test_md` と `amark_test_md_gfm` はこの規則に従い、Naos に依存する検査は別のライブラリ `amark_test_md_check` に分ける（ファジングのターゲットはリンクしない）
 - レイヤーの規則：`src/render/` は `src/parse/` と `src/syntax/` を参照せず、`parser.h`・`scan.h`・`inline.h`・`commonmark.h` も include しない（エンジンはパースの知識を持たない）。`src/syntax/md_*.c` は公開ヘッダだけを include する。公開ヘッダは他の公開ヘッダだけを include する
 
@@ -204,7 +204,7 @@ fuzz/
 - `tests/CMakeLists.txt` — `add_subdirectory(markdown)` を `add_subdirectory(extensions)` の前に追加する（`foundation` の規則に従い、Naos に依存しない補助ライブラリは `AMARK_FUZZ` だけのときも定義される）。
 - `tests/extensions/gfm_set.c`、`tests/extensions/CMakeLists.txt` — `amark_test_gfm_set_new` が HTML の部品の後に `amark_test_md_gfm` の拡張を加え、`amark_test_gfm` が `amark_test_md_gfm` に依存する（brief の Existing Spec Touchpoints）。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(md_roundtrip …)`、`amark_add_fuzzer(md_edit …)`（どちらも `LIBRARIES amark_test_gfm amark_test_md`。どちらも Naos に依存しない。Naos に依存する `amark_test_md_check` はリンクしない）。
-- `tests/support/gen_examples.cmake`（`inline-parser`）と `gen_html_cases.cmake`（`html-renderer`）は編集しない。`CHECK=` はそれぞれの spec が所有して実装する（Integration & Upstream Changes）。
+- `tests/support/gen_examples.cmake`（ファイルと基本の契約は `block-parser` が所有し、`inline-parser` は `EXPECT=html`・`FACTORY=`・`CHECK=` の追加だけを所有する）と `gen_html_cases.cmake`（`html-renderer`）は編集しない。`CHECK=` は、`gen_examples.cmake` では `inline-parser`、`gen_html_cases.cmake` では `html-renderer` が実装する（Integration & Upstream Changes）。
 
 ## System Flows
 

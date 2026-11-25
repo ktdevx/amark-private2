@@ -67,9 +67,9 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 - **Revisiting boundaries**：spec の境界は作業を分けるための手段であり、設計の制約ではない。後の spec で前の spec の API に問題が見つかったら、その spec に戻って直す。
 
 ## Specs (dependency order)
-- [ ] foundation -- CMake ビルド（静的/動的ライブラリ、install、パッケージ設定）、Naos によるテスト基盤、3 OS の CI/CD、ライセンス、共通ランタイム（アロケータ、バッファ、エラー、バージョン、UTF-8 ユーティリティ）。Dependencies: none
-- [ ] syntax-tree -- ノードモデル、ロスレス構文トークン、走査と編集の API、編集済みの追跡、拡張レジストリ（ノード型の登録と構文セット）。Dependencies: foundation
-- [ ] html-renderer -- 構文木から HTML への出力、CommonMark 互換、安全モード、ノード型ごとの HTML 出力のスロット。Dependencies: syntax-tree
-- [ ] block-parser -- パーサの入口、ブロック構文エンジンと公開ブロック構文 API、文書の後処理フック、CommonMark の全ブロック構文とリンク参照定義、構文トークンの記録。Dependencies: syntax-tree, html-renderer
-- [ ] inline-parser -- インライン構文エンジン（区切り文字の処理を含む）と公開インライン構文 API、CommonMark の全インライン構文、CommonMark spec 100% の準拠テスト、拡張 API の表現力を検証するテスト専用拡張。Dependencies: block-parser, html-renderer
-- [ ] markdown-renderer -- ロスレスな Markdown への書き戻し、編集した部分の局所的な出力（意味を保つ。方式は design で決める）、新しいノードの出力、ノード型ごとの Markdown 出力のスロット、往復と意味の保存のプロパティテスト。Dependencies: inline-parser, block-parser, html-renderer
+- [x] foundation -- CMake ビルド（静的/動的ライブラリ、install、パッケージ設定）、Naos によるテスト基盤、3 OS の CI/CD、ライセンス、共通ランタイム（アロケータ、バッファ、エラー、バージョン、UTF-8 ユーティリティ）。Dependencies: none
+- [x] syntax-tree -- ノードモデル、ロスレス構文トークン、走査と編集の API、編集済みの追跡、拡張レジストリ（ノード型の登録と構文セット）。Dependencies: foundation
+- [x] html-renderer -- 構文木から HTML への出力、CommonMark 互換、安全モード、ノード型ごとの HTML 出力のスロット。Dependencies: syntax-tree
+- [x] block-parser -- パーサの入口、ブロック構文エンジンと公開ブロック構文 API、文書の後処理フック、CommonMark の全ブロック構文とリンク参照定義、構文トークンの記録。Dependencies: syntax-tree, html-renderer
+- [x] inline-parser -- インライン構文エンジン（区切り文字の処理を含む）と公開インライン構文 API、CommonMark の全インライン構文、CommonMark spec 100% の準拠テスト、拡張 API の表現力を検証するテスト専用拡張。Dependencies: block-parser, html-renderer
+- [x] markdown-renderer -- ロスレスな Markdown への書き戻し、編集した部分の局所的な出力（意味を保つ。方式は design で決める）、新しいノードの出力、ノード型ごとの Markdown 出力のスロット、往復と意味の保存のプロパティテスト。Dependencies: inline-parser, block-parser, html-renderer

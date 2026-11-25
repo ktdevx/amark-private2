@@ -156,6 +156,9 @@
 - **13. 照合の対応**：`amark_markdown_run(_match)` と `amark_inline_run(_match)` は別の型で、上限の表し方（`max_run_length` と `use_mask`）と `capacity` の規則が違う。MdDispatch に要素ごとの対応の表（添字・`struct_size`・`rule` の値・上限から `use_mask` への変換・照合の結果の写し）と、`capacity`（エンジンは長さの合計以上を渡し、上流の半分以上の要求を満たす）・作業の配列（文書のアロケータ、状態に持って使い回し `finish` で解放）・失敗の規則を書いた。`amark_markdown_run` の公開の形は変えない（拡張が別の照合を提供できる形を保つ）。
 - **Implications**：Revalidation Triggers に、`amark_inline_run(_match)` の形と `capacity`、拡張オートリンクの役割の定数、`gen_html_cases.cmake` の契約、`spec_version.cmake`、`foundation` の `amark.h` の順とファジングの規則、`amark_test_md`・`amark_test_md_gfm` が Naos に依存しないことを加えた。
 
+### 2026-11-25：spec 間のレビュー（2 回目、cross-spec review r2）の反映
+- `tests/support/gen_examples.cmake` の所有の記述を直した：ファイルと基本の契約は `block-parser` が所有し、`inline-parser` は `EXPECT=html`・`FACTORY=`・`CHECK=` の追加だけを所有する（design の Allowed Dependencies と File Structure Plan の該当箇所）。この spec は引き続きこのファイルを編集しない。承認の状態は変えない。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — エスケープ、文字参照、ブロックの構造、flanking と照合の規則
 - [cmark](https://github.com/commonmark/cmark) — `inlines.c`（照合）、`commonmark.c`（正規化した書き戻し）

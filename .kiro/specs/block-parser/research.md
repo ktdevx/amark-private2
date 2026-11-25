@@ -228,6 +228,12 @@
 - **#14 Revalidation Triggers の分割**：独立に変わりうる継ぎ目ごとに、ブロックのエンジンと公開 API、`scan.h` の走査、実行時の文字データ（case fold、文字参照）、CommonMark の構文セットの構築関数、GFM 相当の検証用ライブラリとテストの補助（`gen_examples.cmake` を含む）、ベンチマークの基盤の群に分けた。spec の分割はしない。
 - **Implications**：requirements に 1.9、14.6 と Boundary Context の 2 項目を追加した。design の Boundary Commitments、Revalidation Triggers、File Structure Plan、Modified Files、Requirements Traceability、ParserAPI、Fragment、CommonMarkSet、ParseCheck、SyntaxTests、Bench、Integration & Upstream Changes を更新した。タスクは 1.1、1.4、6.2、8.1、8.4、10.4 の記述と `_Boundary:_` / `_Requirements:_` を更新した（依存の順は変わらない）。
 
+### 2026-11-25：横断レビュー r2（cross-spec review r2）の反映
+- **ファジング用の補助ライブラリの規則（`foundation` 7.7、7.8）**：`amark_test_parse_gfm` は `inline-parser` の `amark_test_gfm` を通して `inline_parse`（`inline-parser`）と `md_roundtrip`・`md_edit`（`markdown-renderer`）のファジングターゲットに間接にリンクされる。そこで、`amark_test_parse_gfm` は Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義されることを明記した。`tests/CMakeLists.txt` の `add_subdirectory(parse)` は条件なしにし、Naos を使う `amark_test_parse`（`parse_check.c`）、`add_subdirectory(syntax)`、`tests/parse/` の Naos のテストは `if(AMARK_BUILD_TESTS)` の中に置く。design の Modified Files、GfmHookTests、Revalidation Triggers（`amark_test_parse_gfm` の依存 → `inline-parser`・`markdown-renderer` のファジング）を更新し、タスク 1.4、9.3 に反映した（9.3 の完了条件にファジングだけの構成の確認を加えた）。
+- **名前の修正**：ScanAPI の目的の記述の `amark_scan_raw_html` を `inline-parser` の現在の名前 `amark_inline_scan_raw_html` に直した。
+- **ベンチマークの構成の置き場所**：`AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は最上位の `CMakeLists.txt`（`foundation` の拡張点）に置き、`bench/CMakeLists.txt` は `amark_add_bench` の定義と登録だけを持つ、と Boundary Commitments の「共同で編集するファイル」を書き直した。
+- approvals は維持した。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — ブロック構造、タブ、不正な文字、リンク参照定義、付録の parsing strategy
 - [cmark](https://github.com/commonmark/cmark) — `blocks.c`、`inlines.c`、`utf8.c`（case fold）、`houdini_html_u.c`（文字参照）

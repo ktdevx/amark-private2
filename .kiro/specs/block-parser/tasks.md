@@ -27,6 +27,7 @@
 - [ ] 1.4 パースの検査の補助と、データ駆動のテストの生成手順を作る
   - 一括でパースして、構文トークンの被覆の検証、木の不変条件の検査（INTERNAL のときだけ）、1 バイトずつ・2 分割・ランダムな区切りの逐次の入力のダンプと一括のダンプの一致を確かめ、通れば一括の文書を返し、失敗なら診断を表示して誤りを返す関数を、INTERFACE ライブラリとして作る（構文セットを指定しないときは、作ったテスト用の構文セットを返す文書に所有させる）
   - その関数の結果を確かめ、期待するダンプとの一致を照合して文書を解放するマクロを、関数の上に置く
+  - この補助は Naos を使うので、`tests/CMakeLists.txt` では INTERFACE ライブラリ `amark_test_parse` の定義と `add_subdirectory(syntax)` を `if(AMARK_BUILD_TESTS)` の中に置き、`add_subdirectory(parse)` は `tests/` の中で条件なしに加える（`foundation` の規則 7.7。`tests/parse/` の中の Naos を使うテストは `if(AMARK_BUILD_TESTS)` の中に置く）
   - spec.txt と同じ区切りの形式のデータファイルから補助を呼ぶテストを生成する共有のスクリプトを `tests/support/gen_examples.cmake` として作り、設計の「`gen_examples.cmake` の契約」（`→` はタブ、見出しの行が節の名前、テストの名前 `ex<4 桁の番号>_<節>`、開始の行の `n=`、基本の ARGS の `EXPECT=dump` と `DUMP_FLAGS=`、`FACTORY` / `CHECK` / `EXPECT=html` の予約、未知の名前と形式の誤りの構成の失敗）どおりに、NUL と CR を失わずに埋め込む。`inline-parser` が後で追加だけで拡張できるよう、基本の経路の出力を 1 か所で作る
   - `tests/syntax/data/` のすべてのデータファイルを構成時に集めて登録し、構文のタスクがデータファイルを足すだけでテストが増える形にする（テストの構成のファイルを各タスクが編集しない）
   - 構文セットの指定がないときに使う、テスト用の構文セット（`amark.core` とすべての構文の拡張。出力の拡張は含まない）を作る補助を置く
@@ -300,7 +301,9 @@
 
 - [ ] 9.3 検証用の構文を、他の spec のテストが再利用できるテスト専用のライブラリとして公開する
   - 検証用の構文のファイルを INTERFACE ライブラリ `amark_test_parse_gfm`（HTML の検証用拡張に依存）として定義し、ヘッダで 3 つの拡張の取得関数、脚注の定義の表を引く関数、テスト用の役割の番号を宣言する。ライブラリのインストールと配布物には含めない
+  - `amark_test_parse_gfm` は Naos に依存させない（Naos のヘッダを include せず、Naos をリンクしない）。`inline-parser` の `amark_test_gfm` を通して `inline_parse`、`md_roundtrip`、`md_edit` のファジングターゲットに間接にリンクされるので、`foundation` の規則 7.7、7.8 に従い、`tests/parse/CMakeLists.txt` の中で条件なしに定義して `AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義されるようにし、Naos を使う `tests/parse/` のテストは `if(AMARK_BUILD_TESTS)` の中に置く
   - ライブラリをリンクするだけの別のテストの実行ファイルから、取得関数で構文セットを作ってパースでき、委譲先の中で脚注の定義の表を引けること、`amark` と `amark_internal` のどちらと組んでもビルドできることを確かめられる
+  - ファジングだけの構成（`-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF`）で、Naos を取得せずに構成が通り、`amark_test_parse_gfm` のターゲットが定義されていることを確かめられる
   - _Boundary: GfmHookTests_
   - _Depends: 9.1, 9.2_
   - _Requirements: 13.5_

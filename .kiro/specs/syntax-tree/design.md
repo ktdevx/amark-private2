@@ -180,7 +180,7 @@ fuzz/
 ### Modified Files
 - `include/amark/amark.h` — `foundation` の design が定める `amark.h` の正規の include の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）の「木のヘッダ」の位置に、`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h` をこの順で追加する。
 - `src/CMakeLists.txt` — `amark_objects` に `src/tree/*.c` を追加する。
-- `tests/CMakeLists.txt` — INTERFACE ライブラリ `amark_test_tree`（INTERFACE のソース `support/tree_builder.c`、インクルード `support/`）を定義し、`add_subdirectory(tree)` を追加する。
+- `tests/CMakeLists.txt` — `if(AMARK_BUILD_TESTS)` の中で、INTERFACE ライブラリ `amark_test_tree`（INTERFACE のソース `support/tree_builder.c`、インクルード `support/`）を定義し、`add_subdirectory(tree)` を追加する。`tree_builder.h` は Naos のマクロ `AMARK_CHECK_TREE_DUMP` を宣言するので、`amark_test_tree` は Naos に依存する。`foundation` の規則 7.7 により `tests/` は `AMARK_FUZZ` だけが ON の構成でも入るため、Naos に依存するターゲットは `if(AMARK_BUILD_TESTS)` の中に置く（ファジングターゲットは `amark_test_tree` をリンクしない）。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(tree_edit SOURCES tree_edit_fuzz.c CORPUS corpus/tree_edit)` を追加する。
 
 ## System Flows
@@ -1006,6 +1006,7 @@ AMARK_API amark_status amark_dump_attr_symbol(amark_dump_writer *writer, const c
 
 **Responsibilities & Constraints**
 - `tests/support/tree_builder.c` を INTERFACE ライブラリ `amark_test_tree` の INTERFACE のソースにし、リンクした各テストの設定でコンパイルする（`amark` と `amark_internal` のどちらとも組める。`amark_test_support` は Amark の関数を呼ばない約束のため、そこには入れない）。
+- Naos に依存する（`AMARK_CHECK_TREE_DUMP`）ので、`tests/CMakeLists.txt` の `if(AMARK_BUILD_TESTS)` の中で定義する（`foundation` の規則 7.7）。ファジングターゲットはこのライブラリをリンクしない。
 - 型の名前は文書の構文セットで引く。組み込みの属性と `:tokens`（文書に登録済みのソースを参照する）を設定する。拡張の属性はコールバックに渡す。`:edits` と `:span` は無視する。組み立て中は追跡を無効にし、終わったら元の状態に戻す。根が `document` なら文書の根に子を付ける。
 - 構文の誤りは `AMARK_ERROR_INVALID_ARGUMENT` と、位置を含む理由（`out_error`）で返す。
 
