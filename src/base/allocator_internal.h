@@ -16,7 +16,7 @@
  * unchanged, when the sum does not fit in size_t. */
 static inline bool amark_size_add(size_t a, size_t b, size_t *out)
 {
-    if (a > SIZE_MAX - b)
+    if (a > (SIZE_MAX - b))
     {
         return false;
     }
@@ -28,7 +28,7 @@ static inline bool amark_size_add(size_t a, size_t b, size_t *out)
  * unchanged, when the product does not fit in size_t. */
 static inline bool amark_size_mul(size_t a, size_t b, size_t *out)
 {
-    if ((b != 0) && (a > SIZE_MAX / b))
+    if ((b != 0) && (a > (SIZE_MAX / b)))
     {
         return false;
     }

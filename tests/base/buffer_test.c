@@ -779,7 +779,7 @@ NAOS_TEST(reserving_a_little_more_each_time_allocates_logarithmically)
     /* reserve(1) before each byte: the reservations do not add allocations. */
     amark_buffer_clear(b);
     amark_test_allocator_reset_counters(&counting);
-    for (i = 0; i < 2 * GROWTH_TOTAL; i++)
+    for (i = 0; i < (2 * GROWTH_TOTAL); i++)
     {
         if ((amark_buffer_reserve(b, 1) != AMARK_ERROR_NONE) ||
             (amark_buffer_append_byte(b, 'r') != AMARK_ERROR_NONE))
@@ -916,7 +916,7 @@ static void sweep_every_operation(const char *prefix, size_t prefix_length)
     };
     size_t i;
 
-    for (i = 0; i < sizeof(ops) / sizeof(ops[0]); i++)
+    for (i = 0; i < (sizeof(ops) / sizeof(ops[0])); i++)
     {
         grow_case_t c;
 
@@ -976,7 +976,7 @@ static amark_error_t sequence_scenario(void *context)
         for (round = 0; (round < 2) && (err == AMARK_ERROR_NONE); round++)
         {
             length_before = amark_buffer_length(b);
-            if (length_before >= SNAPSHOT_SIZE / 2)
+            if (length_before >= (SNAPSHOT_SIZE / 2))
             {
                 (void)amark_buffer_truncate(b, SNAPSHOT_SIZE / 4);
                 length_before = amark_buffer_length(b);

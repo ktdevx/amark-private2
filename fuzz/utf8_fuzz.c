@@ -87,7 +87,7 @@ static void check_decoding(const char *text, size_t size)
 
         /* Covers the input without overlap or gap. */
         CHECK((length >= 1) && (length <= AMARK_UTF8_MAX_LENGTH));
-        CHECK(length <= size - position);
+        CHECK(length <= (size - position));
         CHECK(is_scalar_value(codepoint));
         CHECK(amark_utf8_decode(text + position, size - position, NULL) == length);
 
@@ -120,7 +120,7 @@ static void check_decoding(const char *text, size_t size)
             /* The valid character alone is valid. */
             CHECK(amark_utf8_validate(text + position, length, NULL));
         }
-        CHECK(replaced_length + encoded_length < replaced_capacity);
+        CHECK((replaced_length + encoded_length) < replaced_capacity);
         memcpy(replaced + replaced_length, encoded, encoded_length);
         replaced_length += encoded_length;
         position += length;
@@ -155,7 +155,7 @@ static void check_encoding(const uint8_t *data, size_t size)
 {
     size_t i;
 
-    for (i = 0; i + 4 <= size; i += 4)
+    for (i = 0; (i + 4) <= size; i += 4)
     {
         uint32_t codepoint = (uint32_t)data[i] | ((uint32_t)data[i + 1] << 8) |
                              ((uint32_t)data[i + 2] << 16) | ((uint32_t)data[i + 3] << 24);

@@ -51,7 +51,7 @@ int main(void)
           "amark_buffer_append_cstr succeeds");
     check(amark_buffer_append(buffer, "Amark", 5) == AMARK_ERROR_NONE,
           "amark_buffer_append succeeds");
-    check(amark_buffer_length(buffer) == sizeof text - 1,
+    check(amark_buffer_length(buffer) == (sizeof text - 1),
           "the buffer length is that of the appended text");
     check(memcmp(amark_buffer_data(buffer), text, sizeof text) == 0,
           "the buffer holds the appended text and its NUL terminator");

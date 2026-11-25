@@ -128,7 +128,7 @@ size_t amark_utf8_decode_before(const char *text, size_t position, uint32_t *out
         return 0;
     }
     start = position - 1;
-    while ((start > 0) && (position - start < AMARK_UTF8_MAX_LENGTH) && is_continuation(s[start]))
+    while ((start > 0) && ((position - start) < AMARK_UTF8_MAX_LENGTH) && is_continuation(s[start]))
     {
         start--;
     }
@@ -138,7 +138,7 @@ size_t amark_utf8_decode_before(const char *text, size_t position, uint32_t *out
         bool valid;
         size_t lead_n = decode_one(s + start, position - start, &lead_cp, &valid);
 
-        if (lead_n == position - start)
+        if (lead_n == (position - start))
         {
             cp = lead_cp;
             n = lead_n;

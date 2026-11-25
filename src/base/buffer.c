@@ -96,7 +96,7 @@ static int points_into(const amark_buffer_t *buffer, const void *data)
     uintptr_t start = (uintptr_t)buffer->data;
     uintptr_t p = (uintptr_t)data;
 
-    return (buffer->capacity > 0) && (p >= start) && (p - start < buffer->capacity);
+    return (buffer->capacity > 0) && (p >= start) && ((p - start) < buffer->capacity);
 }
 
 amark_error_t amark_buffer_create(amark_buffer_t **out_buffer)

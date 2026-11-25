@@ -95,7 +95,7 @@ static int check_decoding(const char *bytes, size_t size, const piece_t *expecte
         size_t n = amark_utf8_decode(e.text + offset, size - offset, &cp);
         size_t n_without_out = amark_utf8_decode(e.text + offset, size - offset, NULL);
 
-        if ((n == 0) || (n > AMARK_UTF8_MAX_LENGTH) || (n > size - offset) || (n != n_without_out))
+        if ((n == 0) || (n > AMARK_UTF8_MAX_LENGTH) || (n > (size - offset)) || (n != n_without_out))
         {
             NAOS_CHECK_UINT_EQ(i < count ? expected[i].length : 0, n);
             failures++;
@@ -454,7 +454,7 @@ static int check_properties(const char *text, size_t size)
         size_t n = amark_utf8_decode(text + offset, size - offset, &cp);
         size_t m;
 
-        if ((n == 0) || (n > AMARK_UTF8_MAX_LENGTH) || (n > size - offset))
+        if ((n == 0) || (n > AMARK_UTF8_MAX_LENGTH) || (n > (size - offset)))
         {
             return 1;
         }
@@ -477,7 +477,7 @@ static int check_properties(const char *text, size_t size)
         size_t start = i > 1 ? boundaries[i - 2] : 0;
         size_t n = amark_utf8_decode_before(text, boundaries[i - 1], &cp);
 
-        if ((n != boundaries[i - 1] - start) || (cp != codepoints[i - 1]))
+        if ((n != (boundaries[i - 1] - start)) || (cp != codepoints[i - 1]))
         {
             return 3;
         }

@@ -181,7 +181,7 @@ static void model_init(model_t *model)
 
 static void model_append(model_t *model, const char *bytes, size_t size)
 {
-    CHECK(model->length + size <= MAX_CONTENT);
+    CHECK((model->length + size) <= MAX_CONTENT);
     if (size == 0)
     {
         return; /* bytes may be NULL */
@@ -219,7 +219,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
     {
         return expected;
     }
-    if ((additional > SIZE_MAX - model->length) || (model->length + additional == SIZE_MAX))
+    if ((additional > (SIZE_MAX - model->length)) || ((model->length + additional) == SIZE_MAX))
     {
         expected.error = AMARK_ERROR_OVERFLOW;
         return expected;
@@ -227,7 +227,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
     required = model->length + additional + 1;
     if (required <= model->capacity)
     {
-        expected.too_large = model->length + additional > MAX_CONTENT;
+        expected.too_large = (model->length + additional) > MAX_CONTENT;
         return expected;
     }
     expected.calls = 1;
@@ -236,7 +236,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
         expected.error = AMARK_ERROR_OUT_OF_MEMORY;
         return expected;
     }
-    if ((model->capacity <= SIZE_MAX / 2) && (model->capacity * 2 >= required))
+    if ((model->capacity <= (SIZE_MAX / 2)) && ((model->capacity * 2) >= required))
     {
         expected.capacity = model->capacity * 2;
     }
@@ -244,7 +244,7 @@ static expectation_t expect_room(const model_t *model, size_t additional, bool i
     {
         expected.capacity = required;
     }
-    expected.too_large = model->length + additional > MAX_CONTENT;
+    expected.too_large = (model->length + additional) > MAX_CONTENT;
     return expected;
 }
 
@@ -404,7 +404,7 @@ static void run_operation(state_t *state, reader_t *reader)
         if (expected.error == AMARK_ERROR_NONE)
         {
             model->capacity = expected.capacity;
-            CHECK(model->length + count <= MAX_CONTENT);
+            CHECK((model->length + count) <= MAX_CONTENT);
             memset(model->bytes + model->length, byte, count);
             model_truncate(model, model->length + count);
         }
@@ -416,7 +416,7 @@ static void run_operation(state_t *state, reader_t *reader)
         char text[256];
         size_t size = read_byte(reader);
         size_t i;
-        for (i = 0; (i < size) && (i < sizeof(text) - 1); i++)
+        for (i = 0; (i < size) && (i < (sizeof(text) - 1)); i++)
         {
             text[i] = (char)read_byte(reader);
         }

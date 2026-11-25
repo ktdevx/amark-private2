@@ -130,7 +130,7 @@ static void *new_block(size_t size, int zero)
 {
     block_t *b;
 
-    if (size > SIZE_MAX - sizeof(block_t))
+    if (size > (SIZE_MAX - sizeof(block_t)))
     {
         return NULL;
     }
@@ -163,7 +163,7 @@ static void *test_calloc(size_t count, size_t size)
     {
         return NULL;
     }
-    if ((size != 0) && (count > SIZE_MAX / size))
+    if ((size != 0) && (count > (SIZE_MAX / size)))
     {
         return NULL;
     }
@@ -181,7 +181,7 @@ static void *test_realloc(void *ptr, size_t new_size)
     {
         return NULL;
     }
-    if (new_size > SIZE_MAX - sizeof(block_t))
+    if (new_size > (SIZE_MAX - sizeof(block_t)))
     {
         return NULL;
     }
