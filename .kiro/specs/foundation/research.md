@@ -117,7 +117,7 @@
 
 ### Decision: バッファは公開の不透明型、内部向けには構造体を公開する内部ヘッダを持つ
 - **Context**：要件 12。レンダラの出力スロットを拡張が使うため、公開が必要。内部では構造体に埋め込みたい。
-- **Selected Approach**：`amark_buffer_t` は公開では不透明型（作成・解放の関数経由）。`src/runtime/buffer_internal.h` が構造体の定義と、埋め込み用の初期化・破棄の関数（`amark_buffer_init` / `amark_buffer_destroy`）を持つ。
+- **Selected Approach**：`amark_buffer_t` は公開では不透明型（作成・解放の関数経由）。`src/runtime/buffer_internal.h` が構造体の定義と、埋め込み用の初期化・破棄の関数（`amark_buffer_init` / `amark_buffer_deinit`）を持つ。
 - **Rationale**：ABI を不透明型で守りつつ、内部の性能を落とさない。
 
 ### Decision: テスト生成は CMake スクリプトで行い、データは 16 進で扱う

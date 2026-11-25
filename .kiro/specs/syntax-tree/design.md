@@ -38,7 +38,7 @@
 - CommonMark の構文セットの構築関数、パーサの入口
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_destroy`）
+- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_deinit`）
 - テスト時：Naos、`amark_add_test()`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`）、`amark_add_fuzzer()`
 - C99 の標準ライブラリ（`<stddef.h>`、`<stdint.h>`、`<stdbool.h>`、`<string.h>`、`<limits.h>`）
 - レイヤーの規則：`src/tree/` は `src/parse/`、`src/render/`、`src/syntax/` を参照しない。公開ヘッダは他の公開ヘッダだけを include する
@@ -369,7 +369,7 @@ struct amark_node_type_desc {         /* typedef は node.h が前方宣言で�
     bool (*can_contain)(const struct amark_node_type_desc *self, const struct amark_node_type_desc *child);
     amark_error_t (*validate_literal)(const amark_node_t *node, const char *text, size_t length);
     amark_error_t (*init)(amark_node_t *node, void *data);
-    void (*destroy)(amark_node_t *node, void *data);
+    void (*deinit)(amark_node_t *node, void *data);
     amark_error_t (*copy)(amark_node_t *dst, void *dst_data, const amark_node_t *src, const void *src_data);
     bool (*equal)(const amark_node_t *a, const void *a_data, const amark_node_t *b, const void *b_data);
     amark_error_t (*dump)(const amark_node_t *node, const void *data, amark_dump_writer_t *writer);
@@ -494,7 +494,7 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 | 18 | link | INLINE | INLINE | INLINE | NONE | destination、title（""） |
 | 19 | image | INLINE | INLINE | INLINE | NONE | destination、title（""） |
 
-- 文字列の属性を持つ型は、`destroy` / `copy` / `equal` / `dump` の関数表で、`amark_malloc` などで確保した文字列を管理する。`equal` は list の start を type が ordered のときだけ比べる。
+- 文字列の属性を持つ型は、`deinit` / `copy` / `equal` / `dump` の関数表で、`amark_malloc` などで確保した文字列を管理する。`equal` は list の start を type が ordered のときだけ比べる。
 - `document` 型のノードは文書の生成時に 1 つだけ作る。`amark_node_new` で document を指定すると `AMARK_ERROR_INVALID_ARGUMENT`。
 
 **Contracts**: Service [x]
@@ -524,7 +524,7 @@ enum {
 
 **Responsibilities & Constraints**
 - 生成：凍結済みの構文セット（NULL なら `amark_syntax_set_core()`）を参照し、document 型の根のノードを作る。凍結していない構文セットは `AMARK_ERROR_INVALID_STATE`。編集の追跡は無効で始まる。
-- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `destroy` を呼ぶ）。次にソースを解放する。文書が構文セットを所有していれば、その後で `amark_syntax_set_free` で解放し、最後に文書の構造体を解放する。ノードの `destroy` は記述子と構文セットを参照してよい（解放の順序で保証する）。
+- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `deinit` を呼ぶ）。次にソースを解放する。文書が構文セットを所有していれば、その後で `amark_syntax_set_free` で解放し、最後に文書の構造体を解放する。ノードの `deinit` は記述子と構文セットを参照してよい（解放の順序で保証する）。
 - 構文セットの所有（`amark_document_take_syntax_set`、1.10、1.11）：
   - 受け付ける条件：`set` が、文書が使っている構文セットそのもの（`set == amark_document_syntax_set(document)`）で、静的な構文セット（`is_static`）でなく、文書がまだ構文セットを所有していない。どれかに反すれば `AMARK_ERROR_INVALID_ARGUMENT`（NULL の引数も同じ）で、文書は変わらず、所有権は呼び出し側に残る。文書が使うのは凍結済みの構文セットだけなので、受け取る構文セットは常に凍結済み（凍結の規則はそのまま）。
   - 成功の後：構文セットは文書のものになる。呼び出し側は `amark_syntax_set_free` を呼んではならない。凍結済みなので内容は変わらない。
@@ -576,7 +576,7 @@ AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *documen
 
 **Responsibilities & Constraints**
 - ノードは 1 回の確保で、ヘッダと型のデータ（`data_size`、`max_align` の境界）を持つ。型のデータは 0 で埋めてから `init` を呼ぶ。`init` が失敗したら確保を戻して失敗を返す。
-- 部分木の解放の内部関数 `amark_node_destroy_subtree`：切り離されたノードの部分木を後順に反復で解放する（各ノードの `destroy`、リテラル、トークン、全ノードの環からの除去）。公開の `amark_node_free` は StructureEdit が実装する。
+- 部分木の解放の内部関数 `amark_node_destroy_subtree`：切り離されたノードの部分木を後順に反復で解放する（各ノードの `deinit`、リテラル、トークン、全ノードの環からの除去）。公開の `amark_node_free` は StructureEdit が実装する。
 - 生成時、追跡が有効なら `CREATED` を記録する。
 - 子を持てるかは `accepts != 0 || can_contain != NULL` で決まる。
 
@@ -1113,7 +1113,7 @@ struct amark_document {
 ## Testing Strategy
 
 ### Unit Tests（Naos、`tests/tree/`）
-- **document**：既定の構文セットが core であること（1.2）、凍結していない構文セットの拒否（8.7）、ソースの複製と追加でオフセットが保たれること（1.4, 1.5）、チャンクの境目の CRLF を含む行と列（3.5）、追跡が無効で始まること（7.8）、2 つの文書の交互の操作が干渉しないこと（1.9）、構文セットの所有の受け渡し（テスト用アロケータを設定して作った構文セットが文書の解放で解放されブロック数が 0 になること、`destroy` が構文セットを参照する拡張の型でサニタイザが解放の順序の誤りを検出しないこと。1.10）、静的な構文セット・文書が使っていない構文セット・2 回目の拒否で所有権が呼び出し側に残ること（1.11）。
+- **document**：既定の構文セットが core であること（1.2）、凍結していない構文セットの拒否（8.7）、ソースの複製と追加でオフセットが保たれること（1.4, 1.5）、チャンクの境目の CRLF を含む行と列（3.5）、追跡が無効で始まること（7.8）、2 つの文書の交互の操作が干渉しないこと（1.9）、構文セットの所有の受け渡し（テスト用アロケータを設定して作った構文セットが文書の解放で解放されブロック数が 0 になること、`deinit` が構文セットを参照する拡張の型でサニタイザが解放の順序の誤りを検出しないこと。1.10）、静的な構文セット・文書が使っていない構文セット・2 回目の拒否で所有権が呼び出し側に残ること（1.11）。
 - **builtin_types**：19 の型の識別子・名前・ブロック/インライン・葉かどうか・既定の属性（2.1, 2.4, 4.1）、core の構文セットから記述子を引けること（2.5）。
 - **syntax_set**：追加・挿入・削除・置換の順序（8.4）、core の削除の拒否（8.3）、名前の重複と不正な記述子の拒否（8.5）、型の名前の重複の凍結での検出と識別子の決定性（8.6）、凍結後の変更の拒否（8.7）、スロットの種類ごとの順の列挙（8.8）、利用者の範囲の種類（8.9）、名前・記述子・識別子の相互の検索（8.10）、複製が凍結されていないこと（8.11）、spec ごとの範囲が重ならず Amark の範囲に含まれること（8.13）。
 - **extension_type**：表のような検証用の型（データに所有する文字列、`can_contain` の上書き、`validate_literal`、`dump`）で、生成・解放・複製・比較・ダンプで関数表が呼ばれること（8.1, 8.12, 9.6）、`amark_node_mark_edited`（7.9）。

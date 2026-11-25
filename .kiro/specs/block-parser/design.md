@@ -450,7 +450,7 @@ stateDiagram-v2
 **Responsibilities & Constraints**
 - 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）を受け取る。文書を作り（`amark_document_new`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_new` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_new_take_syntax_set` だけが行う。これは `amark_parser_new` と同じ内部の生成（`amark_parser_create`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_new_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
 - 入力：バイト列をソースに追加し（`amark_document_append_source`）、LineReader が切り出した完全な行を BlockEngine に渡す。
-- 終了：最後の行を処理し、開いているブロックをすべて閉じる → 後処理（インラインの前）→ インラインの段階 → 後処理（インラインの後）→ パースの状態の `destroy` とパースの間のデータの解放 → 追跡の有効化（オプションで無効にしない限り）→ 文書を返す。構文セットの所有権は生成のときに文書へ渡してあるので、返した文書はそれを保持し続け、パーサと独立する（11.3）。
+- 終了：最後の行を処理し、開いているブロックをすべて閉じる → 後処理（インラインの前）→ インラインの段階 → 後処理（インラインの後）→ パースの状態の `deinit` とパースの間のデータの解放 → 追跡の有効化（オプションで無効にしない限り）→ 文書を返す。構文セットの所有権は生成のときに文書へ渡してあるので、返した文書はそれを保持し続け、パーサと独立する（11.3）。
 - インラインの段階：根から前順にたどり、インラインの入力が登録されたノードごとに `delegate->parse` を呼ぶ。`begin` は最初の呼び出しの前に 1 回、`end` は最後（失敗のときも）に 1 回。
 - 解放：終了していなければ文書を解放する。文書が構文セットを所有していれば（`amark_parser_new_take_syntax_set` の生成が成功した後）、`amark_document_free` がノードの後でそれを解放する。生成が成功した後は、パースの成否によらず構文セットは文書のものである（`parser.h` に文書化する）。
 
@@ -512,7 +512,7 @@ AMARK_API const amark_inline_delegate_t *amark_inline_delegate_plain(void);
 
 **Implementation Notes**
 - Integration：`amark_inline_delegate_default()` は、この spec では `amark_inline_delegate_plain()` と同じものを返す。`inline-parser` が自分のエンジンを返すように変える。この spec のテストは単純な委譲先を明示して使う。
-- Risks：拡張の `init` の途中で失敗したら、初期化済みのものの `destroy` を逆順に呼ぶ。
+- Risks：拡張の `init` の途中で失敗したら、初期化済みのものの `deinit` を逆順に呼ぶ。
 
 #### LineReader
 
@@ -572,7 +572,7 @@ amark_error_t amark_engine_finish(amark_parser_t *parser);
 - 行の位置は「バイトの位置」と「列」の組で持つ。タブを途中まで消費したとき、残りの列を持つ（`partial_tab_columns`）。列は行の先頭（1 行目は BOM の後）から数える。
 - 消費の関数は、消費した部分をトークンとして指定したノードに記録する。タブの一部だけを消費したときは `PARTIAL_TAB`（`tab_column_offset`、`tab_columns`）のトークンを作り、残りの列を次の消費に回す（2.2）。
 - `amark_block_open`：照合できなかったブロックを閉じ、さらに親が新しい型を受け入れられる（`amark_node_can_contain`）まで閉じながら上へたどり、ノードを作って親の末尾に付け、鎖の最も内側に加える（3.3）。根まで受け入れられなければ `AMARK_ERROR_INVALID_ARGUMENT`。同じ開始の呼び出しの中で複数回呼べる（4.3。例：リストとリスト項目）。
-- ブロックのデータ：`handler->block_data_size` の大きさで 0 で埋めて確保し、パースの終わりまで保つ（閉じた後も `close` と後の構文が読める）。`destroy_block_data` があればパースの終わりに呼ぶ。
+- ブロックのデータ：`handler->block_data_size` の大きさで 0 で埋めて確保し、パースの終わりまで保つ（閉じた後も `close` と後の構文が読める）。`deinit_block_data` があればパースの終わりに呼ぶ。
 
 **Contracts**: Service [x]
 
@@ -616,7 +616,7 @@ struct amark_block_syntax {
                                    amark_block_continue_result_t *out_result);
     amark_error_t (*add_line)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
     amark_error_t (*close)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
-    void (*destroy_block_data)(void *block_data, void *user_data);
+    void (*deinit_block_data)(void *block_data, void *user_data);
     void *user_data;
 };
 /* start が NULL の構文は、他の構文が amark_block_open の handler に指定するだけのもの（例：リスト） */
@@ -748,7 +748,7 @@ typedef struct amark_parse_state_slot {
     amark_slot_header_t header;     /* kind = AMARK_SLOT_PARSE_STATE */
     size_t size;
     amark_error_t (*init)(amark_parse_context_t *ctx, void *state, void *user_data);  /* 任意 */
-    void (*destroy)(amark_parse_context_t *ctx, void *state, void *user_data);        /* 任意。失敗時も呼ぶ */
+    void (*deinit)(amark_parse_context_t *ctx, void *state, void *user_data);        /* 任意。失敗時も呼ぶ */
     void *user_data;
 } amark_parse_state_slot_t;
 
@@ -1136,7 +1136,7 @@ amark_error_t amark_test_parse_check(const amark_test_parse_spec_t *spec, const 
 - INTERFACE ライブラリ `amark_test_parse_gfm`（INTERFACE のソース `gfm_block_ext.c`、インクルード `tests/parse/`、`amark_test_html_gfm` に依存）として公開し、`tests/parse/` の `gfm_hooks_test` と `inline-parser` の `tests/extensions/`（`amark_test_gfm`）がリンクする。`amark` と `amark_internal` のどちらとも組める。配布するライブラリとインストールの規則には含めない（`tests/` はインストールしない。13.5）。
 - Naos に依存しない（`foundation` の規則 7.7、7.8）：`gfm_block_ext.{h,c}` は Naos のヘッダを include せず、`amark_test_parse_gfm` は Naos をリンクせず、依存（`amark_test_html_gfm`）も Naos に依存しない。`inline-parser` の `amark_test_gfm` を通して `inline_parse`（`inline-parser`）と `md_roundtrip`・`md_edit`（`markdown-renderer`）のファジングターゲットに間接にリンクされるので、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義する（`tests/CMakeLists.txt` の `add_subdirectory(parse)` は条件なし、`tests/parse/CMakeLists.txt` の中で `amark_test_parse_gfm` は条件なしに定義し、Naos を使う `gfm_hooks_test` などのテストは `if(AMARK_BUILD_TESTS)` の中）。Naos を使う検査の補助（`amark_test_parse` の `AMARK_CHECK_PARSE` など）はこのライブラリに含めない。
   - 表：段落の最後の行と区切りの行で `reinterpret`、行の `add_line` で行とセルを作ってセルの区間を登録する。行をセルに分けるとき、エスケープされた `|`（直前が `\` の `|`）では区切らない。セルの区間を登録するとき、セルの中の `\|` の `\` を区間から除き（`\` の前後で区間を分ける）、その `\` を `MARKER`（役割 `AMARK_TEST_GFM_ROLE_CELL_PIPE_ESCAPE`）としてセルに記録する。`|` は後ろの区間の先頭に残る（13.6）。インラインのエンジンには `|` だけが見えるので、コードスパンの中でも `\|` が `|` になる（GFM の規則。cmark-gfm の `unescape_pipes` と同じ結果）。区間の隙間は `\` のトークンが覆うので、被覆は保たれる。
-  - 脚注の定義：`[^label]:` のコンテナ、4 列のインデントで継続、拡張の状態の `amark_label_map_t`（パースの状態のスロットの `init` で作り、`destroy` で解放する。値は `test.footnote_def` のノード）に、正規化したラベルで最初の定義だけを登録する。
+  - 脚注の定義：`[^label]:` のコンテナ、4 列のインデントで継続、拡張の状態の `amark_label_map_t`（パースの状態のスロットの `init` で作り、`deinit` で解放する。値は `test.footnote_def` のノード）に、正規化したラベルで最初の定義だけを登録する。
   - タスクリスト：インラインの前の後処理で、項目の最初の段落の `[ ]` / `[x]` を `amark_parse_consume_inline_prefix` で記録し、item を `test.task_item` に置き換える（子とトークンを移し、`amark_parse_move_inline_input` を使う）。
 - 脚注の定義の表の参照：`amark_test_gfm_footnote_definitions(ctx)` は、`amark_parse_extension_state(ctx, amark_test_gfm_footnote_def_extension())` の状態が持つ表を返す。構文セットに脚注の定義の拡張がなければ NULL。表と値のノードはパースの文脈が有効な間（インラインの委譲と後処理の中）だけ使える。`inline-parser` の `test.inline.footnote_ref` は、これを `amark_inline_lookup_label` に渡して引く。
 
@@ -1222,7 +1222,7 @@ struct amark_parser {
 ### Error Strategy
 - 引数の誤り（NULL、未知の印、上限外の深さ、不足した `struct_size`、範囲外の消費、別の文書のノード）は `AMARK_ERROR_INVALID_ARGUMENT` で、パーサの状態を変えない。
 - 状態の誤り（凍結していない構文セット、終了後の操作、`close` の中の行の操作、副作用のある `NONE`）は `AMARK_ERROR_INVALID_STATE`。
-- 確保の失敗とコールバック・委譲先の失敗は、そのエラーコードを返してパーサを `Failed` にする（共通の規約の例外）。拡張の状態の `destroy`、委譲先の `end`、ブロックのデータの `destroy_block_data` は失敗時にも呼ぶ。リークしない。
+- 確保の失敗とコールバック・委譲先の失敗は、そのエラーコードを返してパーサを `Failed` にする（共通の規約の例外）。拡張の状態の `deinit`、委譲先の `end`、ブロックのデータの `deinit_block_data` は失敗時にも呼ぶ。リークしない。
 - 不正な入力（不正な UTF-8、NUL、深すぎる入れ子）はエラーにしない（2.5、12.2）。
 
 ### Error Categories and Responses

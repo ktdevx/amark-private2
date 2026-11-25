@@ -50,6 +50,7 @@
 
 - **Files**：snake_case（`block_quote.c`、`node_edit.c`）
 - **公開関数**：`amark_<対象>_<動作>`（`amark_node_insert_after`、`amark_parser_feed`、`amark_render_html`）
+- **生成と破棄の関数の組**：領域は呼び出し側（または埋め込み先、エンジン）が用意し、構造体の中身だけを生成・破棄する組は `_init` / `_deinit` とする（`amark_buffer_init` / `amark_buffer_deinit`）。領域の確保と解放も行う組は `_new` / `_free` とする。関数表のコールバックの組も同じ（`init` / `deinit`）。破棄するものがなければ `_deinit` は置かない（`amark_parse_options_init`）。
 - **typedef した型**：構造体、列挙、関数ポインタ、整数の別名のすべてで、末尾に `_t` を付ける。公開型も、モジュールをまたぐ内部の型も `amark_<名前>_t` とする。構造体と列挙のタグには `_t` を付けない。不透明型は `typedef struct amark_node amark_node_t;` の形で宣言する。
 - **列挙と定数**：`AMARK_<分類>_<名前>`（`AMARK_NODE_PARAGRAPH`、`AMARK_ERROR_NONE`）
 - **内部関数**：ファイル内でだけ使うなら `static` にする。モジュールをまたいで使う内部関数には、公開関数と同じ `amark_` 接頭辞を付ける。公開 API との区別は名前ではなく、宣言の場所（公開ヘッダか内部ヘッダか）と `AMARK_API` の有無で行う。内部の名前を公開の名前と重複させない。

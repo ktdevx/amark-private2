@@ -650,7 +650,7 @@ typedef struct amark_markdown_hooks_slot {
 
   - `capacity`：`amark_inline_match_delimiters` は「長さの合計の半分（切り捨て）以上」を求める。フックは作業の配列（`amark_inline_run_t` を `count` 個、`amark_inline_run_match_t` を長さの合計の半分の個数）を、`amark_calloc` で確保して状態に持ち、葉の間で使い回して `finish` で解放する。受け取った `capacity`（長さの合計以上）は上流の要求を満たすので、上流の `INVALID_ARGUMENT` は起きない。写した `*out_count` は `capacity` 以下。
   - 失敗：確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`、上流の失敗はそのまま返す。`count` が 0 なら確保せず `*out_count = 0`。
-- 内部の契約：`amark_md_dispatch_build(ctx)`、`amark_md_dispatch_free(ctx)`、`amark_md_chain_of(ctx, type)`。
+- 内部の契約：`amark_md_dispatch_init(ctx)`、`amark_md_dispatch_deinit(ctx)`、`amark_md_chain_of(ctx, type)`。
 
 #### MdEngine
 

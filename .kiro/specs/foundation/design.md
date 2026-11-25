@@ -907,7 +907,7 @@ AMARK_API amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_d
 ```c
 struct amark_buffer { char *data; size_t length; size_t capacity; };
 void amark_buffer_init(amark_buffer_t *buffer); /* 確保しない */
-void amark_buffer_destroy(amark_buffer_t *buffer);
+void amark_buffer_deinit(amark_buffer_t *buffer);
 ```
 - 内部のモジュールは、構造体に `amark_buffer_t` を値で埋め込み、公開の追加の関数をそのまま使える。
 

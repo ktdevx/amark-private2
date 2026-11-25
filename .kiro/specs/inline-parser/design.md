@@ -463,8 +463,8 @@ AMARK_API amark_error_t amark_inline_special_chars(const amark_syntax_set_t *set
 **Contracts**: Service [x]
 ```c
 /* src/parse/inline_internal.h */
-amark_error_t amark_inline_tables_build(amark_parse_context_t *ctx, amark_inline_tables_t *out_tables);
-void amark_inline_tables_free(amark_inline_tables_t *tables);
+amark_error_t amark_inline_tables_init(amark_inline_tables_t *tables, amark_parse_context_t *ctx);
+void amark_inline_tables_deinit(amark_inline_tables_t *tables);
 ```
 
 #### InlineContext

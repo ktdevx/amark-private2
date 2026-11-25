@@ -38,7 +38,7 @@
 - 木の変更（出力は木を変えない）、ノード型の登録とレジストリの API（`syntax-tree`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_destroy`）。`src/render/` だけが内部 API を使う
+- `foundation` の公開 API：`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_deinit`）。`src/render/` だけが内部 API を使う
 - `syntax-tree` の公開 API：`node.h`、`document.h`、`extension.h`（`amark_syntax_set_find_node_type`、`amark_syntax_set_slot_count`、`amark_syntax_set_slot_at`、`amark_node_source_span`、`amark_document_position`、`amark_document_source_data`、属性とリテラルの取得関数）。`src/tree/` の内部ヘッダは使わない
 - テスト時：Naos、`amark_add_test()`、`amark_add_generated_tests()`、`AmarkTestGen.cmake`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`、`amark_test_allocator_t`）、`amark_test_tree`（`amark_test_tree_build`）、`amark_add_fuzzer()`
 - レイヤーの規則：`src/render/` は `src/syntax/` と `src/parse/` を参照しない。`src/syntax/html_*.c` は公開ヘッダだけを include する（`src/render/` の内部ヘッダを使わない）。公開ヘッダは他の公開ヘッダだけを include する
@@ -417,7 +417,7 @@ typedef struct amark_html_hooks_slot {
     void *user_data;
 } amark_html_hooks_slot_t;
 ```
-- 内部の契約（`html_internal.h`）：`amark_html_dispatch_build(ctx)`、`amark_html_dispatch_free(ctx)`、`amark_html_chain_of(ctx, type, plain)`。
+- 内部の契約（`html_internal.h`）：`amark_html_dispatch_init(ctx)`、`amark_html_dispatch_deinit(ctx)`、`amark_html_chain_of(ctx, type, plain)`。
 
 #### HtmlEngine
 
@@ -483,7 +483,7 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 - Concurrency strategy：文脈は呼び出しごとに独立。共有するのは凍結した構文セットと `const` の静的データ（`amark.core.html` の表、エスケープの表）と、グローバルのアロケータの設定だけ。
 
 **Implementation Notes**
-- Integration：`html_render.c` が `amark_html_dispatch_build` と HtmlOutput の初期化・終了を呼ぶ。数の書式（`start`、行と列）は `snprintf` を使わず、内部の 10 進の変換で書く（ロケールに依存しない）。
+- Integration：`html_render.c` が `amark_html_dispatch_init` と HtmlOutput の初期化・終了を呼ぶ。数の書式（`start`、行と列）は `snprintf` を使わず、内部の 10 進の変換で書く（ロケールに依存しない）。
 - Validation：`render_entry_test`、`slot_test`、`context_test`、`hooks_filter_test`、`oom_test`、`scale_test`。
 - Risks：連鎖の呼び出しの深さは同じ型のスロットの数に、入れ子の出力の深さは `AMARK_HTML_MAX_NESTING` に比例してスタックを使う（ノードの深さには比例しない）。
 
