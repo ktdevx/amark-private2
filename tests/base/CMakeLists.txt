@@ -7,3 +7,8 @@ amark_add_test(version_test SOURCES version_test.c)
 amark_add_test(version_internal_test SOURCES version_test.c INTERNAL)
 
 amark_add_test(error_test SOURCES error_test.c)
+
+# The public API (amark), and the internal overflow-checked arithmetic
+# (amark_internal).
+amark_add_test(allocator_test SOURCES allocator_test.c)
+amark_add_test(allocator_internal_test SOURCES allocator_internal_test.c INTERNAL)

@@ -25,6 +25,7 @@ add_library(amark_objects OBJECT)
 target_sources(amark_objects PRIVATE
   base/version.c
   base/error.c
+  base/allocator.c
 )
 amark_target_defaults(amark_objects)
 target_include_directories(amark_objects PRIVATE
