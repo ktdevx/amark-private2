@@ -114,6 +114,16 @@ if(MODE STREQUAL "pkg_config")
     message("AMARK_SKIP: pkg-config not found")
     return()
   endif()
+  # A file named pkg-config that cannot run here (for example the Perl script
+  # that Strawberry Perl puts on PATH on Windows) counts as no pkg-config.
+  execute_process(COMMAND "${PKG_CONFIG_EXECUTABLE}" --version
+    RESULT_VARIABLE _pkg_config_result
+    OUTPUT_QUIET ERROR_QUIET)
+  if(NOT _pkg_config_result EQUAL 0)
+    message("AMARK_SKIP: pkg-config not usable: ${PKG_CONFIG_EXECUTABLE} --version "
+      "failed (${_pkg_config_result})")
+    return()
+  endif()
 endif()
 
 file(REMOVE_RECURSE "${WORK_DIR}")
