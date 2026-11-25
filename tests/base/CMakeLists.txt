@@ -12,3 +12,5 @@ amark_add_test(error_test SOURCES error_test.c)
 # (amark_internal).
 amark_add_test(allocator_test SOURCES allocator_test.c)
 amark_add_test(allocator_internal_test SOURCES allocator_internal_test.c INTERNAL)
+
+amark_add_test(utf8_test SOURCES utf8_test.c)
