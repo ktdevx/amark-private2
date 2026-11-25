@@ -27,7 +27,7 @@
 - `src/syntax/` のブロックの組み込み拡張（構文ごとに 1 ファイル）と、CommonMark の構文セットを作る関数（`src/syntax/commonmark.c`）。構築関数が加える拡張の順（`amark.core` → 出力の core 拡張 → 構文の拡張）の規則。ただし `commonmark.c` の出力の core 拡張の一覧に `amark_markdown_core_extension()` を足す 1 行は、`markdown-renderer` のタスク 3.7 が編集する（この spec は 1 行で足せる配列の形と順の規則を持つ）
 - HTML ブロックの開始と終わりの条件と HTML のタグの走査の規則（`src/parse/scan_html.c` の 1 つの実装）。バイト列の版と区間の並びの版の両方を `scan.h` で公開し、`commonmark.html_block`、`inline-parser` の raw HTML、`markdown-renderer` の判定はすべてこの実装を使う
 - `inline-parser` の依頼で加えた宛先の括弧の入れ子の上限、エンジンの役割の範囲の分け方、`amark_test_parse_gfm`、`amark_test_parse_check` の唯一の実装（`inline-parser` は実装せず、使うだけ）
-- スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`（0x0100）、`AMARK_SLOT_PARAGRAPH_CONSUMER`（0x0101）、`AMARK_SLOT_POSTPROCESS`（0x0102）、`AMARK_SLOT_PARSE_STATE`（0x0103）とその構造体
+- スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`（1）、`AMARK_SLOT_PARAGRAPH_CONSUMER`（2）、`AMARK_SLOT_POSTPROCESS`（3）、`AMARK_SLOT_PARSE_STATE`（4）とその構造体
 - 組み込みのブロック構文の構文トークンの役割の番号（`commonmark.h`。0x0001–0x00FF に収める）と、エンジンが使う役割の番号の範囲 0xFF00–0xFFFF の割り当て（ブロックのエンジン 0xFF00–0xFF0F をこの spec が使い、インラインのエンジン 0xFF10–0xFF1F を `inline-parser` に割り当て、0xFF20–0xFFFF を予約する。`block.h` の注記）
 - `src/base/` への追加：case fold（`case_fold_tables.inc`、`amark_unicode_case_fold`）、文字参照（`entity.c`、`entity_tables.inc`）と、その生成手順（`tools/gen_unicode_tables.py` の拡張、`tools/gen_entity_table.py`）
 - テスト：`tests/parse/`、`tests/syntax/`、`tests/base/` の追加分、テスト用の補助 `tests/support/parse_check.{h,c}`（INTERFACE ライブラリ `amark_test_parse`）、GFM 相当のブロックの検証用の構文 `tests/parse/gfm_block_ext.{h,c}`（INTERFACE ライブラリ `amark_test_parse_gfm`。`inline-parser` のテストが再利用する）、`fuzz/block_parse_fuzz.c`、`bench/`（`bench/CMakeLists.txt` と、その中のベンチマークの登録関数 `amark_add_bench`。`bench/CMakeLists.txt` は他の spec も追記する。下の「共同で編集するファイル」）
@@ -247,7 +247,7 @@ bench/
 
 ### Modified Files
 - `include/amark/amark.h` — `entity.h`、`scan.h`、`parser.h`、`block.h`、`commonmark.h` を、`foundation` が定める正準の順（`amark.h` の include の順の規則）のそれぞれの位置に追加する（`inline-parser` の `inline.h` は後で `block.h` と `commonmark.h` の間に入る）。 依存の順（左は右を include しない）：`entity.h` → `scan.h` → `parser.h`（`extension.h` も include）→ `block.h` → `commonmark.h`。
-- `include/amark/extension.h` — `syntax-tree` が置いたスロットの種類の範囲の表（`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` / `_LAST`、0x0100–0x01FF）の `block-parser` の節の下に、スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`、`AMARK_SLOT_PARAGRAPH_CONSUMER`、`AMARK_SLOT_POSTPROCESS`、`AMARK_SLOT_PARSE_STATE` の番号を追記する。
+- `include/amark/extension.h` — `syntax-tree` が置いたスロットの種類の一覧で割り当てた番号 1–4 で、スロットの種類 `AMARK_SLOT_BLOCK_SYNTAX`、`AMARK_SLOT_PARAGRAPH_CONSUMER`、`AMARK_SLOT_POSTPROCESS`、`AMARK_SLOT_PARSE_STATE` を追記する。
 - `include/amark/unicode.h`、`src/base/unicode.c` — `amark_unicode_case_fold()` を追加する。
 - `tools/gen_unicode_tables.py` — `CaseFolding.txt`（状態 C と F）を読み、`case_fold_tables.inc` を出力する。`--check` の対象に加える。
 - `src/CMakeLists.txt` — `amark_objects` に `src/parse/*.c`、`src/syntax/*.c`、`src/base/entity.c` を追加する。
@@ -255,7 +255,7 @@ bench/
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(block_parse SOURCES block_parse_fuzz.c CORPUS corpus/block_parse)`。
 - `CMakeLists.txt`（最上位）— オプション `AMARK_BUILD_BENCH`（既定 OFF）と、ON のときの `add_subdirectory(bench)`。`foundation` の Downstream Extension Points の表に載る拡張点への追記。
 - `.gitattributes` — `tests/syntax/data/spec_blocks.txt export-ignore`。同じく `foundation` の拡張点への追記。
-- 上流の変更（`syntax-tree` の所有。`syntax-tree` の spec に反映済みで、`syntax-tree` のタスクが実装する）：`amark_document_take_syntax_set`、`amark_node_import_children`、スロットの種類の範囲の表（Integration の節）。
+- 上流の変更（`syntax-tree` の所有。`syntax-tree` の spec に反映済みで、`syntax-tree` のタスクが実装する）：`amark_document_take_syntax_set`、`amark_node_import_children`、スロットの種類の一覧（Integration の節）。
 
 ## System Flows
 
@@ -1277,10 +1277,10 @@ struct amark_parser {
 - **`syntax-tree` への追加（2026-11-25 に `syntax-tree` の spec に反映済み。実装は `syntax-tree` のタスク 3.4、5.5 が行う）**：
   1. `AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);`（`syntax-tree` の 1.10、1.11。非 `const` の受け取りのまま）— 文書が使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_destroy` でノードとソースの後に解放する。静的な構文セット、文書が使っていない構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT` で、所有権は呼び出し側に残る。確保をしない。この spec は、非 `const` の構文セットを受け取る `amark_parser_create_take_syntax_set` の生成の最後でだけ呼ぶ（ParserAPI。1.2、1.9、11.3）。
   2. `AMARK_API amark_error_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent);`（`syntax-tree` の 4.10、4.11）— `source_parent`（根でもよい）の子をすべて、ソースごとに 1 回だけ複製して取り込み、`before` の前（NULL なら末尾）に順に挿入する。型の対応付け・包含の検査・確保をつなぎ込みの前に終え、全か無か。記録は `parent` に `CHILDREN`、各複製に `RELOCATED`。この spec は断片のパースで使う（Fragment。10.1、10.2、10.4、10.5）。
-  3. スロットの種類の範囲の表（`syntax-tree` の 8.13。`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` 0x0100 – `_LAST` 0x01FF）。この spec は、その `block-parser` の節の下に 0x0100–0x0103 を追記する（予定どおりの追記）。
+  3. スロットの種類の通し番号の一覧（`syntax-tree` の 8.13）。この spec は、一覧で割り当てた 1–4 の種類を追記する（予定どおりの追記）。
 - **`foundation` の生成手順への追加**（foundation の design が予定している作業）：case fold の表と関数、文字参照の表と関数、`.gitattributes` の `export-ignore`。
 - **`foundation` の Downstream Extension Points（2026-11-25 の横断レビュー r1）**：この spec の最上位の `CMakeLists.txt` への追記（オプション `AMARK_BUILD_BENCH` と `add_subdirectory(bench)`）と、`.gitattributes` への `tests/syntax/data/spec_blocks.txt export-ignore` の追記は、`foundation` の Downstream Extension Points の表の行として載る（行の追加は `foundation` の spec が行う。この spec はその表の拡張点の範囲で編集する）。`amark.h` への追加は `foundation` の正準の順に従う。
-- **スロットの種類の番号の範囲**：`block-parser` 0x0100–0x01FF、`inline-parser` 0x0200–0x02FF、`html-renderer` 0x0300–0x03FF（`AMARK_SLOT_HTML_NODE` 0x0301、`AMARK_SLOT_HTML_HOOKS` 0x0302。`html-renderer` の design と一致）、`markdown-renderer` 0x0400–0x04FF。この表は `syntax-tree` の `extension.h` に定数と注記として置かれた（上記 3）。
+- **スロットの種類の番号**：spec ごとの範囲は設けず、通し番号で `block-parser` 1–4、`inline-parser` 5–10、`html-renderer` 11–12（`AMARK_SLOT_HTML_NODE` 11、`AMARK_SLOT_HTML_HOOKS` 12。`html-renderer` の design と一致）、`markdown-renderer` 13–14。この一覧は `syntax-tree` の `extension.h` に注記として置かれた（上記 3）。
 - **`html-renderer` との関係**：構築関数は `amark_html_core_extension()` を `amark.core` の直後に加える（`html-renderer` の登録の規則 4）。
 - **`markdown-renderer` からの依頼（2026-11-25 に反映。`markdown-renderer` の design の Integration & Upstream Changes の `block-parser` の 1、2）**：
   1. `scan.h` に、区間の並びを作らずに使えるバイト列の `amark_scan_html_block_start`、`amark_scan_html_block_end`、`amark_scan_html_open_tag_bytes`、`amark_scan_html_closing_tag_bytes` を公開し、`commonmark.html_block` と区間の並びの版のタグの走査は `scan_html.c` の同じ内部の走査を使う（TextInput と Scanners、Builtin syntaxes の html_block。7.7、7.8）。この spec のタスク 1.1、3.4、7.9 で実装する。

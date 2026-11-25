@@ -23,7 +23,7 @@
 
 ### This Spec Owns
 - 公開ヘッダ `include/amark/inline.h`（インラインの文脈の API、6 種類のスロットの構造体、エスケープに関わる文字の問い合わせ、パースの文脈なしで使える純粋な関数 `amark_inline_delimiter_flanks`・`amark_inline_match_delimiters`・`amark_inline_scan_raw_html`）と、`extension.h`・`commonmark.h`・`amark.h` への追記
-- スロットの種類 `AMARK_SLOT_INLINE_SYNTAX`（0x0201）、`AMARK_SLOT_INLINE_DELIMITER`（0x0202）、`AMARK_SLOT_INLINE_BRACKET`（0x0203）、`AMARK_SLOT_INLINE_TEXT_SCANNER`（0x0204）、`AMARK_SLOT_INLINE_NODE_TRAITS`（0x0205）、`AMARK_SLOT_INLINE_SPECIAL`（0x0206）。範囲 0x0200–0x02FF
+- スロットの種類 `AMARK_SLOT_INLINE_SYNTAX`（5）、`AMARK_SLOT_INLINE_DELIMITER`（6）、`AMARK_SLOT_INLINE_BRACKET`（7）、`AMARK_SLOT_INLINE_TEXT_SCANNER`（8）、`AMARK_SLOT_INLINE_NODE_TRAITS`（9）、`AMARK_SLOT_INLINE_SPECIAL`（10）。番号は `syntax-tree` の通し番号の一覧で割り当てたもの
 - `src/parse/inline_*.c` のインラインのエンジン（スロットの表、文脈、区切り文字、ブラケット、テキストのまとめと走査、委譲先の本体、文字の問い合わせ）と、既定の委譲先をこのエンジンにする変更
 - `src/syntax/` のインラインの組み込み拡張（構文ごとに 1 ファイル）と、`amark_syntax_set_add_commonmark` に加えるインラインの拡張の一覧と順
 - インラインの構文トークンの役割の番号（`AMARK_CM_ROLE_*` の 0x0100–0x01FF）と、インラインのエンジンの役割の値（`block-parser` が割り当てた 0xFF10–0xFF1F の中で定める）、インラインの優先度（`AMARK_CM_INLINE_PRIORITY_*`）
@@ -223,7 +223,7 @@ bench/
 ```
 
 ### Modified Files
-- `include/amark/extension.h` — スロットの種類 0x0201–0x0206 の名前と番号、範囲 0x0200–0x02FF の注記（`syntax-tree` が追加中の範囲の表の `inline-parser` の行）。
+- `include/amark/extension.h` — スロットの種類 5–10 の名前と番号（`syntax-tree` のスロットの種類の一覧で割り当てた番号）。
 - `include/amark/amark.h` — `foundation` が定める正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`・`html.h` → `entity.h`・`scan.h`・`parser.h`・`block.h`・`inline.h`・`commonmark.h` → `markdown.h`）の `inline.h` の位置に追加する。順はこの spec では決めず、`foundation` の定めに従う。
 - `include/amark/commonmark.h` — インラインの拡張の取得関数 10 個、インラインの役割の番号、インラインの優先度を追記する。
 - `src/parse/inline_plain.c` — `amark_inline_delegate_default()` が `amark_inline_engine_delegate` を返すようにする（`block-parser` の design が予定する変更）。
@@ -1094,7 +1094,7 @@ struct amark_inline_context {
   2. 生の HTML の判定の関数を公開する（依頼の時点の名前は `amark_scan_raw_html`。cross-spec review r1 で `inline.h` の名前の空間に揃えて `amark_inline_scan_raw_html` に改名。引数と規則は変えない）。所有の判断：タグの規則は `block-parser`（`scan_html.c` の 1 つの実装。バイト列の版と区間の並びの版）、コメント・処理命令・宣言・CDATA の規則と振り分けはこの spec の `raw_html.c` が持ち、構文と公開の関数が同じ実装を使う（7.7、RawHtml）。`markdown-renderer` は HTML ブロックの開始と終わりの条件を `block-parser` の `amark_scan_html_block_start` / `_end` から、インラインの生の HTML をこの関数から得る。→ この spec のタスク 1.2（前提の確認）、4.5。
   3. テキストの走査の一致の範囲に `ESCAPE` か `CHAR_REF` のトークンの文字が含まれるなら採らない規則を InlineText に加える（4.5）。→ この spec のタスク 2.7、3.4、7.2。
   4. `gen_examples.cmake` に `CHECK=` を足す（14.4、InlineCheck）。ファイルは `block-parser` のタスク 1.4 が先に作り、この spec のタスク 1.4 が予約済みの `EXPECT=html`・`FACTORY=`・`CHECK=` を追加で足す。→ この spec のタスク 1.4。`tests/extensions/gfm_set.c` に `amark_test_md_gfm` を加える編集と `amark_test_gfm` の依存の追加は、`markdown-renderer` のタスク 4.2 が行う（この spec は部品の並びを 1 か所の配列にしておくだけ）。
-- **`syntax-tree`**：並行して追加中の `amark_document_take_syntax_set`、`amark_node_import_children`、スロットの範囲の表に依存する。範囲の表の `inline-parser` の行（0x0200–0x02FF、0x0201–0x0206 の名前）をこの spec が `extension.h` に追記する。それ以外の変更は要らない。
+- **`syntax-tree`**：並行して追加中の `amark_document_take_syntax_set`、`amark_node_import_children`、スロットの種類の一覧に依存する。一覧で割り当てた 5–10 の種類をこの spec が `extension.h` に追記する。それ以外の変更は要らない。
 - **`html-renderer`**：変更は要らない。`gfm_html_ext.h` が公開する記述子（`test.strikethrough`、`test.footnote_ref` とそのラベルの設定）と部品の拡張をそのまま使う。準拠テストで出力の差が見つかったら、`html-renderer` の出力の表を直す。
 - **`foundation`**：予定どおり、`.gitattributes` に spec.txt の `export-ignore` を加える。CI の構成に `AMARK_REQUIRE_SPEC_TESTS=ON` を加える。`amark.h` の `inline.h` の位置は `foundation` の正規の順に従う。ファジングのターゲットがリンクするテスト支援ライブラリの規則（Naos に依存しない、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` で定義される、`LIBRARIES` のターゲットがなければ `amark_add_fuzzer` が構成を失敗させる）に `amark_test_gfm` を合わせる。
 - **`block-parser`（例の生成の手順とベンチマーク）**：`tests/support/gen_examples.cmake` は `block-parser` のタスク 1.4 が spec.txt の形式の唯一のパーサとして先に作る（基本の契約は `block-parser` の design）。この spec は予約済みの名前を追加で足して拡張し、基本の経路の出力を変えない。`bench/CMakeLists.txt`（`amark_add_bench` の定義と登録）も `block-parser` が所有し（`AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は最上位の `CMakeLists.txt` の `foundation` の拡張点）、この spec は `amark_add_bench(inline_pathological ...)` の 1 行を追記する。`amark_parser_create` は構文セットを借りるだけで、所有権を渡すのは `amark_parser_create_take_syntax_set`（`AMARK_PARSE_TAKE_SYNTAX_SET` の印はない）。この spec のテストと補助は、構文セットを渡すとき `block-parser` のこの取り決めに従う。

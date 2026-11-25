@@ -23,7 +23,7 @@
 
 ### This Spec Owns
 - 公開ヘッダ `include/amark/render.h`（レンダラが共有する出力先の型）と `include/amark/html.h`（オプション、入口、スロットの構造体、出力の文脈の API、ユーティリティ、組み込みの HTML 出力の構文拡張の取得）
-- `include/amark/extension.h` への追記：スロットの種類の番号 `AMARK_SLOT_HTML_NODE`、`AMARK_SLOT_HTML_HOOKS`（この spec の範囲は 0x0300–0x03FF）
+- `include/amark/extension.h` への追記：スロットの種類の番号 `AMARK_SLOT_HTML_NODE`、`AMARK_SLOT_HTML_HOOKS`（`syntax-tree` の一覧で割り当てた 11、12）
 - `src/render/` の HTML のエンジンのすべて：出力先と書き出しと分類つきのフィルタ、スロットの検査と連鎖の表、部分木のたどり、出力の文脈、前後のフックと拡張ごとの状態、入れ子の出力、エスケープと URL のユーティリティ
 - 組み込みの HTML 出力の構文拡張 `amark.core.html`（名前、19 のノード型のスロット、公開の取得関数）と、その実装 `src/syntax/html_core.c`、`html_blocks.c`、`html_inlines.c`
 - 組み込みの HTML 出力の登録の規則（下記「組み込みの HTML 出力の登録の規則」）
@@ -168,7 +168,7 @@ fuzz/
 
 ### Modified Files
 - `include/amark/amark.h` — `foundation` の design が定める `amark.h` の正規の include の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）の「`render.h`、`html.h`」の位置に、この 2 つをこの順で追加する。
-- `include/amark/extension.h` — スロットの種類の番号の節に `AMARK_SLOT_HTML_NODE`（0x0301）、`AMARK_SLOT_HTML_HOOKS`（0x0302）と、この spec の範囲（0x0300–0x03FF）の注記を追記する。
+- `include/amark/extension.h` — スロットの種類の一覧で割り当てた番号で `AMARK_SLOT_HTML_NODE`（11）、`AMARK_SLOT_HTML_HOOKS`（12）を追記する。
 - `src/CMakeLists.txt` — `amark_objects` に `src/render/html_*.c` と `src/syntax/html_*.c` を追加する。
 - `tests/CMakeLists.txt` — `add_subdirectory(html)` を追加する。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(html_render SOURCES html_render_fuzz.c CORPUS corpus/html_render)` を追加する。
@@ -293,9 +293,9 @@ graph TB
 typedef amark_error_t (*amark_write_fn_t)(void *user_data, const char *data, size_t length);
 
 /* include/amark/extension.h（追記） */
-/* 0x0300–0x03FF：html-renderer */
-#define AMARK_SLOT_HTML_NODE  0x0301u   /* amark_html_node_slot_t */
-#define AMARK_SLOT_HTML_HOOKS 0x0302u   /* amark_html_hooks_slot_t */
+/* html-renderer（syntax-tree の一覧の 11–12） */
+#define AMARK_SLOT_HTML_NODE  11u   /* amark_html_node_slot_t */
+#define AMARK_SLOT_HTML_HOOKS 12u   /* amark_html_hooks_slot_t */
 ```
 
 ### Render

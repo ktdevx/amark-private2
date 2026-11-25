@@ -22,7 +22,7 @@
 ## Boundary Commitments
 
 ### This Spec Owns
-- 公開ヘッダ `include/amark/markdown.h`（オプション、報告、入口、2 種類のスロットの構造体、出力の文脈の API、エスケープのユーティリティ、`amark.core.markdown` の取得、CommonMark の補助関数）と、`amark.h`・`extension.h` への追記（`AMARK_SLOT_MARKDOWN_NODE` 0x0401、`AMARK_SLOT_MARKDOWN_HOOKS` 0x0402、範囲 0x0400–0x04FF の注記）
+- 公開ヘッダ `include/amark/markdown.h`（オプション、報告、入口、2 種類のスロットの構造体、出力の文脈の API、エスケープのユーティリティ、`amark.core.markdown` の取得、CommonMark の補助関数）と、`amark.h`・`extension.h` への追記（`AMARK_SLOT_MARKDOWN_NODE` 13、`AMARK_SLOT_MARKDOWN_HOOKS` 14。`syntax-tree` の一覧で割り当てた番号）
 - `src/render/markdown_*` の Markdown のエンジンのすべて：元の表記と作り直しの判定、トークンの出力順の列挙、行と接頭辞、葉の中身の解決（エスケープ、保護、区切り文字）、ブロックの区切り、スロットの検査と連鎖、入口とたどり
 - 組み込みの Markdown 出力の構文拡張 `amark.core.markdown`（19 のノード型のスロット、フック）と、その実装 `src/syntax/md_core.c`、`md_blocks.c`、`md_inlines.c`
 - 元の表記の出力の規則、保守的なエスケープの規則、区切り文字の選び直しの規則、ブロックの区切りの規則、接頭辞の付け直しの規則（このファイルの各コンポーネント）
@@ -198,7 +198,7 @@ fuzz/
 
 ### Modified Files
 - `include/amark/amark.h` — `foundation` が定める正準の順に従い、`markdown.h` を最後に追加する。
-- `include/amark/extension.h` — 範囲 0x0400–0x04FF の節に `AMARK_SLOT_MARKDOWN_NODE`（0x0401）、`AMARK_SLOT_MARKDOWN_HOOKS`（0x0402）を追記する。
+- `include/amark/extension.h` — スロットの種類の一覧で割り当てた番号で `AMARK_SLOT_MARKDOWN_NODE`（13）、`AMARK_SLOT_MARKDOWN_HOOKS`（14）を追記する。
 - `src/CMakeLists.txt` — `amark_objects` に `src/render/markdown_*.c` と `src/syntax/md_*.c` を追加する。
 - `src/syntax/commonmark.c` — 出力の core 拡張の一覧に `amark_markdown_core_extension()` を `amark_html_core_extension()` の次に 1 行足す（登録の規則 4）。
 - `tests/CMakeLists.txt` — `add_subdirectory(markdown)` を `add_subdirectory(extensions)` の前に追加する（`foundation` の規則に従い、Naos に依存しない補助ライブラリは `AMARK_FUZZ` だけのときも定義される）。
@@ -349,9 +349,9 @@ graph TB
 **Contracts**: Service [x]
 ```c
 /* include/amark/extension.h（追記） */
-/* 0x0400–0x04FF：markdown-renderer */
-#define AMARK_SLOT_MARKDOWN_NODE  0x0401u   /* amark_markdown_node_slot_t */
-#define AMARK_SLOT_MARKDOWN_HOOKS 0x0402u   /* amark_markdown_hooks_slot_t */
+/* markdown-renderer（syntax-tree の一覧の 13–14） */
+#define AMARK_SLOT_MARKDOWN_NODE  13u   /* amark_markdown_node_slot_t */
+#define AMARK_SLOT_MARKDOWN_HOOKS 14u   /* amark_markdown_hooks_slot_t */
 ```
 
 ### Render
@@ -944,7 +944,7 @@ struct amark_markdown_context {
 この spec の実装の前に、次の上流の spec を更新する（spec の境界を守るための回避策は作らない）。
 
 - **`foundation`**：`amark_error_t` の末尾に `AMARK_ERROR_UNREPRESENTABLE = 6`（「表現できない」）を追加し、`amark_error_string` に文字列を足す（エラーコードの追加は既定の Revalidation Trigger）。
-- **`syntax-tree`**：API の変更は要らない。`extension.h` の範囲の表の `markdown-renderer` の行に `AMARK_SLOT_MARKDOWN_NODE`（0x0401）、`AMARK_SLOT_MARKDOWN_HOOKS`（0x0402）を記す（予定どおりの追記）。
+- **`syntax-tree`**：API の変更は要らない。`extension.h` のスロットの種類の一覧で割り当てた番号で `AMARK_SLOT_MARKDOWN_NODE`（13）、`AMARK_SLOT_MARKDOWN_HOOKS`（14）を記す（予定どおりの追記）。
 - **`block-parser`**：
   1. `scan.h` に、`amark_text_input_t` を作らずに使えるバイト列の走査を追加する：`bool amark_scan_html_block_start(const char *line, size_t length, bool interrupting, int *out_kind)`（7 種類の開始の条件。段落を中断する場面では種類 7 を不成立にする）、`bool amark_scan_html_block_end(int kind, const char *line, size_t length)`（種類 1–5 の終わりの条件）、`bool amark_scan_html_open_tag_bytes` / `amark_scan_html_closing_tag_bytes`（同じ規則のバイト列の版）。`commonmark.html_block` と既存の走査はこれらを使い、規則を 1 か所に保つ。
   2. 構築関数の出力の core 拡張の一覧に `amark_markdown_core_extension()` を足す（予定どおり。この spec のタスクが 1 行を足す）。

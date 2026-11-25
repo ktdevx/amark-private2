@@ -25,14 +25,14 @@
 - 公開ヘッダ `include/amark/{node,document,token,iterator,dump,extension}.h` と、`amark.h` への追加
 - `src/tree/` のすべて：文書、ソースと行の索引、ノード、構造の編集、複製と取り込み、リテラルと属性、組み込みのノード型の記述子、編集の追跡、構文トークン、ロスレス性の検証、走査、ソース上の位置、比較、ダンプ、構文セット（レジストリ）、木の不変条件の検査
 - 木の意味の不変条件：包含の規則、リテラルと属性の値の規則（LF への正規化を含む）
-- 構文トークンの種類と印の定義、編集の記録のビットの定義、スロットの種類の番号の範囲と、spec ごとの範囲の割り当ての表
+- 構文トークンの種類と印の定義、編集の記録のビットの定義、スロットの種類の番号の範囲（Amark と利用者）と、Amark の種類の通し番号の一覧
 - 文書による構文セットの所有（`amark_document_take_syntax_set`）と、子をまとめた取り込み（`amark_node_import_children`）の意味論
 - テスト用の補助 `tests/support/tree_builder.{h,c}`（S 式から木を組み立てる）と INTERFACE ライブラリ `amark_test_tree`
 - `tests/tree/` のテストと、`fuzz/tree_edit_fuzz.c` のファジングターゲット
 
 ### Out of Boundary
 - 構文トークンを実際に記録する処理、トークンの役割の番号の値（構文ごとに `block-parser`、`inline-parser` が定める）
-- スロットの種類ごとの構造体と、その番号の名前と値（スロットを実行する spec が、範囲の表で割り当てた自分の範囲の中で `extension.h` に追記する）
+- スロットの種類ごとの構造体と、その番号の名前と値（スロットを実行する spec が、一覧で割り当てた番号で `extension.h` に追記する）
 - 編集した部分の作り直し、出力時の表現可否の判定（例：リンクの中のリンク）、エスケープ（`markdown-renderer`）
 - HTML の出力（リンク参照定義を出さないことを含む。`html-renderer`）
 - CommonMark の構文セットの構築関数、パーサの入口
@@ -47,11 +47,11 @@
 - 構文トークンの種類・印・フィールドの追加や意味の変更 → `block-parser`、`inline-parser`、`markdown-renderer`
 - 編集の記録のビットの追加や伝播の規則の変更 → `markdown-renderer`
 - 組み込みのノード型の追加、属性・リテラルの規則（LF の正規化、検査）の変更 → すべての下流の spec
-- 包含の規則、`amark_node_type_desc_t` / `amark_extension_t` / `amark_slot_header_t` の形、識別子の割り当て規則、スロットの番号の範囲と spec ごとの範囲の表の変更 → すべての下流の spec と利用者の拡張
+- 包含の規則、`amark_node_type_desc_t` / `amark_extension_t` / `amark_slot_header_t` の形、識別子の割り当て規則、スロットの番号の範囲と種類の一覧の変更 → すべての下流の spec と利用者の拡張
 - ソースの扱い（追加、取り込み時の複製）の変更 → `block-parser`、`markdown-renderer`
 - 構文セットの所有の受け渡しの規則（受け付ける条件、解放の順序）、子をまとめた取り込みの規則（検査の順、全か無か、編集の記録）の変更 → `block-parser`（便宜の関数と断片のパース）と、同じ関数を使う上位の spec
 - ダンプの形式の変更 → ダンプで期待値を書くすべての spec のテスト
-- 下流の spec のスロットの種類の追加・番号の変更 → この spec の範囲の表（右の列）と `extension.h` の注記
+- 下流の spec のスロットの種類の追加・番号の変更 → この spec の種類の一覧と `extension.h` の注記
 - `foundation` の `amark.h` の正規の include の順の変更 → この spec（`amark.h` への追加の位置）
 
 ## Architecture
@@ -256,7 +256,7 @@ graph TB
 | 8.1, 8.2, 8.9 | 記述子とスロット | SyntaxSet | `amark_node_type_desc_t`, `amark_extension_t`, `amark_slot_header_t` | — |
 | 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.10, 8.11 | 構文セットの操作、凍結、問い合わせ | SyntaxSet | `amark_syntax_set_*` | — |
 | 8.12 | 関数表の呼び出し | NodeCore, CopyImport, Equality, Dump | 記述子の関数表 | — |
-| 8.13 | spec ごとのスロットの種類の範囲 | SyntaxSet | `AMARK_SLOT_KIND_*_FIRST` / `_LAST` | — |
+| 8.13 | Amark のスロットの種類の通し番号の一覧 | SyntaxSet | `AMARK_SLOT_KIND_AMARK_FIRST` / `_LAST`、種類の一覧 | — |
 | 9.1, 9.2 | 比較 | Equality | `amark_node_equal` | — |
 | 9.3, 9.4, 9.5, 9.6 | ダンプ | Dump | `amark_node_dump`, `amark_dump_attr_*` | — |
 | 9.7 | S 式から木を組み立てる | TreeBuilder | `amark_test_tree_build` | — |
@@ -267,7 +267,7 @@ graph TB
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| SyntaxSet | Registry | 構文拡張の並び、凍結、識別子、スロットの索引、スロットの種類の範囲の表 | 1.2, 1.9, 1.11, 2.5, 8.1–8.13 | BuiltinTypes (P0), allocator (P0) | Service, State |
+| SyntaxSet | Registry | 構文拡張の並び、凍結、識別子、スロットの索引、スロットの種類の一覧 | 1.2, 1.9, 1.11, 2.5, 8.1–8.13 | BuiltinTypes (P0), allocator (P0) | Service, State |
 | BuiltinTypes | Registry | 組み込みの 19 の型の記述子と `amark.core` | 2.1–2.5, 4.1 | NodeCore (P1) | Service |
 | Document | Tree | 文書、ソース、行の索引、位置、追跡の切り替え、構文セットの所有 | 1.1–1.5, 1.9–1.11, 3.5, 7.8 | NodeCore (P0), SyntaxSet (P0), buffer (P0) | Service, State |
 | NodeCore | Tree | ノードの生成・部分木の解放・参照・型のデータ | 1.3, 2.4, 3.1, 3.7, 4.1, 8.12 | SyntaxSet (P0), EditTracking (P0) | Service, State |
@@ -321,17 +321,26 @@ graph TB
 - 凍結：すべての型の名前の重複を検査し（重複は `AMARK_ERROR_INVALID_ARGUMENT`、構文セットは凍結されないまま）、拡張の型に 256 から順に識別子を割り当て、名前の索引とスロットの索引（種類ごとに構文セットの順）を作る。凍結後の変更は `AMARK_ERROR_INVALID_STATE`。
 - 記述子と拡張は構文セットより長く生きること（通常は静的な記憶域）。構文セットはそれを使うすべての文書より長く生きること。凍結した構文セットは読み取りだけなので、複数のスレッドから同時に使える。
 - `amark_syntax_set_core()` は、凍結済みで `amark.core` だけを持つ静的な `const` の構文セットを返す。解放しても何もしない。内部の印（`is_static`）を持ち、`amark_document_take_syntax_set` はこの印で静的な構文セットを拒否する（1.11）。
-- スロットの種類の番号の範囲（8.9、8.13）：0 は不正。`0x0001`–`0xFFFF` は Amark の spec が使い、spec ごとに次の表の範囲を割り当てる。各 spec は自分の範囲の中で、種類の名前と値を `extension.h` に追記する。表にない Amark の範囲（`0x0500`–`0xFFFF`）は将来の spec のために予約し、割り当てるときはこの spec を更新する。`0x10000` 以上は利用者の独自のスロット。レジストリは表を強制しない（`kind` が 0 でなければ受け付ける）。表は番号の衝突を spec の間で防ぐための約束である。表の右の列は、各 spec の承認済みの design が定める種類の名前と値の写しである（定義の正本は各 spec の design。種類を足す・変える spec は、この表と `extension.h` の注記も合わせて更新する）。
+- スロットの種類の番号（8.9、8.13）：0 は不正。1–255 は Amark の spec が使い、256 以上は利用者の独自のスロット（ノード型の識別子と同じ境界）。Amark の種類は、spec ごとの範囲を設けず、次の 1 つの一覧で重ならない通し番号を割り当てる。新しい種類は、この一覧の末尾に次の番号で加え（この spec を更新する）、その種類を実行する spec が名前と値を `extension.h` に追記する。レジストリは一覧を強制しない（`kind` が 0 でなければ受け付ける）。一覧は番号の衝突を spec の間で防ぐための約束である。一覧の名前は、各 spec の承認済みの design が定める種類の名前の写しである（構造体の定義の正本は各 spec の design。種類を足す・変える spec は、この一覧と `extension.h` の注記も合わせて更新する）。
 
-| 範囲 | 割り当て先 | この時点で定義されている種類 |
-|------|------------|------------------------------|
-| `0x0001`–`0x00FF` | `syntax-tree`（`amark.core` とレジストリ） | なし（予約） |
-| `0x0100`–`0x01FF` | `block-parser` | `AMARK_SLOT_BLOCK_SYNTAX`（`0x0100`）、`AMARK_SLOT_PARAGRAPH_CONSUMER`（`0x0101`）、`AMARK_SLOT_POSTPROCESS`（`0x0102`）、`AMARK_SLOT_PARSE_STATE`（`0x0103`） |
-| `0x0200`–`0x02FF` | `inline-parser` | `AMARK_SLOT_INLINE_SYNTAX`（`0x0201`）、`AMARK_SLOT_INLINE_DELIMITER`（`0x0202`）、`AMARK_SLOT_INLINE_BRACKET`（`0x0203`）、`AMARK_SLOT_INLINE_TEXT_SCANNER`（`0x0204`）、`AMARK_SLOT_INLINE_NODE_TRAITS`（`0x0205`）、`AMARK_SLOT_INLINE_SPECIAL`（`0x0206`） |
-| `0x0300`–`0x03FF` | `html-renderer` | `AMARK_SLOT_HTML_NODE`（`0x0301`）、`AMARK_SLOT_HTML_HOOKS`（`0x0302`） |
-| `0x0400`–`0x04FF` | `markdown-renderer` | `AMARK_SLOT_MARKDOWN_NODE`（`0x0401`）、`AMARK_SLOT_MARKDOWN_HOOKS`（`0x0402`） |
-| `0x0500`–`0xFFFF` | 将来の Amark の spec（予約） | — |
-| `0x10000` 以上 | 利用者 | — |
+| 番号 | 種類 | 定義する spec |
+|------|------|---------------|
+| 1 | `AMARK_SLOT_BLOCK_SYNTAX` | `block-parser` |
+| 2 | `AMARK_SLOT_PARAGRAPH_CONSUMER` | `block-parser` |
+| 3 | `AMARK_SLOT_POSTPROCESS` | `block-parser` |
+| 4 | `AMARK_SLOT_PARSE_STATE` | `block-parser` |
+| 5 | `AMARK_SLOT_INLINE_SYNTAX` | `inline-parser` |
+| 6 | `AMARK_SLOT_INLINE_DELIMITER` | `inline-parser` |
+| 7 | `AMARK_SLOT_INLINE_BRACKET` | `inline-parser` |
+| 8 | `AMARK_SLOT_INLINE_TEXT_SCANNER` | `inline-parser` |
+| 9 | `AMARK_SLOT_INLINE_NODE_TRAITS` | `inline-parser` |
+| 10 | `AMARK_SLOT_INLINE_SPECIAL` | `inline-parser` |
+| 11 | `AMARK_SLOT_HTML_NODE` | `html-renderer` |
+| 12 | `AMARK_SLOT_HTML_HOOKS` | `html-renderer` |
+| 13 | `AMARK_SLOT_MARKDOWN_NODE` | `markdown-renderer` |
+| 14 | `AMARK_SLOT_MARKDOWN_HOOKS` | `markdown-renderer` |
+| 15–255 | 将来の Amark の spec（予約） | — |
+| 256 以上 | 利用者 | — |
 
 **Contracts**: Service [x] / State [x]
 
@@ -382,32 +391,19 @@ typedef struct amark_slot_header {
     uint32_t kind;
 } amark_slot_header_t;
 
-#define AMARK_SLOT_KIND_AMARK_FIRST 0x00001u   /* 1–0xFFFF：Amark の spec が使う */
-#define AMARK_SLOT_KIND_AMARK_LAST  0x0FFFFu
-#define AMARK_SLOT_KIND_USER_FIRST  0x10000u   /* 0x10000 以上：利用者の独自のスロット */
+#define AMARK_SLOT_KIND_AMARK_FIRST   1u   /* 1–255：Amark の spec が使う */
+#define AMARK_SLOT_KIND_AMARK_LAST  255u
+#define AMARK_SLOT_KIND_USER_FIRST  256u   /* 256 以上：利用者の独自のスロット */
 
-/* spec ごとの範囲（8.13）。各 spec は自分の範囲の中だけで種類を定義し、範囲の節の下に追記する。
-   0x0500–0xFFFF は将来の Amark の spec のために予約（割り当てるときは syntax-tree の spec を更新する） */
-#define AMARK_SLOT_KIND_CORE_FIRST              0x0001u   /* syntax-tree（amark.core）：予約、現在は定義なし */
-#define AMARK_SLOT_KIND_CORE_LAST               0x00FFu
-#define AMARK_SLOT_KIND_BLOCK_PARSER_FIRST      0x0100u   /* block-parser */
-#define AMARK_SLOT_KIND_BLOCK_PARSER_LAST       0x01FFu
-#define AMARK_SLOT_KIND_INLINE_PARSER_FIRST     0x0200u   /* inline-parser */
-#define AMARK_SLOT_KIND_INLINE_PARSER_LAST      0x02FFu
-#define AMARK_SLOT_KIND_HTML_RENDERER_FIRST     0x0300u   /* html-renderer */
-#define AMARK_SLOT_KIND_HTML_RENDERER_LAST      0x03FFu
-#define AMARK_SLOT_KIND_MARKDOWN_RENDERER_FIRST 0x0400u   /* markdown-renderer */
-#define AMARK_SLOT_KIND_MARKDOWN_RENDERER_LAST  0x04FFu
-/* 0x0100–0x01FF：block-parser（block-parser が追記する）
-     AMARK_SLOT_BLOCK_SYNTAX 0x0100、AMARK_SLOT_PARAGRAPH_CONSUMER 0x0101、
-     AMARK_SLOT_POSTPROCESS 0x0102、AMARK_SLOT_PARSE_STATE 0x0103 */
-/* 0x0200–0x02FF：inline-parser（inline-parser が追記する）
-     AMARK_SLOT_INLINE_SYNTAX 0x0201、AMARK_SLOT_INLINE_DELIMITER 0x0202、AMARK_SLOT_INLINE_BRACKET 0x0203、
-     AMARK_SLOT_INLINE_TEXT_SCANNER 0x0204、AMARK_SLOT_INLINE_NODE_TRAITS 0x0205、AMARK_SLOT_INLINE_SPECIAL 0x0206 */
-/* 0x0300–0x03FF：html-renderer（html-renderer が追記する）
-     AMARK_SLOT_HTML_NODE 0x0301、AMARK_SLOT_HTML_HOOKS 0x0302 */
-/* 0x0400–0x04FF：markdown-renderer（markdown-renderer が追記する）
-     AMARK_SLOT_MARKDOWN_NODE 0x0401、AMARK_SLOT_MARKDOWN_HOOKS 0x0402 */
+/* Amark のスロットの種類の一覧（8.13）。spec ごとの範囲は設けず、通し番号で末尾に加える。
+   各種類の定義は、それを実行する spec が次の番号で追記する。15–255 は将来の Amark の spec のために予約
+   （割り当てるときは syntax-tree の spec の一覧を更新する）
+     1 AMARK_SLOT_BLOCK_SYNTAX、2 AMARK_SLOT_PARAGRAPH_CONSUMER、3 AMARK_SLOT_POSTPROCESS、
+     4 AMARK_SLOT_PARSE_STATE（block-parser）
+     5 AMARK_SLOT_INLINE_SYNTAX、6 AMARK_SLOT_INLINE_DELIMITER、7 AMARK_SLOT_INLINE_BRACKET、
+     8 AMARK_SLOT_INLINE_TEXT_SCANNER、9 AMARK_SLOT_INLINE_NODE_TRAITS、10 AMARK_SLOT_INLINE_SPECIAL（inline-parser）
+     11 AMARK_SLOT_HTML_NODE、12 AMARK_SLOT_HTML_HOOKS（html-renderer）
+     13 AMARK_SLOT_MARKDOWN_NODE、14 AMARK_SLOT_MARKDOWN_HOOKS（markdown-renderer） */
 
 typedef struct amark_extension {
     size_t struct_size;
@@ -451,7 +447,7 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 ```
 - Preconditions：`remove` / `replace` / `insert_before` の名前が見つからなければ `AMARK_ERROR_INVALID_ARGUMENT`。`replace` は同じ名前でなくてもよい（新しい名前も重複の検査をする）。
 - Postconditions：凍結に成功した構文セットでは、同じ拡張の並びから作った別の構文セットと同じ識別子が割り当たる（8.6）。`slot_at` は構文セットの順、拡張の中ではスロットの一覧の順に返す。
-- Invariants：組み込みの型の識別子は 1–19 で固定。拡張の型の識別子は 256 以上。spec ごとの範囲は重ならず、すべて `AMARK_SLOT_KIND_AMARK_FIRST`–`AMARK_SLOT_KIND_AMARK_LAST` に含まれる（テストで確かめる）。
+- Invariants：組み込みの型の識別子は 1–19 で固定。拡張の型の識別子は 256 以上。一覧の Amark のスロットの種類の番号は重ならず、すべて `AMARK_SLOT_KIND_AMARK_FIRST`–`AMARK_SLOT_KIND_AMARK_LAST` に含まれる（テストで確かめる）。
 
 ##### State Management
 - State model：`{frozen, is_static, extensions[], 凍結後: dynamic_types[], name_index[], slot_index[]}`。状態は「編集可能」→（freeze）→「凍結」の一方向。
@@ -1127,7 +1123,7 @@ struct amark_document {
 ### Unit Tests（Naos、`tests/tree/`）
 - **document**：既定の構文セットが core であること（1.2）、凍結していない構文セットの拒否（8.7）、ソースの複製と追加でオフセットが保たれること（1.4, 1.5）、チャンクの境目の CRLF を含む行と列（3.5）、追跡が無効で始まること（7.8）、2 つの文書の交互の操作が干渉しないこと（1.9）、構文セットの所有の受け渡し（テスト用アロケータを設定して作った構文セットが文書の解放で解放されブロック数が 0 になること、`deinit` が構文セットを参照する拡張の型でサニタイザが解放の順序の誤りを検出しないこと。1.10）、静的な構文セット・文書が使っていない構文セット・2 回目の拒否で所有権が呼び出し側に残ること（1.11）。
 - **builtin_types**：19 の型の識別子・名前・ブロック/インライン・葉かどうか・既定の属性（2.1, 2.4, 4.1）、core の構文セットから記述子を引けること（2.5）。
-- **syntax_set**：追加・挿入・削除・置換の順序（8.4）、core の削除の拒否（8.3）、名前の重複と不正な記述子の拒否（8.5）、型の名前の重複の凍結での検出と識別子の決定性（8.6）、凍結後の変更の拒否（8.7）、スロットの種類ごとの順の列挙（8.8）、利用者の範囲の種類（8.9）、名前・記述子・識別子の相互の検索（8.10）、複製が凍結されていないこと（8.11）、spec ごとの範囲が重ならず Amark の範囲に含まれること（8.13）。
+- **syntax_set**：追加・挿入・削除・置換の順序（8.4）、core の削除の拒否（8.3）、名前の重複と不正な記述子の拒否（8.5）、型の名前の重複の凍結での検出と識別子の決定性（8.6）、凍結後の変更の拒否（8.7）、スロットの種類ごとの順の列挙（8.8）、利用者の範囲の種類（8.9）、名前・記述子・識別子の相互の検索（8.10）、複製が凍結されていないこと（8.11）、一覧の種類の番号が重ならず Amark の範囲に含まれること（8.13）。
 - **extension_type**：表のような検証用の型（データに所有する文字列、`can_contain` の上書き、`validate_literal`、`dump`）で、生成・解放・複製・比較・ダンプで関数表が呼ばれること（8.1, 8.12, 9.6）、`amark_node_mark_edited`（7.9）。
 - **structure_edit**：4 つの挿入の位置（4.2）、移動（4.3）、置換（4.4）、包含・循環・根・別の文書の拒否で木が変わらないこと（4.5）、切り離しと再挿入（1.6）、木にあるノードの解放（1.7）。
 - **literal_attr**：NUL・不正な UTF-8 の拒否（5.2）、改行と空行の規則（5.3, 5.4）、LF への正規化と末尾の LF（5.5）、範囲外の属性とラベルの規則（5.6）、型の不一致（2.6）、一括設定の text と softbreak の並び（5.7）、トークンが残ること（5.8）。

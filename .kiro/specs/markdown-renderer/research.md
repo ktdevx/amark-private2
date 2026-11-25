@@ -164,6 +164,11 @@
 - **変更**：`src/syntax/md_core_internal.h` を `src/syntax/md_core.h` に改名した（File Structure Plan、フックの記述）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
 - **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-25：スロットの種類の番号を、`syntax-tree` の通し番号の一覧に合わせる
+- **Context**：スロットの種類の番号は、各 spec の design を別々に書いていた段階で衝突を防ぐため、spec ごとに 256 ずつの範囲（`0x0100`–`0x04FF`）を割り当て、利用者の範囲を `0x10000` 以上としていた。全 spec の design が揃い、Amark の種類は 14 個に確定した。種類は 1 つの公開ヘッダ（`extension.h`）の 1 か所で管理するので、範囲の区切りがなくても、一覧への追記で衝突を防げる。範囲と桁は必要に対して過剰だった。`syntax-tree` が要件 8.13 を改め、spec ごとの範囲をやめて通し番号の一覧にした。
+- **変更**：この spec のスロットの種類の番号を、一覧で割り当てた 13–14 に置き換えた。範囲の注記は削除した。種類の名前と構造体は変えない。
+- **Implications**：番号の値と記述だけの変更で、この spec の要件・API の形・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — エスケープ、文字参照、ブロックの構造、flanking と照合の規則
 - [cmark](https://github.com/commonmark/cmark) — `inlines.c`（照合）、`commonmark.c`（正規化した書き戻し）
