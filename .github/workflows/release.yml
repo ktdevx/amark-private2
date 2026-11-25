@@ -1,0 +1,292 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) The Amark Authors
+#
+# Release of Amark (ReleaseWorkflow; requirements 6.1-6.5): pushing a tag
+# v<major>.<minor>.<patch> builds, tests and packages Amark on every release
+# platform and publishes the archives on the GitHub release of that tag.
+#
+#   verify   cmake/scripts/check_version_tag.cmake: the version of the tag must
+#            be the version of include/amark/version.h; otherwise the job fails,
+#            showing both versions, and nothing is built (6.3).
+#   package  (needs verify) Linux x86_64 (GCC), macOS universal (AppleClang,
+#            arm64 and x86_64), Windows x64 (MSVC), each with BUILD_SHARED_LIBS
+#            OFF and ON: configure, build and test in Release (the package tests
+#            included), install to a prefix of its own, check that prefix with the
+#            consumer project (cmake/scripts/run_package_test.cmake with PREFIX),
+#            check its contents, and archive it as
+#            amark-<version>-<platform>-<variant>.tar.gz (.zip on Windows), with
+#            <platform> linux-x86_64, macos-universal or windows-x64-msvc and
+#            <variant> static or shared: 6 archives (6.1). The contents are given
+#            by the install rules only: LICENSE, no tests, no test data (6.5).
+#   publish  (needs verify and every package job, so it does not run when any
+#            build or test fails; 6.4) The source archive amark-<version>.tar.gz
+#            (git archive: the files marked export-ignore in .gitattributes, such
+#            as test data, are left out; 6.5), SHA256SUMS of all the archives,
+#            and the GitHub release of the tag with all of them attached (6.2).
+#            The only job with write permission.
+#
+# The trigger pattern also matches tags such as v01.2.3; the verify job rejects
+# them (leading zeros are not allowed, as in version.h).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify the tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the tag against version.h
+        env:
+          TAG: ${{ github.ref_name }}
+        run: cmake "-DTAG=$TAG" -P cmake/scripts/check_version_tag.cmake
+
+      - name: Version
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  package:
+    name: package (${{ matrix.config.platform }}, shared=${{ matrix.shared }})
+    needs: verify
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        shared: ["OFF", "ON"]
+        config:
+          - platform: linux-x86_64
+            os: ubuntu-24.04
+            cc: gcc
+            generator: Ninja
+            generator_platform: ""
+            osx_architectures: ""
+            archive: tar.gz
+          - platform: macos-universal
+            os: macos-latest
+            cc: clang
+            generator: Ninja
+            generator_platform: ""
+            osx_architectures: arm64;x86_64
+            archive: tar.gz
+          # The default generator of CMake on Windows is Visual Studio (MSVC).
+          - platform: windows-x64-msvc
+            os: windows-latest
+            cc: ""
+            generator: ""
+            generator_platform: x64
+            osx_architectures: ""
+            archive: zip
+    defaults:
+      run:
+        shell: bash
+    env:
+      AMARK_CC: ${{ matrix.config.cc }}
+      AMARK_GENERATOR: ${{ matrix.config.generator }}
+      AMARK_GENERATOR_PLATFORM: ${{ matrix.config.generator_platform }}
+      AMARK_OSX_ARCHITECTURES: ${{ matrix.config.osx_architectures }}
+      AMARK_SHARED: ${{ matrix.shared }}
+      # amark-<version>-<platform>-<variant>: the archive and its top directory.
+      AMARK_PACKAGE: amark-${{ needs.verify.outputs.version }}-${{ matrix.config.platform }}-${{ matrix.shared == 'ON' && 'shared' || 'static' }}
+      AMARK_ARCHIVE: ${{ matrix.config.archive }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkgconf
+
+      - name: Install tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja pkgconf
+
+      - name: Configure
+        run: |
+          args=()
+          if [ -n "$AMARK_GENERATOR" ]; then args+=(-G "$AMARK_GENERATOR"); fi
+          if [ -n "$AMARK_GENERATOR_PLATFORM" ]; then args+=(-A "$AMARK_GENERATOR_PLATFORM"); fi
+          if [ -n "$AMARK_CC" ]; then args+=("-DCMAKE_C_COMPILER=$AMARK_CC"); fi
+          if [ -n "$AMARK_OSX_ARCHITECTURES" ]; then
+            args+=("-DCMAKE_OSX_ARCHITECTURES=$AMARK_OSX_ARCHITECTURES")
+          fi
+          cmake -S . -B build "${args[@]}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DBUILD_SHARED_LIBS=$AMARK_SHARED"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Install
+        run: cmake --install build --config Release --prefix "stage/$AMARK_PACKAGE"
+
+      # The consumer project, built against the installed prefix only.
+      - name: Check the installed package
+        run: |
+          # An absolute path CMake understands (D:/a/... on Windows, not /d/a/...).
+          root=$(pwd -W 2>/dev/null || pwd)
+          args=(
+            "-DPREFIX=$root/stage/$AMARK_PACKAGE"
+            "-DBUILD_SHARED_LIBS=$AMARK_SHARED"
+            -DCONFIG=Release
+            "-DAMARK_SOURCE_DIR=$root"
+          )
+          if [ -n "$AMARK_GENERATOR" ]; then args+=("-DGENERATOR=$AMARK_GENERATOR"); fi
+          if [ -n "$AMARK_GENERATOR_PLATFORM" ]; then
+            args+=("-DGENERATOR_PLATFORM=$AMARK_GENERATOR_PLATFORM")
+          fi
+          if [ -n "$AMARK_CC" ]; then args+=("-DC_COMPILER=$AMARK_CC"); fi
+          if [ -n "$AMARK_OSX_ARCHITECTURES" ]; then
+            args+=("-DOSX_ARCHITECTURES=${AMARK_OSX_ARCHITECTURES//;/,}")
+          fi
+          modes=(find_package find_package_wrong_variant)
+          # pkg-config is checked where it is the platform's tool (not with MSVC).
+          if [ "$RUNNER_OS" != Windows ]; then modes+=(pkg_config); fi
+          for mode in "${modes[@]}"; do
+            cmake "-DMODE=$mode" "${args[@]}" "-DWORK_DIR=$root/package-check/$mode" \
+              -P cmake/scripts/run_package_test.cmake
+          done
+
+      - name: Check the universal binaries (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          found=0
+          for lib in "stage/$AMARK_PACKAGE"/lib/libamark*; do
+            if [ -L "$lib" ] || [ ! -f "$lib" ]; then continue; fi
+            archs=$(lipo -archs "$lib")
+            echo "$lib: $archs"
+            for arch in arm64 x86_64; do
+              if [[ " $archs " != *" $arch "* ]]; then
+                echo "::error::$lib does not contain $arch"
+                exit 1
+              fi
+            done
+            found=1
+          done
+          if [ "$found" != 1 ]; then echo "::error::no libamark in the prefix"; exit 1; fi
+
+      # The archive has LICENSE and nothing of the tests (6.5).
+      - name: Check the package contents
+        run: |
+          dir="stage/$AMARK_PACKAGE"
+          if [ ! -f "$dir/share/licenses/amark/LICENSE" ]; then
+            echo "::error::LICENSE is not in the package"
+            exit 1
+          fi
+          unexpected=$(find "$dir" \( -name tests -o -name fuzz -o -name data \
+            -o -name corpus -o -name 'spec*.txt' -o -name 'CTest*' \) -print)
+          if [ -n "$unexpected" ]; then
+            echo "::error::test files in the package: $unexpected"
+            exit 1
+          fi
+          find "$dir" | sort
+
+      - name: Archive
+        run: |
+          mkdir -p dist
+          cd stage
+          if [ "$AMARK_ARCHIVE" = zip ]; then
+            cmake -E tar cf "../dist/$AMARK_PACKAGE.zip" --format=zip "$AMARK_PACKAGE"
+          else
+            cmake -E tar czf "../dist/$AMARK_PACKAGE.tar.gz" "$AMARK_PACKAGE"
+          fi
+          cmake -E tar tf "../dist/$AMARK_PACKAGE.$AMARK_ARCHIVE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.AMARK_PACKAGE }}
+          path: dist/${{ env.AMARK_PACKAGE }}.${{ matrix.config.archive }}
+          if-no-files-found: error
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-release-${{ matrix.config.platform }}-shared-${{ matrix.shared }}
+          path: build/Testing/Temporary/
+          if-no-files-found: ignore
+
+  publish:
+    name: publish
+    needs: [verify, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      AMARK_VERSION: ${{ needs.verify.outputs.version }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: amark-*
+          path: dist
+          merge-multiple: true
+
+      # git archive leaves out the files marked export-ignore (test data).
+      - name: Source archive
+        run: |
+          git archive --format=tar.gz --prefix="amark-$AMARK_VERSION/" \
+            -o "dist/amark-$AMARK_VERSION.tar.gz" HEAD
+          tar -tzf "dist/amark-$AMARK_VERSION.tar.gz" | sort
+
+      - name: Check the artifacts
+        run: |
+          expected=(
+            "amark-$AMARK_VERSION.tar.gz"
+            "amark-$AMARK_VERSION-linux-x86_64-static.tar.gz"
+            "amark-$AMARK_VERSION-linux-x86_64-shared.tar.gz"
+            "amark-$AMARK_VERSION-macos-universal-static.tar.gz"
+            "amark-$AMARK_VERSION-macos-universal-shared.tar.gz"
+            "amark-$AMARK_VERSION-windows-x64-msvc-static.zip"
+            "amark-$AMARK_VERSION-windows-x64-msvc-shared.zip"
+          )
+          for file in "${expected[@]}"; do
+            if [ ! -f "dist/$file" ]; then echo "::error::missing $file"; exit 1; fi
+          done
+          count=$(find dist -maxdepth 1 -type f | wc -l)
+          if [ "$count" -ne "${#expected[@]}" ]; then
+            echo "::error::unexpected files in dist:"; ls -l dist; exit 1
+          fi
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      # A re-run after a failed upload replaces the assets of the release.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag \
+              --title "Amark $AMARK_VERSION" --generate-notes
+          fi

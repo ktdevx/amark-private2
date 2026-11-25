@@ -204,7 +204,7 @@
   - _Boundary: CIWorkflow_
   - _Requirements: 1.1, 5.1, 5.2, 5.3, 5.4, 5.5, 7.7_
 
-- [ ] 4.3 リリースのワークフローを作る
+- [x] 4.3 リリースのワークフローを作る
   - タグと版の定義を照合し、一致しなければ 2 つの版を示して失敗するスクリプトを作る
   - `v<メジャー>.<マイナー>.<パッチ>` のタグで、照合のあと、Linux（x86_64）、macOS（ユニバーサル）、Windows（MSVC x64）のそれぞれで静的版と動的版を Release でビルド・テストし、種類ごとに別の接頭辞へインストールし、利用者のプロジェクトでの検査を通してから種類ごとのアーカイブにまとめる
   - すべての先行ジョブが成功したときだけ、ソースのアーカイブとチェックサムを作り、全成果物をそのタグの GitHub リリースに添付する。書き込みの権限は公開のジョブだけに与える
@@ -236,3 +236,4 @@
 - 3.5: ファジングターゲットは `amark_add_fuzzer(<name> SOURCES … CORPUS <dir> [LIBRARIES …])`。再生のテスト名は末尾の `_fuzz` を除いた `fuzz.<name>.corpus`（ラベル fuzz）。空のコーパスは構成時のエラー。libFuzzer の実行はこのコンテナでは確かめられない（compiler-rt がない）ので、CI のファジングのジョブで確かめる
 - 4.1: 公開の名前の接頭辞と amark.h の include の順は `lint.public_headers`（cmake/scripts/check_public_headers.cmake、ラベル lint）で検査する。正規の順の一覧は design の PublicHeaders の表とこのスクリプトの 2 か所にあるので、後続の spec が公開ヘッダを加えるときは両方を直す
 - 4.2: CI（.github/workflows/ci.yml）は GitHub で一度も実行していない。macOS、Windows（MSVC、MSYS2）、Clang のサニタイザ、libFuzzer の短時間実行は、最初の実行で確かめる。macOS の brew の pkgconf の競合と、windows-latest の Strawberry Perl の pkg-config に注意する
+- 4.3: リリース（.github/workflows/release.yml）は GitHub で一度も実行していない。試しのタグ（フォークなど）で、6 つのアーカイブ、ソースのアーカイブ、SHA256SUMS ができることを確かめる。release.yml は ci.yml の `AMARK_CI_CONFIGURE_ARGS` を受け取らないので、後続の spec が CI に構成の引数を足すときは release.yml も直すかを決める
