@@ -74,7 +74,7 @@
 - **Context**：`html-renderer` は並行して spec を書いており、組み込みのノードの HTML 出力のスロットを定義する。`markdown-renderer` は後で Markdown 出力のスロットを足す。
 - **Sources Consulted**：`.kiro/steering/roadmap.md`（Boundary Strategy：1 つの構文拡張が、ノード型、パース、HTML 出力、Markdown 出力をまとめる）、`.kiro/steering/structure.md`（構文ごとに 1 ファイル）、`.kiro/specs/syntax-tree/design.md`（`amark_extension` のスロットの一覧、`amark.core` が組み込みの型を持つ）。
 - **Findings**：組み込みのノード型は `amark.core` が持つため、構文ごとの拡張はスロットだけを持つ。見出し（ATX と setext）とコードブロック（インデントとフェンス）は、2 つの構文が同じノード型を作る。document 型は構文ではなくエンジンが作る。
-- **Implications**：構文ごとのファイルが自分の拡張とスロットの静的な一覧を持ち、下流の spec は同じファイルの一覧に自分のスロットを足す。どのノード型をどの拡張が作るかの対応表を公開する。同じノード型を複数の拡張が作る場合の出力のスロットの選び方は、レンダラの spec が決める（この spec は「同じスロットの実体を複数の拡張から参照してよい」ことだけを保証する）。
+- **Implications（`html-renderer` の design の確定後に更新）**：`html-renderer` は、組み込みの 19 のノード型の HTML 出力を 1 つの構文拡張 `amark.core.html`（`amark_html_core_extension()`）に置き、`commonmark.*` の構文の拡張は組み込みのノード型の HTML のスロットを持たないと決めた（出力は構文ではなくノード型に従う）。これにより、見出しやコードブロックのように 2 つの構文が同じ型を作る場合の重複の問題は起きない。この spec の構築関数は `amark.core.html` を `amark.core` の直後に加え、`markdown-renderer` の `amark.core.markdown` も同じ位置に加えられる形にする。構文ごとのファイルの静的なスロットの一覧は残し、特定の構文だけが独自の出力を必要とする場合にそこへ足せるようにする。GFM 相当の検証用の構文は、`html-renderer` の `amark_test_html_gfm` のノード型の記述子を使い、パースのスロットだけを持つ。
 
 ## Architecture Pattern Evaluation
 
@@ -184,12 +184,12 @@
   - `tools/gen_unicode_tables.py` に `CaseFolding.txt` の読み取りを足し、`src/runtime/case_fold_tables.inc` を出力する。`include/amark/unicode.h` に `amark_unicode_case_fold()` を足す。
   - `tools/gen_entity_table.py`、`src/runtime/entity_tables.inc`、`src/runtime/entity.c`、`include/amark/entity.h` を追加する。
   - `.gitattributes` に、CommonMark spec の例を写したテストデータの `export-ignore` を足す。
-- **スロットの種類の番号の範囲**：`html-renderer` と並行して決めるため、範囲の取り決め（`block-parser` 0x0100–0x01FF、`inline-parser` 0x0200–0x02FF、`html-renderer` 0x0300–0x03FF、`markdown-renderer` 0x0400–0x04FF）を提案する。
+- **スロットの種類の番号の範囲**：`block-parser` 0x0100–0x01FF、`inline-parser` 0x0200–0x02FF、`html-renderer` 0x0300–0x03FF（`html-renderer` の design と一致）、`markdown-renderer` 0x0400–0x04FF。`syntax-tree` の `extension.h` の注記に範囲の表を加えることを推奨する。
 
 ## Risks & Mitigations
 - 公開のブロック構文 API が大きくなる — 組み込みの構文が使う操作だけに絞り、GFM 相当の 3 つの検証用の構文で不足と過剰を確かめる。
 - 行の記録から記録したトークンと、即座に記録したコンテナの接頭辞の順序が崩れる — トークンはノードごとにソース上の順で整列される（`syntax-tree`）ので順序の問題はない。被覆はすべてのテストとファジングで検証する。
-- `html-renderer` が別のスロットの番号の範囲や、構文ごとでない拡張の構造を選ぶ — Upstream Changes の取り決めを報告し、`html-renderer` の design と突き合わせる。構文ごとのファイルの静的なスロットの一覧は、どの選び方とも両立する。
+- 構築関数が `html-renderer` の公開関数に依存する — roadmap の順で `html-renderer` が先に実装されるので許される。テストは構築関数の拡張の順を確かめる。
 - 後処理がインラインの入力を持つノードを解放すると、内部の表に古いポインタが残る — 後処理の契約として、`amark_parse_discard_inline_input` / `amark_parse_move_inline_input` を呼ぶことを要求し、テストで確かめる。
 - CommonMark spec の例の期待値を手で書く量が多い — 期待値はブロックの構造だけのダンプ（インラインは単純な委譲先のテキスト）にし、生成の補助で形式を検査する。
 
