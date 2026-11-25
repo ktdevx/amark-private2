@@ -30,6 +30,15 @@ if(AMARK_BUILD_TESTS)
   # amark_internal, so that a duplicate symbol in either combination fails to link.
   amark_add_test(test_allocator_test SOURCES support/test_allocator_test.c)
   amark_add_test(test_allocator_internal_test SOURCES support/test_allocator_test.c INTERNAL)
+
+  # The license header check (8.3, 8.4, label "lint"): every C source and header of
+  # the source tree begins with the two-line license header. It needs no build; see
+  # cmake/scripts/check_license_headers.cmake for what it scans.
+  add_test(NAME lint.license_headers
+    COMMAND "${CMAKE_COMMAND}"
+      "-DAMARK_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+      -P "${PROJECT_SOURCE_DIR}/cmake/scripts/check_license_headers.cmake")
+  set_tests_properties(lint.license_headers PROPERTIES LABELS lint)
 endif()
 
 add_subdirectory(base)
