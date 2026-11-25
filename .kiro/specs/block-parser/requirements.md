@@ -84,7 +84,7 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
 5. The Amark Block Parser shall 拡張が段落の先頭の行を消費して別のノード（例：リンク参照定義）を作る処理を登録でき、他の構文がこの処理を必要な時点で明示的に実行させられるようにする
 6. The Amark Block Parser shall 拡張が行の位置、インデント、列、空行かどうかを問い合わせ、指定した列の数だけ読み進めて、読み進めた部分を構文トークンとして記録できるようにする
 7. The Amark Block Parser shall 拡張がブロックの中身をインラインの入力として登録し、インラインの解析の前にその先頭を消費して別の構文トークンとして記録できるようにする
-8. If 拡張のコールバックが失敗を返す, then the Amark Block Parser shall パースを止めてその状態コードを呼び出し側へ返す
+8. If 拡張のコールバックが失敗を返す, then the Amark Block Parser shall パースを止めてそのエラーコードを呼び出し側へ返す
 9. The Amark Block Parser shall 組み込みの構文が使うフックをすべて公開 API として提供し、内部専用の近道を使わない
 
 ### Requirement 5: 文書の後処理とパースの間の拡張の状態
@@ -106,7 +106,7 @@ Amark では、CommonMark のブロック構文も、利用者の拡張と同じ
 3. The Amark Block Parser shall インラインのエンジンが、パースの間の文脈（文書、オプション、リンク参照定義の表、拡張の状態）を参照できるようにする
 4. Where 利用者がオプションでインラインのエンジンを指定する, the Amark Block Parser shall そのエンジンへ委譲する
 5. The Amark Block Parser shall インラインの中身をテキストと改行のノードとして扱う単純な委譲先を提供し、インラインのエンジンがない状態でも、元の表記をすべて構文トークンで覆う文書を作れるようにする
-6. If インラインのエンジンが失敗を返す, then the Amark Block Parser shall パースを止めてその状態コードを返す
+6. If インラインのエンジンが失敗を返す, then the Amark Block Parser shall パースを止めてそのエラーコードを返す
 
 ### Requirement 7: CommonMark のブロック構文の組み込み拡張
 **Objective:** As a Amark の利用者, I want CommonMark の全ブロック構文が組み込み拡張として提供され、構文ごとに無効化や置き換えができること, so that CommonMark どおりにパースでき、方言に合わせて構文を組み替えられる

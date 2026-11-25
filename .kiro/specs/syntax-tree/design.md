@@ -38,7 +38,7 @@
 - CommonMark の構文セットの構築関数、パーサの入口
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`status.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark__allocator_resolve`、`amark__size_add`、`amark__size_mul`）、`runtime/buffer_internal.h`（`amark__buffer_init`、`amark__buffer_destroy`）
+- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark__allocator_resolve`、`amark__size_add`、`amark__size_mul`）、`runtime/buffer_internal.h`（`amark__buffer_init`、`amark__buffer_destroy`）
 - テスト時：Naos、`amark_add_test()`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`）、`amark_add_fuzzer()`
 - C99 の標準ライブラリ（`<stddef.h>`、`<stdint.h>`、`<stdbool.h>`、`<string.h>`、`<limits.h>`）
 - レイヤーの規則：`src/tree/` は `src/parse/`、`src/render/`、`src/syntax/` を参照しない。公開ヘッダは他の公開ヘッダだけを include する
@@ -110,14 +110,14 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：公開ヘッダは機能ごとに 1 つ。実装は 1 ファイル 1 責務。
-- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、`AMARK_BEGIN_DECLS`、不透明型、`struct_size`、アロケータの経由、状態コード、グローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ。
+- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、`AMARK_BEGIN_DECLS`、不透明型、`struct_size`、アロケータの経由、エラーコード、グローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ。
 
 ### Technology Stack
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Language | C99 | ライブラリ、テスト、ファジング | `foundation` の `amark_target_defaults()` |
-| Runtime | `foundation`（status、allocator、buffer、utf8） | 確保、文字列の検査、ダンプの出力 | 新しい依存なし |
+| Runtime | `foundation`（error、allocator、buffer、utf8） | 確保、文字列の検査、ダンプの出力 | 新しい依存なし |
 | Test | Naos v0.4.0、`amark_add_test`、`amark_test_support` | 単体テスト、確保失敗の総当たり | `amark_test_tree`（INTERFACE）を追加 |
 | Fuzz | `amark_add_fuzzer` | 編集の操作列のファジング | `fuzz/tree_edit_fuzz.c` |
 
@@ -232,7 +232,7 @@ graph TB
 | 1.3 | 文書の解放ですべて解放 | Document, NodeCore | `amark_document_free` | — |
 | 1.4, 1.5 | ソースの登録と追加 | Document | `amark_document_add_source`, `amark_document_append_source` | 組み立て |
 | 1.6, 1.7 | 切り離しと解放 | StructureEdit, NodeCore | `amark_node_unlink`, `amark_node_free`, `amark__node_destroy_subtree` | — |
-| 1.8 | 確保失敗時の強い保証 | 全コンポーネント | 状態コード | — |
+| 1.8 | 確保失敗時の強い保証 | 全コンポーネント | エラーコード | — |
 | 1.9 | スレッドと構文セットの共有 | SyntaxSet, Document | 凍結、`const` の静的データ | — |
 | 1.10, 1.11 | 文書による構文セットの所有 | Document, SyntaxSet | `amark_document_take_syntax_set` | 組み立て |
 | 2.1, 2.5 | 組み込みの型と同じ登録の仕組み | BuiltinTypes, SyntaxSet | `AMARK_NODE_*`, `amark.core` | — |
@@ -286,14 +286,14 @@ graph TB
 | TreeTests / TreeFuzz | Test / Fuzz | 要件の検証 | 1.8, 4.9, 10.3–10.5 ほか | TreeBuilder (P0) | Batch |
 
 ### 共通の規約
-- `foundation` の規約に従う：失敗しうる関数は `amark_status_t` を返し、出力引数は最後で `out_` で始める。失敗時は対象を変えない（強い保証）。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。解放の関数は NULL を受け付ける。問い合わせの関数は値を直接返し、NULL のノードには「なし」（NULL、0、false、空文字列）を返す。
+- `foundation` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。失敗時は対象を変えない（強い保証）。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。解放の関数は NULL を受け付ける。問い合わせの関数は値を直接返し、NULL のノードには「なし」（NULL、0、false、空文字列）を返す。
 - 公開の構造体は先頭に `size_t struct_size` を持つ。ライブラリが値を書く構造体（`amark_token_t`、`amark_source_span_t`、`amark_token_check_t`）は、呼び出し側が `struct_size` を設定し、ライブラリはその大きさまでだけ書く。
 - 文字列を返す関数は NUL 終端の文字列を返し、長さを `out_length`（NULL でもよい）で返す。返した文字列は、そのノードの次の変更か解放まで有効。
 - ノードを受け取る関数で、ノードが別の文書のもの、または型が合わないときは `AMARK_ERROR_INVALID_ARGUMENT`。
 
 ### 公開ヘッダの構成
 - 依存の順（左は右を include しない）：`node.h` → `document.h` → `token.h` → `iterator.h` → `dump.h` → `extension.h`。`amark.h` は、`foundation` の design が定める正規の include の順の「木のヘッダ」の位置で、この順に include する（他の spec のヘッダとの前後は `foundation` の順に従い、この spec では定めない）。
-- `node.h` は `status.h`、`<stddef.h>`、`<stdint.h>`、`<stdbool.h>` を include し、次の前方宣言を 1 か所で持つ（C99 は同じ typedef の重複を許さないため、他のヘッダは繰り返さない）。
+- `node.h` は `error.h`、`<stddef.h>`、`<stdint.h>`、`<stdbool.h>` を include し、次の前方宣言を 1 か所で持つ（C99 は同じ typedef の重複を許さないため、他のヘッダは繰り返さない）。
   ```c
   typedef struct amark_document amark_document_t;
   typedef struct amark_node amark_node_t;
@@ -367,12 +367,12 @@ struct amark_node_type_desc {         /* typedef は node.h が前方宣言で�
     size_t data_size;                 /* 型ごとのデータの大きさ。0 も可。生成時に 0 で埋める */
     /* 以下はすべて任意（NULL 可） */
     bool (*can_contain)(const struct amark_node_type_desc *self, const struct amark_node_type_desc *child);
-    amark_status_t (*validate_literal)(const amark_node_t *node, const char *text, size_t length);
-    amark_status_t (*init)(amark_node_t *node, void *data);
+    amark_error_t (*validate_literal)(const amark_node_t *node, const char *text, size_t length);
+    amark_error_t (*init)(amark_node_t *node, void *data);
     void (*destroy)(amark_node_t *node, void *data);
-    amark_status_t (*copy)(amark_node_t *dst, void *dst_data, const amark_node_t *src, const void *src_data);
+    amark_error_t (*copy)(amark_node_t *dst, void *dst_data, const amark_node_t *src, const void *src_data);
     bool (*equal)(const amark_node_t *a, const void *a_data, const amark_node_t *b, const void *b_data);
-    amark_status_t (*dump)(const amark_node_t *node, const void *data, amark_dump_writer_t *writer);
+    amark_error_t (*dump)(const amark_node_t *node, const void *data, amark_dump_writer_t *writer);
     void *user_data;
 };
 
@@ -419,19 +419,19 @@ typedef struct amark_extension {
     void *user_data;
 } amark_extension_t;
 
-AMARK_API amark_status_t amark_syntax_set_new(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
-AMARK_API amark_status_t amark_syntax_set_clone(const amark_syntax_set_t *set, const amark_allocator_t *allocator,
-                                                amark_syntax_set_t **out_set);   /* 凍結していない複製 */
+AMARK_API amark_error_t amark_syntax_set_new(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
+AMARK_API amark_error_t amark_syntax_set_clone(const amark_syntax_set_t *set, const amark_allocator_t *allocator,
+                                               amark_syntax_set_t **out_set);   /* 凍結していない複製 */
 AMARK_API void amark_syntax_set_free(amark_syntax_set_t *set);
 AMARK_API const amark_syntax_set_t *amark_syntax_set_core(void);
 
-AMARK_API amark_status_t amark_syntax_set_append(amark_syntax_set_t *set, const amark_extension_t *extension);
-AMARK_API amark_status_t amark_syntax_set_insert_before(amark_syntax_set_t *set, const char *anchor_name,
-                                                        const amark_extension_t *extension);
-AMARK_API amark_status_t amark_syntax_set_remove(amark_syntax_set_t *set, const char *name);
-AMARK_API amark_status_t amark_syntax_set_replace(amark_syntax_set_t *set, const char *name,
-                                                  const amark_extension_t *extension);
-AMARK_API amark_status_t amark_syntax_set_freeze(amark_syntax_set_t *set);
+AMARK_API amark_error_t amark_syntax_set_append(amark_syntax_set_t *set, const amark_extension_t *extension);
+AMARK_API amark_error_t amark_syntax_set_insert_before(amark_syntax_set_t *set, const char *anchor_name,
+                                                       const amark_extension_t *extension);
+AMARK_API amark_error_t amark_syntax_set_remove(amark_syntax_set_t *set, const char *name);
+AMARK_API amark_error_t amark_syntax_set_replace(amark_syntax_set_t *set, const char *name,
+                                                 const amark_extension_t *extension);
+AMARK_API amark_error_t amark_syntax_set_freeze(amark_syntax_set_t *set);
 AMARK_API bool amark_syntax_set_is_frozen(const amark_syntax_set_t *set);
 
 AMARK_API size_t amark_syntax_set_extension_count(const amark_syntax_set_t *set);
@@ -537,22 +537,22 @@ enum {
 **Contracts**: Service [x] / State [x]
 ```c
 /* include/amark/document.h */
-AMARK_API amark_status_t amark_document_new(const amark_syntax_set_t *syntax, const amark_allocator_t *allocator,
-                                            amark_document_t **out_document);
+AMARK_API amark_error_t amark_document_new(const amark_syntax_set_t *syntax, const amark_allocator_t *allocator,
+                                           amark_document_t **out_document);
 AMARK_API void amark_document_free(amark_document_t *document);
 AMARK_API amark_node_t *amark_document_root(const amark_document_t *document);
 AMARK_API const amark_syntax_set_t *amark_document_syntax_set(const amark_document_t *document);
 AMARK_API const amark_allocator_t *amark_document_allocator(const amark_document_t *document);
 
-AMARK_API amark_status_t amark_document_add_source(amark_document_t *document, const char *data, size_t length,
-                                                   amark_source_id_t *out_source);
-AMARK_API amark_status_t amark_document_append_source(amark_document_t *document, amark_source_id_t source,
-                                                      const char *data, size_t length);
+AMARK_API amark_error_t amark_document_add_source(amark_document_t *document, const char *data, size_t length,
+                                                  amark_source_id_t *out_source);
+AMARK_API amark_error_t amark_document_append_source(amark_document_t *document, amark_source_id_t source,
+                                                     const char *data, size_t length);
 AMARK_API size_t amark_document_source_count(const amark_document_t *document);
 AMARK_API const char *amark_document_source_data(const amark_document_t *document, amark_source_id_t source,
                                                  size_t *out_length);   /* 未登録なら NULL */
-AMARK_API amark_status_t amark_document_position(const amark_document_t *document, amark_source_id_t source,
-                                                 size_t offset, size_t *out_line, size_t *out_column);
+AMARK_API amark_error_t amark_document_position(const amark_document_t *document, amark_source_id_t source,
+                                                size_t offset, size_t *out_line, size_t *out_column);
 
 AMARK_API void amark_document_set_edit_tracking(amark_document_t *document, bool enabled);
 AMARK_API bool amark_document_edit_tracking(const amark_document_t *document);
@@ -560,7 +560,7 @@ AMARK_API bool amark_document_edit_tracking(const amark_document_t *document);
 /* 文書が使っている、ヒープに作られた構文セットの所有権を受け取る。成功したら、amark_document_free が
    ノードとソースの後でこの構文セットを解放する。失敗したら所有権は呼び出し側に残る。
    const のポインタしか持たない呼び出し側は渡さない（const を外すキャストをしない） */
-AMARK_API amark_status_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);
+AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);
 ```
 - `data` が NULL で `length` が 0 なら空のソースとして扱う。`data` が NULL で `length` が 0 でなければ `AMARK_ERROR_INVALID_ARGUMENT`。
 
@@ -585,7 +585,7 @@ AMARK_API amark_status_t amark_document_take_syntax_set(amark_document_t *docume
 ```c
 /* include/amark/node.h（続き。前方宣言は公開ヘッダの構成を参照） */
 
-AMARK_API amark_status_t amark_node_new(amark_document_t *document, amark_node_type_t type, amark_node_t **out_node);
+AMARK_API amark_error_t amark_node_new(amark_document_t *document, amark_node_type_t type, amark_node_t **out_node);
 
 AMARK_API amark_node_type_t amark_node_get_type(const amark_node_t *node);
 AMARK_API const char *amark_node_type_name(const amark_node_t *node);
@@ -699,10 +699,10 @@ typedef struct amark_token {
 } amark_token_t;
 
 AMARK_API size_t amark_node_token_count(const amark_node_t *node);
-AMARK_API amark_status_t amark_node_token_at(const amark_node_t *node, size_t index, amark_token_t *out_token);
-AMARK_API amark_status_t amark_node_add_token(amark_node_t *node, const amark_token_t *token);
-AMARK_API amark_status_t amark_node_remove_token(amark_node_t *node, size_t index);
-AMARK_API amark_status_t amark_node_transfer_tokens(amark_node_t *from, size_t first, size_t count, amark_node_t *to);
+AMARK_API amark_error_t amark_node_token_at(const amark_node_t *node, size_t index, amark_token_t *out_token);
+AMARK_API amark_error_t amark_node_add_token(amark_node_t *node, const amark_token_t *token);
+AMARK_API amark_error_t amark_node_remove_token(amark_node_t *node, size_t index);
+AMARK_API amark_error_t amark_node_transfer_tokens(amark_node_t *from, size_t first, size_t count, amark_node_t *to);
 AMARK_API const char *amark_token_kind_name(amark_token_kind_t kind);   /* "text" など。未知は "unknown" */
 ```
 
@@ -737,28 +737,28 @@ AMARK_API const char *amark_token_kind_name(amark_token_kind_t kind);   /* "text
 ```c
 /* include/amark/node.h（続き） */
 AMARK_API const char *amark_node_literal(const amark_node_t *node, size_t *out_length);   /* なければ "" */
-AMARK_API amark_status_t amark_node_set_literal(amark_node_t *node, const char *text, size_t length);
-AMARK_API amark_status_t amark_node_set_inline_text(amark_node_t *node, const char *text, size_t length);
+AMARK_API amark_error_t amark_node_set_literal(amark_node_t *node, const char *text, size_t length);
+AMARK_API amark_error_t amark_node_set_inline_text(amark_node_t *node, const char *text, size_t length);
 
 AMARK_API int amark_node_heading_level(const amark_node_t *node);          /* 見出しでなければ 0 */
-AMARK_API amark_status_t amark_node_set_heading_level(amark_node_t *node, int level);
+AMARK_API amark_error_t amark_node_set_heading_level(amark_node_t *node, int level);
 
 typedef enum amark_list_type { AMARK_LIST_NONE = 0, AMARK_LIST_BULLET = 1, AMARK_LIST_ORDERED = 2 } amark_list_type_t;
 AMARK_API amark_list_type_t amark_node_list_type(const amark_node_t *node);
-AMARK_API amark_status_t amark_node_set_list_type(amark_node_t *node, amark_list_type_t type);
+AMARK_API amark_error_t amark_node_set_list_type(amark_node_t *node, amark_list_type_t type);
 AMARK_API long amark_node_list_start(const amark_node_t *node);
-AMARK_API amark_status_t amark_node_set_list_start(amark_node_t *node, long start);
+AMARK_API amark_error_t amark_node_set_list_start(amark_node_t *node, long start);
 AMARK_API bool amark_node_list_tight(const amark_node_t *node);
-AMARK_API amark_status_t amark_node_set_list_tight(amark_node_t *node, bool tight);
+AMARK_API amark_error_t amark_node_set_list_tight(amark_node_t *node, bool tight);
 
 AMARK_API const char *amark_node_code_info(const amark_node_t *node, size_t *out_length);
-AMARK_API amark_status_t amark_node_set_code_info(amark_node_t *node, const char *text, size_t length);
+AMARK_API amark_error_t amark_node_set_code_info(amark_node_t *node, const char *text, size_t length);
 AMARK_API const char *amark_node_link_destination(const amark_node_t *node, size_t *out_length);
-AMARK_API amark_status_t amark_node_set_link_destination(amark_node_t *node, const char *text, size_t length);
+AMARK_API amark_error_t amark_node_set_link_destination(amark_node_t *node, const char *text, size_t length);
 AMARK_API const char *amark_node_link_title(const amark_node_t *node, size_t *out_length);
-AMARK_API amark_status_t amark_node_set_link_title(amark_node_t *node, const char *text, size_t length);
+AMARK_API amark_error_t amark_node_set_link_title(amark_node_t *node, const char *text, size_t length);
 AMARK_API const char *amark_node_link_label(const amark_node_t *node, size_t *out_length);   /* link_definition */
-AMARK_API amark_status_t amark_node_set_link_label(amark_node_t *node, const char *text, size_t length);
+AMARK_API amark_error_t amark_node_set_link_label(amark_node_t *node, const char *text, size_t length);
 ```
 - 型が合わないノードの取得は既定値（0、`AMARK_LIST_NONE`、false、""）、設定は `AMARK_ERROR_INVALID_ARGUMENT`（2.6）。
 
@@ -785,13 +785,13 @@ AMARK_API amark_status_t amark_node_set_link_label(amark_node_t *node, const cha
 **Contracts**: Service [x]
 ```c
 /* include/amark/node.h（続き） */
-AMARK_API amark_status_t amark_node_unlink(amark_node_t *node);
+AMARK_API amark_error_t amark_node_unlink(amark_node_t *node);
 AMARK_API void amark_node_free(amark_node_t *node);
-AMARK_API amark_status_t amark_node_insert_before(amark_node_t *sibling, amark_node_t *node);
-AMARK_API amark_status_t amark_node_insert_after(amark_node_t *sibling, amark_node_t *node);
-AMARK_API amark_status_t amark_node_prepend_child(amark_node_t *parent, amark_node_t *node);
-AMARK_API amark_status_t amark_node_append_child(amark_node_t *parent, amark_node_t *node);
-AMARK_API amark_status_t amark_node_replace(amark_node_t *old_node, amark_node_t *new_node);
+AMARK_API amark_error_t amark_node_insert_before(amark_node_t *sibling, amark_node_t *node);
+AMARK_API amark_error_t amark_node_insert_after(amark_node_t *sibling, amark_node_t *node);
+AMARK_API amark_error_t amark_node_prepend_child(amark_node_t *parent, amark_node_t *node);
+AMARK_API amark_error_t amark_node_append_child(amark_node_t *parent, amark_node_t *node);
+AMARK_API amark_error_t amark_node_replace(amark_node_t *old_node, amark_node_t *new_node);
 ```
 
 #### CopyImport
@@ -822,11 +822,11 @@ AMARK_API amark_status_t amark_node_replace(amark_node_t *old_node, amark_node_t
 
 **Contracts**: Service [x]
 ```c
-AMARK_API amark_status_t amark_node_copy(const amark_node_t *node, amark_node_t **out_copy);
-AMARK_API amark_status_t amark_node_import(amark_document_t *document, const amark_node_t *node, amark_node_t **out_copy);
+AMARK_API amark_error_t amark_node_copy(const amark_node_t *node, amark_node_t **out_copy);
+AMARK_API amark_error_t amark_node_import(amark_document_t *document, const amark_node_t *node, amark_node_t **out_copy);
 /* source_parent の子をすべて複製し、parent の before の前（NULL なら末尾）に順に挿入する。全か無か */
-AMARK_API amark_status_t amark_node_import_children(amark_node_t *parent, amark_node_t *before,
-                                                    const amark_node_t *source_parent);
+AMARK_API amark_error_t amark_node_import_children(amark_node_t *parent, amark_node_t *before,
+                                                   const amark_node_t *source_parent);
 ```
 - `amark_node_import` に根（document）を渡したときは `AMARK_ERROR_INVALID_ARGUMENT`。文書の全体を取り込むには、根を `source_parent` にして `amark_node_import_children` を使う。
 
@@ -860,8 +860,8 @@ typedef struct amark_token_check {
     const amark_node_t *node;   /* 不整合に関わるトークンの所有者（GAP では直前のトークンの所有者。なければ NULL） */
 } amark_token_check_t;
 
-AMARK_API amark_status_t amark_document_check_tokens(const amark_document_t *document, amark_source_id_t source,
-                                                     amark_token_check_t *out_result);
+AMARK_API amark_error_t amark_document_check_tokens(const amark_document_t *document, amark_source_id_t source,
+                                                    amark_token_check_t *out_result);
 ```
 
 #### SourceSpan
@@ -908,13 +908,13 @@ typedef enum amark_event {
     AMARK_EVENT_NONE = 0, AMARK_EVENT_DONE = 1, AMARK_EVENT_ENTER = 2, AMARK_EVENT_EXIT = 3
 } amark_event_t;
 
-AMARK_API amark_status_t amark_iter_new(amark_node_t *root, amark_iter_t **out_iter);   /* 根の文書のアロケータで確保 */
+AMARK_API amark_error_t amark_iter_new(amark_node_t *root, amark_iter_t **out_iter);   /* 根の文書のアロケータで確保 */
 AMARK_API void amark_iter_free(amark_iter_t *iter);
 AMARK_API amark_event_t amark_iter_next(amark_iter_t *iter);
 AMARK_API amark_node_t *amark_iter_node(const amark_iter_t *iter);
 AMARK_API amark_event_t amark_iter_event(const amark_iter_t *iter);
 AMARK_API amark_node_t *amark_iter_root(const amark_iter_t *iter);
-AMARK_API amark_status_t amark_iter_reset(amark_iter_t *iter, amark_node_t *node, amark_event_t event);
+AMARK_API amark_error_t amark_iter_reset(amark_iter_t *iter, amark_node_t *node, amark_event_t event);
 ```
 
 #### Equality
@@ -976,12 +976,12 @@ string  = DQUOTE { char } DQUOTE
 
 typedef struct amark_dump_writer amark_dump_writer_t;   /* 不透明。拡張の dump の間だけ有効 */
 
-AMARK_API amark_status_t amark_node_dump(const amark_node_t *node, uint32_t flags, amark_buffer_t *out);
-AMARK_API amark_status_t amark_dump_attr_string(amark_dump_writer_t *writer, const char *name,
-                                                const char *value, size_t length);
-AMARK_API amark_status_t amark_dump_attr_int(amark_dump_writer_t *writer, const char *name, long long value);
-AMARK_API amark_status_t amark_dump_attr_bool(amark_dump_writer_t *writer, const char *name, bool value);
-AMARK_API amark_status_t amark_dump_attr_symbol(amark_dump_writer_t *writer, const char *name, const char *symbol);
+AMARK_API amark_error_t amark_node_dump(const amark_node_t *node, uint32_t flags, amark_buffer_t *out);
+AMARK_API amark_error_t amark_dump_attr_string(amark_dump_writer_t *writer, const char *name,
+                                               const char *value, size_t length);
+AMARK_API amark_error_t amark_dump_attr_int(amark_dump_writer_t *writer, const char *name, long long value);
+AMARK_API amark_error_t amark_dump_attr_bool(amark_dump_writer_t *writer, const char *name, bool value);
+AMARK_API amark_error_t amark_dump_attr_symbol(amark_dump_writer_t *writer, const char *name, const char *symbol);
 ```
 
 #### TreeInvariants（内部）
@@ -992,7 +992,7 @@ AMARK_API amark_status_t amark_dump_attr_symbol(amark_dump_writer_t *writer, con
 | Requirements | 4.5, 6.1, 7.5 の検証 |
 
 **Responsibilities & Constraints**
-- `amark_status_t amark__tree_check(const amark_document_t *document, const char **out_reason)`（`tree_internal.h`）：親子と兄弟のリンクの対称性、包含の規則、`DESCENDANTS` の不変条件、トークンの整列と範囲、全ノードの環に属すること、を反復で検査する。違反は `AMARK_ERROR_INVALID_STATE` と理由の静的な文字列。
+- `amark_error_t amark__tree_check(const amark_document_t *document, const char **out_reason)`（`tree_internal.h`）：親子と兄弟のリンクの対称性、包含の規則、`DESCENDANTS` の不変条件、トークンの整列と範囲、全ノードの環に属すること、を反復で検査する。違反は `AMARK_ERROR_INVALID_STATE` と理由の静的な文字列。
 - 文書は内部のカウンタ（祖先への伝播の段数、トークンの移動の回数）を持ち、INTERNAL のテストが計算量（10.3–10.5）を確かめる。公開しない。
 
 ### Test
@@ -1008,16 +1008,16 @@ AMARK_API amark_status_t amark_dump_attr_symbol(amark_dump_writer_t *writer, con
 - `tests/support/tree_builder.c` を INTERFACE ライブラリ `amark_test_tree` の INTERFACE のソースにし、リンクした各テストの設定でコンパイルする（`amark` と `amark_internal` のどちらとも組める。`amark_test_support` は Amark の関数を呼ばない約束のため、そこには入れない）。
 - Naos に依存する（`AMARK_CHECK_TREE_DUMP`）ので、`tests/CMakeLists.txt` の `if(AMARK_BUILD_TESTS)` の中で定義する（`foundation` の規則 7.7）。ファジングターゲットはこのライブラリをリンクしない。
 - 型の名前は文書の構文セットで引く。組み込みの属性と `:tokens`（文書に登録済みのソースを参照する）を設定する。拡張の属性はコールバックに渡す。`:edits` と `:span` は無視する。組み立て中は追跡を無効にし、終わったら元の状態に戻す。根が `document` なら文書の根に子を付ける。
-- 構文の誤りは `AMARK_ERROR_INVALID_ARGUMENT` と、位置を含む理由（`out_error`）で返す。
+- 構文の誤りは `AMARK_ERROR_INVALID_ARGUMENT` と、位置を含む理由（`out_reason`）で返す。
 
 **Contracts**: Service [x]
 ```c
 /* tests/support/tree_builder.h */
-typedef amark_status_t (*amark_test_tree_attr_fn_t)(amark_node_t *node, const char *name,
-                                                    const char *value, size_t length, void *context);
-amark_status_t amark_test_tree_build(amark_document_t *document, const char *sexpr,
-                                     amark_test_tree_attr_fn_t attr_fn, void *context,
-                                     amark_node_t **out_node, const char **out_error);
+typedef amark_error_t (*amark_test_tree_attr_fn_t)(amark_node_t *node, const char *name,
+                                                   const char *value, size_t length, void *context);
+amark_error_t amark_test_tree_build(amark_document_t *document, const char *sexpr,
+                                    amark_test_tree_attr_fn_t attr_fn, void *context,
+                                    amark_node_t **out_node, const char **out_reason);
 /* ダンプと期待値の文字列を比べ、違えば両方を表示して失敗する */
 #define AMARK_CHECK_TREE_DUMP(node, flags, expected_literal) /* ... */
 ```

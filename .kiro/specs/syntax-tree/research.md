@@ -54,14 +54,14 @@
 - **Context**：上流の契約に正確に合わせるため。
 - **Sources Consulted**：`.kiro/specs/foundation/design.md`
 - **Findings**：
-  - 状態コード（`AMARK_OK`、`OUT_OF_MEMORY`、`INVALID_ARGUMENT`、`OVERFLOW`、`LIMIT_EXCEEDED`、`INVALID_STATE`）、出力引数は最後で `out_` で始める、失敗時は強い保証、解放の関数は NULL を受け付ける、公開の構造体は先頭に `struct_size`。
+  - エラーコード（`AMARK_ERROR_NONE`、`OUT_OF_MEMORY`、`INVALID_ARGUMENT`、`OVERFLOW`、`LIMIT_EXCEEDED`、`INVALID_STATE`）、出力引数は最後で `out_` で始める、失敗時は強い保証、解放の関数は NULL を受け付ける、公開の構造体は先頭に `struct_size`。
   - `amark_allocator_t` はオブジェクトに値でコピーして持つ（`amark__allocator_resolve`）。`amark_buffer_t` は内部で埋め込める（`buffer_internal.h` の `amark__buffer_init` / `amark__buffer_destroy`）。
   - `amark_utf8_validate` で UTF-8 を検査できる。
   - テストは `amark_add_test(... [INTERNAL] [LIBRARIES ...])`、確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP`、比較は `AMARK_CHECK_BYTES_EQ` / `AMARK_CHECK_BUFFER_EQ`。ファジングは `amark_add_fuzzer`。
   - `amark_test_support` は Amark の関数を呼ばない約束（`amark` と `amark_internal` の両方と組み合わせるため）。
 - **Implications**：
   - 構文木のテスト用の補助（S 式から木を組み立てる）は Amark の関数を呼ぶので、`amark_test_support` には入れない。INTERFACE ライブラリ `amark_test_tree` の INTERFACE のソースとして、各テストの実行ファイルにそのテストの設定でコンパイルさせる（`amark` と `amark_internal` のどちらとも組める）。foundation の変更は不要。
-  - 「表現できない値」も `AMARK_ERROR_INVALID_ARGUMENT`、凍結済みの構文セットの変更は `AMARK_ERROR_INVALID_STATE` で表せる。新しい状態コードは不要。
+  - 「表現できない値」も `AMARK_ERROR_INVALID_ARGUMENT`、凍結済みの構文セットの変更は `AMARK_ERROR_INVALID_STATE` で表せる。新しいエラーコードは不要。
 
 ## Architecture Pattern Evaluation
 
@@ -213,4 +213,4 @@
 - [rowan](https://github.com/rust-analyzer/rowan) — green/red tree
 - [recast](https://github.com/benjamn/recast) — 変更部分だけを印刷し直す AST の書き戻し
 - [mdast](https://github.com/syntax-tree/mdast) — `definition` ノードと位置
-- `.kiro/specs/foundation/design.md` — 状態コード、アロケータ、バッファ、UTF-8、テストとファジングの仕組み
+- `.kiro/specs/foundation/design.md` — エラーコード、アロケータ、バッファ、UTF-8、テストとファジングの仕組み

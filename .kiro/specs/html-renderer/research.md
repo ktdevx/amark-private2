@@ -153,4 +153,4 @@
 - GitHub Flavored Markdown Spec 0.29 — 表、取り消し線、タスクリスト、タグフィルタ、脚注の期待値
 - markdown-it の renderer rules — 規則の置き換えと元の規則の呼び出しの先行例
 - `.kiro/specs/syntax-tree/design.md` — ノードモデル、レジストリ、スロットの見出し、テストの補助
-- `.kiro/specs/foundation/design.md` — 状態コード、アロケータ、バッファ、テストとファジングの仕組み
+- `.kiro/specs/foundation/design.md` — エラーコード、アロケータ、バッファ、テストとファジングの仕組み

@@ -46,7 +46,7 @@ Amark では CommonMark の構文も利用者の拡張と同じ公開 API の上
 2. The Amark Inline Parser shall 既定の委譲先としてこのエンジンを提供し、`block-parser` の単純な委譲先は従来どおり明示して選べるようにする
 3. The Amark Inline Parser shall 中身が複数の区間（複数の行、コンテナの接頭辞で区切られた範囲）からなるとき、区間をつないだテキストを中身として解析し、区間の間の表記（コンテナの接頭辞、行頭の空白）を自分のノードに含めない
 4. When 利用者が入力を任意の位置で区切って逐次に与える, the Amark Inline Parser shall 一括のパースと同じ木と同じ構文トークンを作る
-5. If インライン構文の処理が失敗を返すか、確保が失敗する, then the Amark Inline Parser shall パースを止めてその状態コードを返し、リークしない
+5. If インライン構文の処理が失敗を返すか、確保が失敗する, then the Amark Inline Parser shall パースを止めてそのエラーコードを返し、リークしない
 6. The Amark Inline Parser shall グローバルな可変状態を持たず、1 つの凍結した構文セットを、別々のスレッドの複数のパースで共有できるようにする
 
 ### Requirement 2: 汎用のインライン構文エンジン

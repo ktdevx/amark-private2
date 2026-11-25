@@ -81,7 +81,7 @@ Amark では、パーサが元の表記をすべて構文トークンとして�
 **Objective:** As a 木を編集するツールの開発者, I want どの Markdown でも表せない木を書き戻そうとしたとき、それが分かること, so that 黙って違う意味の文書を保存してしまうことを防げる
 
 #### Acceptance Criteria
-1. If 編集後の木が、文書の構文セットで再パースして同じ木になるどの Markdown でも表せない, then the Amark Markdown Renderer shall 出力を失敗させ、表現できないことを示す専用の状態コードを返す
+1. If 編集後の木が、文書の構文セットで再パースして同じ木になるどの Markdown でも表せない, then the Amark Markdown Renderer shall 出力を失敗させ、表現できないことを示す専用のエラーコードを返す
 2. When 表現できないことによって出力が失敗し、利用者が報告を求めている, the Amark Markdown Renderer shall 原因のノードと、理由の種類（空の中身、入れ子の文脈、隣り合うノード、区切りの条件、リテラルの形、属性の組み合わせ、出力の処理がない型、拡張の定めた理由）を知らせる
 3. The Amark Markdown Renderer shall 少なくとも次の木を表現できないものとして報告する：空の段落、空の強調、リンクの中のリンク、隣り合うコードスパン、3 以上のレベルの見出しの中の改行、段落の末尾のハードブレーク、タイトなリストの項目の中で連続する段落、構文として成立しない HTML のリテラル
 4. If 編集したノード（または元の表記を使えないノード）の型に Markdown の出力の処理がない, then the Amark Markdown Renderer shall 表現できないとして報告する

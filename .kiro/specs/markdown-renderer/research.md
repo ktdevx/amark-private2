@@ -104,9 +104,9 @@
 - **Selected Approach**：`amark.core.markdown` のフックの `begin` が、文書に編集があるときだけ、定義の表（先勝ち）を作り、参照の形のリンクのラベルが同じ宛先とタイトルの定義に解決されるかを確かめる。解決されないリンクと、定義に編集があるときの `UNMATCHED` の `[` を含むテキストに汚れの印を付ける。汚れの印は祖先に伝わり、その葉は作り直しになる。
 - **Rationale**：非局所の依存を、拡張と同じ公開の仕組み（`amark_markdown_mark_dirty`）で表せる。脚注などの拡張も同じ方法を使える。
 
-### Decision: 表現できない木は専用の状態コードと報告で知らせる
+### Decision: 表現できない木は専用のエラーコードと報告で知らせる
 - **Context**：要件 4。
-- **Selected Approach**：`foundation` の状態コードの末尾に `AMARK_ERROR_UNREPRESENTABLE` を足す（上流の変更）。理由とノードは、オプションの `report` のポインタに書く。入口の形は `html-renderer` と同じに保つ。
+- **Selected Approach**：`foundation` のエラーコードの末尾に `AMARK_ERROR_UNREPRESENTABLE` を足す（上流の変更）。理由とノードは、オプションの `report` のポインタに書く。入口の形は `html-renderer` と同じに保つ。
 - **Rationale**：引数の誤りと区別でき、利用者が分岐しやすい。報告をオプションに置けば入口の形を揃えられる。
 
 ### Decision: GFM 相当の拡張の Markdown の部品はテストの中に置く
@@ -131,13 +131,13 @@
 - 境目の規則の漏れ（意味が変わる出力）— 構文トークンを取り除いた木の作り直しと、編集の手順のプロパティテストを spec.txt の全例・コーパス・ファジングで回し、再パースの比較を受け入れ基準にする。
 - 保守的なエスケープで、編集した葉のバックスラッシュが増える — エスケープの判断をエンジンにまとめ、後で必要最小限の方式を足せるようにする。
 - 区切り文字の構成的な割り当てで文字参照が増える（`&#111;`）— 照合による検証で、元の表記が成り立つときはそれを保つ。
-- 上流の変更（状態コード、走査と照合の公開、テキストの走査の規則）が遅れる — 統合の節に明記し、この spec の実装の前に上流の spec を更新する。
+- 上流の変更（エラーコード、走査と照合の公開、テキストの走査の規則）が遅れる — 統合の節に明記し、この spec の実装の前に上流の spec を更新する。
 
 ## Revision Notes
 
 ### 2026-11-25：上流の spec による依頼の取り込み（この spec の承認後）
 - **Context**：design の Integration & Upstream Changes の依頼は、それぞれの上流の spec に反映された。この spec の承認済みの要件・設計・タスクの意図は変えず、取り込まれた形に記述を合わせた。
-- **`foundation`**：`AMARK_ERROR_UNREPRESENTABLE = 6` と `amark_status_string` の文字列が取り込まれた（`foundation` の要件 10.9、タスク 2.1、Downstream Extension Points）。
+- **`foundation`**：`AMARK_ERROR_UNREPRESENTABLE = 6` と `amark_error_string` の文字列が取り込まれた（`foundation` の要件 10.9、タスク 2.1、Downstream Extension Points）。
 - **`block-parser`**：`scan.h` のバイト列の HTML ブロックの開始と終わりの条件とタグの走査（`block-parser` の 7.7、7.8）と、構築関数の出力の core 拡張の一覧への `amark.core.markdown` の 1 行（この spec のタスク 3.7 が足す）が取り込まれた。
 - **`inline-parser`**：
   - `amark_inline_delimiter_flanks` と `amark_inline_match_delimiters`（5.7）。取り込まれた形では `amark_inline_run_t` が `max_run_length` ではなく `use_mask` を持ち、`capacity` は「長さの合計の半分（切り捨て）以上」になった。この spec の `amark_markdown_run(_match)_t` は形を変えず、対応の表を MdDispatch に置いた（下の 13）。

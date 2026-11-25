@@ -42,7 +42,7 @@
 - spec.txt 全体と CommonMark の準拠テストのランナー（`inline-parser`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（status、allocator、buffer、utf8、unicode）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）
+- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h`）。`src/parse/` は `tree/tree_internal.h` を使わない
 - `html-renderer` の公開 API `amark_html_core_extension()`（`html.h`）：`src/syntax/commonmark.c` の構築関数だけが使う（roadmap の順で `html-renderer` は先に実装される）。`markdown-renderer` の公開 API `amark_markdown_core_extension()`（`markdown.h`）も同じ場所だけが使い、その 1 行は `markdown-renderer` のタスク 3.7 が足す（この spec の実装の時点では使わない）
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`amark_test_support`、`amark_test_tree`、`amark_test_html_gfm`（`html-renderer` の検証用のノード型の記述子。GfmHookTests だけ）、`amark_add_fuzzer`
@@ -139,7 +139,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（`src/parse/`）、構文（`src/syntax/`）、文字データ（`src/runtime/`）。構文の知識はエンジンに置かない。
-- Existing patterns preserved：状態コードと出力引数、強い保証（パーサの失敗だけは例外。下記）、不透明型、`struct_size`、アロケータの経由、グローバルな可変状態なし、`amark__` の内部関数、ライセンスヘッダ。
+- Existing patterns preserved：エラーコードと出力引数、強い保証（パーサの失敗だけは例外。下記）、不透明型、`struct_size`、アロケータの経由、グローバルな可変状態なし、`amark__` の内部関数、ライセンスヘッダ。
 - Steering compliance：構文ごとに 1 ファイル、組み込みも公開 API だけ、parse → tree の一方向。
 
 ### Technology Stack
@@ -147,7 +147,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Language | C99 | ライブラリ、テスト、ファジング、ベンチマーク | `amark_target_defaults()` |
-| Runtime | `foundation`（status、allocator、buffer、utf8、unicode） | 確保、UTF-8 の復号、文字の分類 | case fold と文字参照を追加 |
+| Runtime | `foundation`（error、allocator、buffer、utf8、unicode） | 確保、UTF-8 の復号、文字の分類 | case fold と文字参照を追加 |
 | Tree | `syntax-tree`（公開 API） | ノード、トークン、追跡、構文セット | 上流の変更 2 件（Upstream Changes） |
 | Data | Unicode 17.0.0 `CaseFolding.txt`、WHATWG `entities.json` | case fold、文字参照の表 | 生成物をリポジトリに入れる |
 | Test | Naos v0.4.0、`amark_add_generated_tests` | 単体テスト、データ駆動のテスト | CommonMark 0.31.2 の例をテストデータにする |
@@ -321,7 +321,7 @@ stateDiagram-v2
     Finished --> [*]
     Failed --> [*]
 ```
-- `Finished` と `Failed` では `feed` と `finish` は `AMARK_ERROR_INVALID_STATE`。`Failed` に入る前の失敗の状態コードはそのまま返す。
+- `Finished` と `Failed` では `feed` と `finish` は `AMARK_ERROR_INVALID_STATE`。`Failed` に入る前の失敗のエラーコードはそのまま返す。
 
 ## Requirements Traceability
 
@@ -358,7 +358,7 @@ stateDiagram-v2
 | 4.5 | 段落の先頭の消費 | BlockLines | `amark_paragraph_consumer_t`, `amark_block_settle_paragraph` | — |
 | 4.6 | 行の問い合わせと消費 | BlockContext | `amark_block_column` など | — |
 | 4.7 | インラインの入力の登録と先頭の消費 | ParseContext | `amark_parse_add_inline_segment`, `amark_parse_consume_inline_prefix` | — |
-| 4.8 | コールバックの失敗 | BlockEngine, ParserAPI | 状態コードの伝播 | パーサの状態 |
+| 4.8 | コールバックの失敗 | BlockEngine, ParserAPI | エラーコードの伝播 | パーサの状態 |
 | 4.9 | 近道を使わない | Builtin syntaxes | 公開ヘッダだけ | — |
 | 5.1 | 後処理の登録と段階 | ParseContext | `amark_postprocess_t` | パースの全体 |
 | 5.2 | 終了時の順序 | ParserAPI | `finish` | パースの全体 |
@@ -370,7 +370,7 @@ stateDiagram-v2
 | 6.3 | パースの文脈 | ParseContext | `amark_parse_document` など | — |
 | 6.4 | 委譲先の指定 | ParserAPI | `amark_parse_options_t.inline_delegate` | — |
 | 6.5 | 単純な委譲先 | PlainDelegate | `amark_inline_delegate_plain` | — |
-| 6.6 | 委譲先の失敗 | ParserAPI | 状態コードの伝播 | パーサの状態 |
+| 6.6 | 委譲先の失敗 | ParserAPI | エラーコードの伝播 | パーサの状態 |
 | 7.1 | 全ブロック構文 | Builtin syntaxes | 各拡張 | — |
 | 7.2 | 構文ごとの拡張 | Builtin syntaxes | `commonmark.*` | — |
 | 7.3 | 構文セットを作る手段 | CommonMarkSet | `amark_syntax_set_add_commonmark`, `amark_syntax_set_new_commonmark` | — |
@@ -433,10 +433,10 @@ stateDiagram-v2
 | GfmHookTests | Test | GFM 相当のフックの検証と、再利用できる検証用の構文（`amark_test_parse_gfm`） | 13.1–13.6 | ParseCheck (P0), amark_test_html_gfm (P0) | Service, Batch |
 
 ### 共通の規約
-- `foundation` と `syntax-tree` の規約に従う：失敗しうる関数は `amark_status_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。解放の関数は NULL を受け付ける。公開の構造体は先頭に `size_t struct_size`（スロットの構造体は `amark_slot_header_t` の `struct_size`）を持ち、ライブラリは知っている最小のサイズ以上であることを確かめる。
+- `foundation` と `syntax-tree` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。解放の関数は NULL を受け付ける。公開の構造体は先頭に `size_t struct_size`（スロットの構造体は `amark_slot_header_t` の `struct_size`）を持ち、ライブラリは知っている最小のサイズ以上であることを確かめる。
 - **パーサの失敗の例外**：`amark_parser_feed` と `amark_parser_finish` は、確保の失敗とコールバックの失敗のとき、強い保証ではなく「リークせず、パーサが `Failed` の状態になる」保証とする（入力の途中まで組み立てた木を巻き戻すと、行ごとに複製が必要になるため）。`Failed` のパーサは解放だけを受け付ける。利用者は入力を最初から与え直す。この例外は `parser.h` に文書化する。
 - コールバックに渡す `amark_block_context_t *` と `amark_parse_context_t *` は、そのコールバックの間だけ有効。行の内容のポインタも同じ。
-- ブロック構文のコールバックが `AMARK_OK` 以外を返したら、エンジンは処理を止めてその状態コードを返す（4.8）。
+- ブロック構文のコールバックが `AMARK_ERROR_NONE` 以外を返したら、エンジンは処理を止めてそのエラーコードを返す（4.8）。
 
 ### Parse
 
@@ -468,9 +468,9 @@ typedef struct amark_parser amark_parser_t;
 
 typedef struct amark_inline_delegate {
     size_t struct_size;
-    amark_status_t (*begin)(amark_parse_context_t *ctx, void *user_data, void **out_session);   /* 任意 */
-    amark_status_t (*parse)(amark_parse_context_t *ctx, void *session, amark_node_t *leaf,
-                            const amark_text_input_t *input);                               /* 必須 */
+    amark_error_t (*begin)(amark_parse_context_t *ctx, void *user_data, void **out_session);   /* 任意 */
+    amark_error_t (*parse)(amark_parse_context_t *ctx, void *session, amark_node_t *leaf,
+                           const amark_text_input_t *input);                                /* 必須 */
     void (*end)(amark_parse_context_t *ctx, void *session);                                 /* 任意 */
     void *user_data;
 } amark_inline_delegate_t;
@@ -485,19 +485,19 @@ typedef struct amark_parse_options {
 AMARK_API void amark_parse_options_init(amark_parse_options_t *options);
 
 /* 構文セットを借りる（変更も解放もしない）。呼び出し側は文書より長く構文セットを保つ */
-AMARK_API amark_status_t amark_parser_new(const amark_syntax_set_t *syntax, const amark_parse_options_t *options,
-                                          const amark_allocator_t *allocator, amark_parser_t **out_parser);
+AMARK_API amark_error_t amark_parser_new(const amark_syntax_set_t *syntax, const amark_parse_options_t *options,
+                                         const amark_allocator_t *allocator, amark_parser_t **out_parser);
 /* amark_parser_new と同じ生成の後、構文セットの所有権を受け取って文書へ渡す。
    成功したら所有権は文書のもの、失敗したら呼び出し側に残る */
-AMARK_API amark_status_t amark_parser_new_take_syntax_set(amark_syntax_set_t *syntax, const amark_parse_options_t *options,
-                                                          const amark_allocator_t *allocator, amark_parser_t **out_parser);
-AMARK_API amark_status_t amark_parser_feed(amark_parser_t *parser, const char *data, size_t length);
-AMARK_API amark_status_t amark_parser_finish(amark_parser_t *parser, amark_document_t **out_document);
+AMARK_API amark_error_t amark_parser_new_take_syntax_set(amark_syntax_set_t *syntax, const amark_parse_options_t *options,
+                                                         const amark_allocator_t *allocator, amark_parser_t **out_parser);
+AMARK_API amark_error_t amark_parser_feed(amark_parser_t *parser, const char *data, size_t length);
+AMARK_API amark_error_t amark_parser_finish(amark_parser_t *parser, amark_document_t **out_document);
 AMARK_API void amark_parser_free(amark_parser_t *parser);
 
-AMARK_API amark_status_t amark_parse(const amark_syntax_set_t *syntax, const char *data, size_t length,
-                                     const amark_parse_options_t *options, const amark_allocator_t *allocator,
-                                     amark_document_t **out_document);   /* new + feed + finish + free */
+AMARK_API amark_error_t amark_parse(const amark_syntax_set_t *syntax, const char *data, size_t length,
+                                    const amark_parse_options_t *options, const amark_allocator_t *allocator,
+                                    amark_document_t **out_document);   /* new + feed + finish + free */
 
 AMARK_API const amark_inline_delegate_t *amark_inline_delegate_default(void);
 AMARK_API const amark_inline_delegate_t *amark_inline_delegate_plain(void);
@@ -557,8 +557,8 @@ bool amark__line_reader_next(amark__line_reader_t *reader, const char *data, siz
 **Contracts**: Service [x]
 ```c
 /* src/parse/parse_internal.h */
-amark_status_t amark__engine_process_line(amark_parser_t *parser, const amark__line_t *line);
-amark_status_t amark__engine_finish(amark_parser_t *parser);
+amark_error_t amark__engine_process_line(amark_parser_t *parser, const amark__line_t *line);
+amark_error_t amark__engine_finish(amark_parser_t *parser);
 ```
 
 #### BlockContext
@@ -611,11 +611,11 @@ struct amark_block_syntax {
     int32_t priority;                       /* 小さいほど先に試す。同じ値は構文セットの順 */
     const unsigned char *trigger;           /* 256 ビットの集合（32 バイト）。NULL なら常に試す */
     size_t block_data_size;
-    amark_status_t (*start)(amark_block_context_t *ctx, void *user_data, amark_block_start_result_t *out_result);
-    amark_status_t (*continue_line)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data,
-                                    amark_block_continue_result_t *out_result);
-    amark_status_t (*add_line)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
-    amark_status_t (*close)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
+    amark_error_t (*start)(amark_block_context_t *ctx, void *user_data, amark_block_start_result_t *out_result);
+    amark_error_t (*continue_line)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data,
+                                   amark_block_continue_result_t *out_result);
+    amark_error_t (*add_line)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
+    amark_error_t (*close)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
     void (*destroy_block_data)(void *block_data, void *user_data);
     void *user_data;
 };
@@ -635,18 +635,18 @@ AMARK_API amark_source_id_t amark_block_source(const amark_block_context_t *ctx)
 AMARK_API size_t amark_block_line_source_offset(const amark_block_context_t *ctx);   /* 行の先頭のソース上の位置 */
 
 /* 消費と記録（指定したノードにトークンを記録する） */
-AMARK_API amark_status_t amark_block_consume_columns(amark_block_context_t *ctx, amark_node_t *owner, size_t columns,
-                                                     uint16_t role, uint32_t token_flags);   /* 空白とタブだけ */
-AMARK_API amark_status_t amark_block_consume_bytes(amark_block_context_t *ctx, amark_node_t *owner, size_t length,
-                                                   amark_token_kind_t kind, uint16_t role, uint32_t token_flags);
-AMARK_API amark_status_t amark_block_consume_rest(amark_block_context_t *ctx, amark_node_t *owner,
-                                                  amark_token_kind_t kind, uint16_t role);     /* 行末まで */
-AMARK_API amark_status_t amark_block_consume_line_ending(amark_block_context_t *ctx, amark_node_t *owner, uint16_t role);
+AMARK_API amark_error_t amark_block_consume_columns(amark_block_context_t *ctx, amark_node_t *owner, size_t columns,
+                                                    uint16_t role, uint32_t token_flags);   /* 空白とタブだけ */
+AMARK_API amark_error_t amark_block_consume_bytes(amark_block_context_t *ctx, amark_node_t *owner, size_t length,
+                                                  amark_token_kind_t kind, uint16_t role, uint32_t token_flags);
+AMARK_API amark_error_t amark_block_consume_rest(amark_block_context_t *ctx, amark_node_t *owner,
+                                                 amark_token_kind_t kind, uint16_t role);     /* 行末まで */
+AMARK_API amark_error_t amark_block_consume_line_ending(amark_block_context_t *ctx, amark_node_t *owner, uint16_t role);
 
 /* ブロックの操作 */
-AMARK_API amark_status_t amark_block_open(amark_block_context_t *ctx, const amark_block_syntax_t *handler,
-                                          amark_node_type_t type, amark_node_t **out_node);
-AMARK_API amark_status_t amark_block_close(amark_block_context_t *ctx, amark_node_t *node); /* 開いた子孫も閉じる */
+AMARK_API amark_error_t amark_block_open(amark_block_context_t *ctx, const amark_block_syntax_t *handler,
+                                         amark_node_type_t type, amark_node_t **out_node);
+AMARK_API amark_error_t amark_block_close(amark_block_context_t *ctx, amark_node_t *node); /* 開いた子孫も閉じる */
 AMARK_API amark_node_t *amark_block_container(const amark_block_context_t *ctx); /* 最後に照合したブロック */
 AMARK_API amark_node_t *amark_block_tip(const amark_block_context_t *ctx);       /* 最も内側の開いているブロック */
 AMARK_API const amark_block_syntax_t *amark_block_handler(const amark_block_context_t *ctx, const amark_node_t *node);
@@ -688,13 +688,13 @@ typedef struct amark_block_line_info {
     bool lazy;
 } amark_block_line_info_t;
 
-AMARK_API amark_status_t amark_block_append_line(amark_block_context_t *ctx, amark_node_t *node);
+AMARK_API amark_error_t amark_block_append_line(amark_block_context_t *ctx, amark_node_t *node);
 AMARK_API size_t amark_block_line_count(const amark_block_context_t *ctx, const amark_node_t *node);
-AMARK_API amark_status_t amark_block_line_at(const amark_block_context_t *ctx, const amark_node_t *node, size_t index,
-                                             amark_block_line_info_t *out_line);
-AMARK_API amark_status_t amark_block_reinterpret(amark_block_context_t *ctx, amark_node_t *node, size_t first_line,
-                                                 const amark_block_syntax_t *handler, amark_node_type_t type,
-                                                 amark_node_t **out_node);
+AMARK_API amark_error_t amark_block_line_at(const amark_block_context_t *ctx, const amark_node_t *node, size_t index,
+                                            amark_block_line_info_t *out_line);
+AMARK_API amark_error_t amark_block_reinterpret(amark_block_context_t *ctx, amark_node_t *node, size_t first_line,
+                                                const amark_block_syntax_t *handler, amark_node_type_t type,
+                                                amark_node_t **out_node);
 
 typedef enum amark_consume_result_kind {
     AMARK_CONSUME_NONE = 0, AMARK_CONSUME_PENDING = 1, AMARK_CONSUME_LINES = 2
@@ -705,8 +705,8 @@ typedef struct amark_paragraph_consumer {
     size_t state_size;            /* 段落ごとの再開の状態。0 で始まり、CONSUME_LINES と NONE でやり直される */
     /* 段落の行 [0, line_count) を先頭から見る。scanned_lines 行までは以前の呼び出しで調べてある。
        CONSUME_LINES のとき *out_lines に消費した行の数を入れ、段落の前に作ったノードにトークンを記録済みであること */
-    amark_status_t (*consume)(amark_block_context_t *ctx, amark_node_t *paragraph, void *state, size_t scanned_lines,
-                              bool final, void *user_data, amark_consume_result_kind_t *out_kind, size_t *out_lines);
+    amark_error_t (*consume)(amark_block_context_t *ctx, amark_node_t *paragraph, void *state, size_t scanned_lines,
+                             bool final, void *user_data, amark_consume_result_kind_t *out_kind, size_t *out_lines);
     void *user_data;
 } amark_paragraph_consumer_t;
 
@@ -716,12 +716,12 @@ typedef struct amark_settle_result {
     size_t settled_lines;         /* final でないとき：保留中の消費に属さない最初の行 */
 } amark_settle_result_t;
 
-AMARK_API amark_status_t amark_block_settle_paragraph(amark_block_context_t *ctx, amark_node_t *paragraph, bool final,
-                                                      amark_settle_result_t *out_result);
-AMARK_API amark_status_t amark_block_discard(amark_block_context_t *ctx, amark_node_t *node); /* 空の葉を捨てる */
-AMARK_API amark_status_t amark_block_record_line_range(amark_block_context_t *ctx, amark_node_t *owner,
-                                                       const amark_block_line_info_t *line, size_t from, size_t to,
-                                                       amark_token_kind_t kind, uint16_t role);
+AMARK_API amark_error_t amark_block_settle_paragraph(amark_block_context_t *ctx, amark_node_t *paragraph, bool final,
+                                                     amark_settle_result_t *out_result);
+AMARK_API amark_error_t amark_block_discard(amark_block_context_t *ctx, amark_node_t *node); /* 空の葉を捨てる */
+AMARK_API amark_error_t amark_block_record_line_range(amark_block_context_t *ctx, amark_node_t *owner,
+                                                      const amark_block_line_info_t *line, size_t from, size_t to,
+                                                      amark_token_kind_t kind, uint16_t role);
     /* 行の記録の [from, to)（ソース上の位置）を記録する。from が content_start で部分的なタブがあれば
        PARTIAL_TAB を作る。kind が TEXT なら NUL と不正な UTF-8 を REPLACED に分ける */
 ```
@@ -747,7 +747,7 @@ AMARK_API amark_status_t amark_block_record_line_range(amark_block_context_t *ct
 typedef struct amark_parse_state_slot {
     amark_slot_header_t header;     /* kind = AMARK_SLOT_PARSE_STATE */
     size_t size;
-    amark_status_t (*init)(amark_parse_context_t *ctx, void *state, void *user_data); /* 任意 */
+    amark_error_t (*init)(amark_parse_context_t *ctx, void *state, void *user_data);  /* 任意 */
     void (*destroy)(amark_parse_context_t *ctx, void *state, void *user_data);        /* 任意。失敗時も呼ぶ */
     void *user_data;
 } amark_parse_state_slot_t;
@@ -759,7 +759,7 @@ typedef enum amark_postprocess_phase {
 typedef struct amark_postprocess {
     amark_slot_header_t header;     /* kind = AMARK_SLOT_POSTPROCESS */
     amark_postprocess_phase_t phase;
-    amark_status_t (*run)(amark_parse_context_t *ctx, amark_node_t *root, void *user_data);
+    amark_error_t (*run)(amark_parse_context_t *ctx, amark_node_t *root, void *user_data);
     void *user_data;
 } amark_postprocess_t;
 
@@ -769,21 +769,21 @@ AMARK_API void *amark_parse_extension_state(amark_parse_context_t *ctx, const am
 AMARK_API amark_label_map_t *amark_parse_link_definitions(amark_parse_context_t *ctx);
 
 /* インラインの入力 */
-AMARK_API amark_status_t amark_parse_add_inline_segment(amark_parse_context_t *ctx, amark_node_t *leaf,
-                                                        const amark_text_segment_t *segment);
+AMARK_API amark_error_t amark_parse_add_inline_segment(amark_parse_context_t *ctx, amark_node_t *leaf,
+                                                       const amark_text_segment_t *segment);
 AMARK_API const amark_text_input_t *amark_parse_inline_input(const amark_parse_context_t *ctx, const amark_node_t *leaf);
-AMARK_API amark_status_t amark_parse_consume_inline_prefix(amark_parse_context_t *ctx, amark_node_t *leaf, size_t length,
-                                                           amark_node_t *owner, amark_token_kind_t kind, uint16_t role);
+AMARK_API amark_error_t amark_parse_consume_inline_prefix(amark_parse_context_t *ctx, amark_node_t *leaf, size_t length,
+                                                          amark_node_t *owner, amark_token_kind_t kind, uint16_t role);
 AMARK_API void amark_parse_discard_inline_input(amark_parse_context_t *ctx, amark_node_t *leaf);
-AMARK_API amark_status_t amark_parse_move_inline_input(amark_parse_context_t *ctx, amark_node_t *from, amark_node_t *to);
+AMARK_API amark_error_t amark_parse_move_inline_input(amark_parse_context_t *ctx, amark_node_t *from, amark_node_t *to);
 
 /* トークンの補助 */
-AMARK_API amark_status_t amark_parse_add_token(amark_parse_context_t *ctx, amark_node_t *owner, amark_token_kind_t kind,
-                                               uint16_t role, uint32_t flags, amark_source_id_t source,
-                                               size_t offset, size_t length);
-AMARK_API amark_status_t amark_parse_add_text(amark_parse_context_t *ctx, amark_node_t *owner, uint16_t role,
-                                              amark_source_id_t source, size_t offset, size_t length,
-                                              amark_buffer_t *out_value);   /* out_value は NULL 可 */
+AMARK_API amark_error_t amark_parse_add_token(amark_parse_context_t *ctx, amark_node_t *owner, amark_token_kind_t kind,
+                                              uint16_t role, uint32_t flags, amark_source_id_t source,
+                                              size_t offset, size_t length);
+AMARK_API amark_error_t amark_parse_add_text(amark_parse_context_t *ctx, amark_node_t *owner, uint16_t role,
+                                             amark_source_id_t source, size_t offset, size_t length,
+                                             amark_buffer_t *out_value);   /* out_value は NULL 可 */
 ```
 - `consume_inline_prefix`：入力の先頭の `length` バイト（論理的な位置）を `owner` に記録して入力から除く（4.7。タスクリストの `[ ]` など）。入力の長さを超えたら `AMARK_ERROR_INVALID_ARGUMENT`。
 - 後処理の中の変更は追跡が無効なので記録されない（5.5）。
@@ -817,13 +817,13 @@ typedef struct amark_text_segment {
     unsigned leading_columns;
 } amark_text_segment_t;
 
-AMARK_API amark_status_t amark_text_input_new(amark_document_t *document, amark_text_input_t **out_input);
+AMARK_API amark_error_t amark_text_input_new(amark_document_t *document, amark_text_input_t **out_input);
 AMARK_API void amark_text_input_free(amark_text_input_t *input);
-AMARK_API amark_status_t amark_text_input_add(amark_text_input_t *input, const amark_text_segment_t *segment);
+AMARK_API amark_error_t amark_text_input_add(amark_text_input_t *input, const amark_text_segment_t *segment);
 AMARK_API size_t amark_text_input_length(const amark_text_input_t *input);
 AMARK_API size_t amark_text_input_segment_count(const amark_text_input_t *input);
-AMARK_API amark_status_t amark_text_input_segment_at(const amark_text_input_t *input, size_t index,
-                                                     amark_text_segment_t *out_segment);
+AMARK_API amark_error_t amark_text_input_segment_at(const amark_text_input_t *input, size_t index,
+                                                    amark_text_segment_t *out_segment);
 /* 論理的な位置 pos から、同じ区間の中で連続するバイト列を返す（pos が長さ以上なら NULL と 0） */
 AMARK_API const char *amark_text_input_chunk(const amark_text_input_t *input, size_t pos, size_t *out_length);
 AMARK_API int amark_text_input_byte(const amark_text_input_t *input, size_t pos);            /* 範囲外は -1 */
@@ -855,9 +855,9 @@ AMARK_API bool amark_scan_html_block_end(int kind, const char *line, size_t leng
 
 #define AMARK_DECODE_ESCAPES   0x01u
 #define AMARK_DECODE_CHAR_REFS 0x02u
-AMARK_API amark_status_t amark_parse_add_decoded(amark_parse_context_t *ctx, amark_node_t *owner,
-                                                 const amark_text_input_t *input, size_t start, size_t end,
-                                                 uint16_t role, uint32_t decode_flags, amark_buffer_t *out_value);
+AMARK_API amark_error_t amark_parse_add_decoded(amark_parse_context_t *ctx, amark_node_t *owner,
+                                                const amark_text_input_t *input, size_t start, size_t end,
+                                                uint16_t role, uint32_t decode_flags, amark_buffer_t *out_value);
 ```
 - `out_end` は走査した構文の直後の位置。失敗なら false で出力を変えない。
 
@@ -884,11 +884,11 @@ AMARK_API amark_status_t amark_parse_add_decoded(amark_parse_context_t *ctx, ama
 **Contracts**: Service [x]
 ```c
 /* include/amark/parser.h（続き） */
-AMARK_API amark_status_t amark_label_normalize(const char *label, size_t length, amark_buffer_t *out);
-AMARK_API amark_status_t amark_label_map_new(const amark_allocator_t *allocator, amark_label_map_t **out_map);
+AMARK_API amark_error_t amark_label_normalize(const char *label, size_t length, amark_buffer_t *out);
+AMARK_API amark_error_t amark_label_map_new(const amark_allocator_t *allocator, amark_label_map_t **out_map);
 AMARK_API void amark_label_map_free(amark_label_map_t *map);
-AMARK_API amark_status_t amark_label_map_add(amark_label_map_t *map, const char *key, size_t length, void *value,
-                                             bool *out_added);   /* key は正規化済み */
+AMARK_API amark_error_t amark_label_map_add(amark_label_map_t *map, const char *key, size_t length, void *value,
+                                            bool *out_added);   /* key は正規化済み */
 AMARK_API void *amark_label_map_find(const amark_label_map_t *map, const char *key, size_t length);
 AMARK_API size_t amark_label_map_count(const amark_label_map_t *map);
 ```
@@ -923,9 +923,9 @@ AMARK_API size_t amark_label_map_count(const amark_label_map_t *map);
 typedef enum amark_fragment_context { AMARK_FRAGMENT_BLOCK = 1, AMARK_FRAGMENT_INLINE = 2 } amark_fragment_context_t;
 #define AMARK_FRAGMENT_TARGET_DEFINITIONS 0x01u
 
-AMARK_API amark_status_t amark_parse_fragment(amark_node_t *parent, amark_node_t *before,
-                                              amark_fragment_context_t context, const char *data, size_t length,
-                                              const amark_parse_options_t *options, uint32_t fragment_flags);
+AMARK_API amark_error_t amark_parse_fragment(amark_node_t *parent, amark_node_t *before,
+                                             amark_fragment_context_t context, const char *data, size_t length,
+                                             const amark_parse_options_t *options, uint32_t fragment_flags);
 ```
 - Preconditions：`before` は NULL か `parent` の子。`parent` の文書の構文セットを借りて使う（所有権は扱わない）。
 - Postconditions：成功なら、得たノードがその順で挿入され、各ノードは取り込んだソースを参照するトークンを持つ。失敗なら挿入先の木は変わらない。
@@ -958,12 +958,12 @@ AMARK_API const amark_extension_t *amark_commonmark_html_block(void);
 AMARK_API const amark_extension_t *amark_commonmark_link_reference_definition(void);
 AMARK_API const amark_extension_t *amark_commonmark_paragraph(void);
 
-AMARK_API amark_status_t amark_syntax_set_add_commonmark(amark_syntax_set_t *set);
-AMARK_API amark_status_t amark_syntax_set_new_commonmark(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
-AMARK_API amark_status_t amark_parser_new_commonmark(const amark_parse_options_t *options,
-                                                     const amark_allocator_t *allocator, amark_parser_t **out_parser);
-AMARK_API amark_status_t amark_parse_commonmark(const char *data, size_t length, const amark_parse_options_t *options,
-                                                const amark_allocator_t *allocator, amark_document_t **out_document);
+AMARK_API amark_error_t amark_syntax_set_add_commonmark(amark_syntax_set_t *set);
+AMARK_API amark_error_t amark_syntax_set_new_commonmark(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
+AMARK_API amark_error_t amark_parser_new_commonmark(const amark_parse_options_t *options,
+                                                    const amark_allocator_t *allocator, amark_parser_t **out_parser);
+AMARK_API amark_error_t amark_parse_commonmark(const char *data, size_t length, const amark_parse_options_t *options,
+                                               const amark_allocator_t *allocator, amark_document_t **out_document);
 ```
 
 **ノード型と、それを作る組み込み拡張の対応（9.5、7.6。表記の区別と、構文ごとの出力を足す場合の場所）**
@@ -1088,13 +1088,13 @@ typedef struct amark_test_parse_spec {
 
 /* input を一括でパースし、(1) amark_document_check_tokens が OK、(2) amark__tree_check が成功（INTERNAL のときだけ）、
    (3) 1 バイトずつ・2 分割・ランダムな区切りの逐次の入力のダンプ（spec->dump_flags）が一括と一致、を確かめる。
-   すべて通れば AMARK_OK を返し、一括でパースした文書を *out_document に渡す（呼び出し側が amark_document_free で解放する）。
-   パースが失敗したらその状態コードを、検査が失敗したら入力・失敗した検査・両方のダンプを表示して
+   すべて通れば AMARK_ERROR_NONE を返し、一括でパースした文書を *out_document に渡す（呼び出し側が amark_document_free で解放する）。
+   パースが失敗したらそのエラーコードを、検査が失敗したら入力・失敗した検査・両方のダンプを表示して
    AMARK_ERROR_INVALID_STATE を返す。どちらの失敗でも *out_document は NULL で、リークしない */
-amark_status_t amark_test_parse_check(const amark_test_parse_spec_t *spec, const char *input, size_t length,
-                                      amark_document_t **out_document);
+amark_error_t amark_test_parse_check(const amark_test_parse_spec_t *spec, const char *input, size_t length,
+                                     amark_document_t **out_document);
 
-/* amark_test_parse_check が AMARK_OK を返すことを Naos で確かめ、(4) 文書のダンプが expected_dump と
+/* amark_test_parse_check が AMARK_ERROR_NONE を返すことを Naos で確かめ、(4) 文書のダンプが expected_dump と
    バイト単位で一致することを確かめて（違えば入力・期待・実際を表示）、文書を解放する */
 #define AMARK_CHECK_PARSE(spec, input, input_length, expected_dump) /* ... */
 ```
@@ -1223,7 +1223,7 @@ struct amark_parser {
 ### Error Strategy
 - 引数の誤り（NULL、未知の印、上限外の深さ、不足した `struct_size`、範囲外の消費、別の文書のノード）は `AMARK_ERROR_INVALID_ARGUMENT` で、パーサの状態を変えない。
 - 状態の誤り（凍結していない構文セット、終了後の操作、`close` の中の行の操作、副作用のある `NONE`）は `AMARK_ERROR_INVALID_STATE`。
-- 確保の失敗とコールバック・委譲先の失敗は、その状態コードを返してパーサを `Failed` にする（共通の規約の例外）。拡張の状態の `destroy`、委譲先の `end`、ブロックのデータの `destroy_block_data` は失敗時にも呼ぶ。リークしない。
+- 確保の失敗とコールバック・委譲先の失敗は、そのエラーコードを返してパーサを `Failed` にする（共通の規約の例外）。拡張の状態の `destroy`、委譲先の `end`、ブロックのデータの `destroy_block_data` は失敗時にも呼ぶ。リークしない。
 - 不正な入力（不正な UTF-8、NUL、深すぎる入れ子）はエラーにしない（2.5、12.2）。
 
 ### Error Categories and Responses
@@ -1254,7 +1254,7 @@ struct amark_parser {
 - すべてのデータ駆動のテストは `AMARK_CHECK_PARSE` を使い、被覆と逐次の入力の一致を確かめる（9.1、1.3、14.3）。
 - **fragment**：ブロックとインラインの文脈、挿入先の定義の解決、包含に反する断片で木が変わらないこと、追跡の記録（10.1–10.5）。
 - **gfm_hooks**：3 つの検証用の構文が公開ヘッダだけで書けて期待する木とトークンになること、`amark_test_html_gfm` と同じ構文セットに並べて HTML まで出力できること（13.1–13.4）。`amark_test_parse_gfm` をリンクしたテストから取得関数で構文セットを作れること、委譲先の中で `amark_test_gfm_footnote_definitions` が登録したラベルの定義を返し、拡張のない構文セットでは NULL を返すこと（13.5）。セルの中の `a \| b` が 1 つのセルになり、区間が `a ` と `| b`、`\` が `AMARK_TEST_GFM_ROLE_CELL_PIPE_ESCAPE` の `MARKER` としてセルに記録され、被覆が保たれること（13.6）。
-- **parse_check**：`amark_test_parse_check` が検査の後に一括の文書を返し、指定しない構文セットのときも返した文書が単独で解放できる（テスト用アロケータのブロック数が 0）こと、パースの失敗で状態コードと NULL を返すこと（14.5）。
+- **parse_check**：`amark_test_parse_check` が検査の後に一括の文書を返し、指定しない構文セットのときも返した文書が単独で解放できる（テスト用アロケータのブロック数が 0）こと、パースの失敗でエラーコードと NULL を返すこと（14.5）。
 - **engine_roles**：ブロックのエンジンが記録する役割の値がすべて 0xFF00–0xFF0F にあり、組み込みのブロック構文の役割の値がすべて 0x0001–0x00FF にあること（9.7）。
 - **commonmark_set**：構築関数の構文セットの拡張の順（`amark.core`、`amark.core.html`、構文の拡張）、同じ名前の拡張がある構文セットの拒否、便宜の関数の文書で HTML が出力できること（7.3、7.6）。`amark.core.markdown` を含む順の確認は、それを足す `markdown-renderer` のタスク 3.7 がこのテストを更新して行う。
 - **oom**：`AMARK_CHECK_OOM_SWEEP` で、パーサの生成、各構文を含む文書の一括と逐次のパース、断片のパースについて、メモリ不足が返ってリークがないこと（1.6）。
@@ -1276,8 +1276,8 @@ struct amark_parser {
 
 ## Integration & Upstream Changes
 - **`syntax-tree` への追加（2026-11-25 に `syntax-tree` の spec に反映済み。実装は `syntax-tree` のタスク 3.4、5.5 が行う）**：
-  1. `AMARK_API amark_status_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);`（`syntax-tree` の 1.10、1.11。非 `const` の受け取りのまま）— 文書が使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードとソースの後に解放する。静的な構文セット、文書が使っていない構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT` で、所有権は呼び出し側に残る。確保をしない。この spec は、非 `const` の構文セットを受け取る `amark_parser_new_take_syntax_set` の生成の最後でだけ呼ぶ（ParserAPI。1.2、1.9、11.3）。
-  2. `AMARK_API amark_status_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent);`（`syntax-tree` の 4.10、4.11）— `source_parent`（根でもよい）の子をすべて、ソースごとに 1 回だけ複製して取り込み、`before` の前（NULL なら末尾）に順に挿入する。型の対応付け・包含の検査・確保をつなぎ込みの前に終え、全か無か。記録は `parent` に `CHILDREN`、各複製に `RELOCATED`。この spec は断片のパースで使う（Fragment。10.1、10.2、10.4、10.5）。
+  1. `AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set);`（`syntax-tree` の 1.10、1.11。非 `const` の受け取りのまま）— 文書が使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードとソースの後に解放する。静的な構文セット、文書が使っていない構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT` で、所有権は呼び出し側に残る。確保をしない。この spec は、非 `const` の構文セットを受け取る `amark_parser_new_take_syntax_set` の生成の最後でだけ呼ぶ（ParserAPI。1.2、1.9、11.3）。
+  2. `AMARK_API amark_error_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent);`（`syntax-tree` の 4.10、4.11）— `source_parent`（根でもよい）の子をすべて、ソースごとに 1 回だけ複製して取り込み、`before` の前（NULL なら末尾）に順に挿入する。型の対応付け・包含の検査・確保をつなぎ込みの前に終え、全か無か。記録は `parent` に `CHILDREN`、各複製に `RELOCATED`。この spec は断片のパースで使う（Fragment。10.1、10.2、10.4、10.5）。
   3. スロットの種類の範囲の表（`syntax-tree` の 8.13。`AMARK_SLOT_KIND_BLOCK_PARSER_FIRST` 0x0100 – `_LAST` 0x01FF）。この spec は、その `block-parser` の節の下に 0x0100–0x0103 を追記する（予定どおりの追記）。
 - **`foundation` の生成手順への追加**（foundation の design が予定している作業）：case fold の表と関数、文字参照の表と関数、`.gitattributes` の `export-ignore`。
 - **`foundation` の Downstream Extension Points（2026-11-25 の横断レビュー r1）**：この spec の最上位の `CMakeLists.txt` への追記（オプション `AMARK_BUILD_BENCH` と `add_subdirectory(bench)`）と、`.gitattributes` への `tests/syntax/data/spec_blocks.txt export-ignore` の追記は、`foundation` の Downstream Extension Points の表の行として載る（行の追加は `foundation` の spec が行う。この spec はその表の拡張点の範囲で編集する）。`amark.h` への追加は `foundation` の正準の順に従う。

@@ -11,7 +11,7 @@
 - `cmake -B build && cmake --build build && ctest --test-dir build` が 5 つのコンパイラ環境で、静的版・動的版のどちらでも通る。
 - 4 つの取り込み方法（`find_package`、`add_subdirectory`、FetchContent、pkg-config）が自動テストで保証される。
 - 後続の spec が、テスト・データ駆動のテスト・ファジングターゲットを CMake の関数 1 つで追加できる。
-- 共通ランタイムの規約（状態コード、出力引数、アロケータ、所有権）を、後続の spec がそのまま従える形で確定する。
+- 共通ランタイムの規約（エラーコード、出力引数、アロケータ、所有権）を、後続の spec がそのまま従える形で確定する。
 
 ### Non-Goals
 - ノード型、構文トークン、パーサ、レンダラ、拡張レジストリ
@@ -30,8 +30,8 @@
 - ファジングの仕組み：`amark_add_fuzzer()`、libFuzzer のない環境の代替の `main`、短時間実行のターゲット
 - `.github/workflows/` の CI とリリースのワークフロー
 - `LICENSE`、`README.md`、`.gitattributes`、`.gitignore`、ソースのライセンスヘッダの規約
-- 公開ヘッダの配置規約と `include/amark/{amark,export,version,status,allocator,buffer,utf8,unicode}.h`
-- `src/runtime/` のすべて（版、状態コード、アロケータ、バッファ、UTF-8、文字の分類と Unicode の表）と `tools/gen_unicode_tables.py`
+- 公開ヘッダの配置規約と `include/amark/{amark,export,version,error,allocator,buffer,utf8,unicode}.h`
+- `src/runtime/` のすべて（版、エラーコード、アロケータ、バッファ、UTF-8、文字の分類と Unicode の表）と `tools/gen_unicode_tables.py`
 - ライブラリ全体のエラーとメモリ管理の規約（後続の spec が従う）
 
 ### Out of Boundary
@@ -40,7 +40,7 @@
 - 特定の構文だけが使う文字データ（case fold、HTML の文字参照）と、その生成手順への追加（`block-parser` が Downstream Extension Points の拡張点に追加する）
 - spec.txt の `export-ignore` と CI の `AMARK_REQUIRE_SPEC_TESTS=ON`（`inline-parser` が追加する）
 - `bench/` の中身、最上位の `AMARK_BUILD_BENCH` と `add_subdirectory(bench)`、`spec_blocks.txt` の `export-ignore`（`block-parser` が追加する）
-- 入れ子の深さの上限の値など、パーサ固有の制限（状態コード `AMARK_ERROR_LIMIT_EXCEEDED` だけを用意する）
+- 入れ子の深さの上限の値など、パーサ固有の制限（エラーコード `AMARK_ERROR_LIMIT_EXCEEDED` だけを用意する）
 
 ### Allowed Dependencies
 - 実行時：C99 の標準ライブラリだけ（`<stddef.h>`、`<stdint.h>`、`<stdbool.h>`、`<stdlib.h>`、`<string.h>`、`<limits.h>`）
@@ -50,13 +50,13 @@
 - レイヤーの規則：`src/runtime/` は他のレイヤー（tree、parse、render、syntax）を参照しない。公開ヘッダは他の公開ヘッダだけを include する
 
 ### Revalidation Triggers
-- 状態コードの追加・意味の変更、出力引数の規約の変更 → すべての後続の spec
+- エラーコードの追加・意味の変更、出力引数の規約の変更 → すべての後続の spec
 - `amark_allocator_t` のフィールドの追加、`amark_buffer_t` の API の変更 → `syntax-tree`、`html-renderer`、`markdown-renderer`
 - `amark_add_test()` / `amark_add_generated_tests()` / `amark_add_fuzzer()` の引数の変更、テスト生成の補助の契約の変更、ファジングターゲットがリンクするテスト用の補助ライブラリの規則（FuzzInfra の「ファジング用の補助ライブラリの規則」）の変更 → テストやファジングターゲットを持つすべての spec
 - 文字の分類の定義の変更、Unicode の版の更新、準拠対象の CommonMark の版の変更 → `inline-parser`、`block-parser`
 - 公開ヘッダの配置、`amark.h` の構成と正規の include の順（PublicHeaders）、`AMARK_API` の規則の変更 → すべての後続の spec
 - インストールの配置、パッケージの選択の規則の変更 → 利用者とリリースのワークフロー
-- 下の Downstream Extension Points の拡張点（生成スクリプトの表の一覧と出力の形、`.gitattributes` の規則、`ci.yml` の構成の段、状態コードの末尾への追加、最上位の `CMakeLists.txt` のオプションとサブディレクトリの組み立て）の形の変更 → その拡張点に追加する spec（`block-parser`、`inline-parser`、`markdown-renderer`）
+- 下の Downstream Extension Points の拡張点（生成スクリプトの表の一覧と出力の形、`.gitattributes` の規則、`ci.yml` の構成の段、エラーコードの末尾への追加、最上位の `CMakeLists.txt` のオプションとサブディレクトリの組み立て）の形の変更 → その拡張点に追加する spec（`block-parser`、`inline-parser`、`markdown-renderer`）
 
 ### Downstream Extension Points
 この spec が所有するファイルのうち、後続の spec が追加を行うことが予定されている箇所（2026-11-25 に確認、同日の cross-spec review r1 で `block-parser` の 2 行を追加）。ファイル全体の所有と、追加を受け入れる形（拡張点）はこの spec が持ち、追加した部分の実装・テスト・保守は追加する spec が持つ。これらの追加はこの spec のタスクに含めない。追加する spec は拡張点の形を変えず、形の変更が必要ならこの spec の改訂として依頼する。
@@ -69,7 +69,7 @@
 | `block-parser` | `.gitattributes` | `tests/syntax/data/spec_blocks.txt` の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
 | `inline-parser` | `.gitattributes` | `tests/spec/data/` の spec.txt と NOTICE.txt の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
 | `inline-parser` | `.github/workflows/ci.yml` | 全ジョブの構成に `-DAMARK_REQUIRE_SPEC_TESTS=ON` を加える | CIWorkflow の構成の段（構成のオプションを追加できる） |
-| `markdown-renderer` | `include/amark/status.h`、`src/runtime/status.c` | `AMARK_ERROR_UNREPRESENTABLE` | 状態コードの末尾への追加（10.7）。2026-11-25 にこの spec に取り込み済み（値 6、要件 10.9、タスク 2.1） |
+| `markdown-renderer` | `include/amark/error.h`、`src/runtime/error.c` | `AMARK_ERROR_UNREPRESENTABLE` | エラーコードの末尾への追加（10.7）。2026-11-25 にこの spec に取り込み済み（値 6、要件 10.9、タスク 2.1） |
 
 - 表のほかに、すべての後続の spec が行う定型の追加として、`src/CMakeLists.txt` へのソース、`include/amark/amark.h` への公開ヘッダ（PublicHeaders の正規の順の自分の位置に）、`tests/CMakeLists.txt` と `fuzz/CMakeLists.txt` へのサブディレクトリ（FuzzInfra の「ファジング用の補助ライブラリの規則」に従う）がある。
 - 上の追加で `src/runtime/` に入るファイルは、This Spec Owns の「`src/runtime/` のすべて」の例外として、追加する spec が所有する。ライセンスヘッダ、`amark_` 接頭辞、アロケータの経由、レイヤーの規則などの規約はこの spec のものに従う。
@@ -95,7 +95,7 @@ graph TB
     subgraph Runtime
         Export[export h]
         Version[version]
-        Status[status]
+        Error[error]
         Allocator[allocator]
         Buffer[buffer]
         Utf8[utf8]
@@ -113,21 +113,21 @@ graph TB
     VersionMod --> Version
     Buffer --> Allocator
     Buffer --> Utf8
-    Allocator --> Status
+    Allocator --> Error
     Unicode --> Export
     Utf8 --> Export
-    Status --> Export
+    Error --> Export
     Tree --> Runtime
     Tree --> TestingMod
     Tree --> FuzzMod
     Workflows --> TopCMake
 ```
 
-**Dependency direction（実行時のコード）**：`export.h` → `version` / `status` → `allocator` → `utf8` / `unicode` → `buffer` → （後続：tree → parse / render → syntax）。左のものは右のものを参照しない。違反はレビューでエラーとして扱う。
+**Dependency direction（実行時のコード）**：`export.h` → `version` / `error` → `allocator` → `utf8` / `unicode` → `buffer` → （後続：tree → parse / render → syntax）。左のものは右のものを参照しない。違反はレビューでエラーとして扱う。
 
 **Architecture Integration**：
 - Domain boundaries：インフラはファイル単位で責務を分ける（ビルドの中核、パッケージ、テスト、テスト生成、ファジング、検査、ワークフロー）。共通ランタイムは 1 つの機能につき 1 つの公開ヘッダと 1 つのソースにする。
-- Steering compliance：C99、`amark_` / `AMARK_` 接頭辞、`AMARK_API`、既定で hidden の可視性、不透明型、アロケータの経由、状態コード、`include/amark/`、`src/runtime/`、`_internal.h`、`amark__` 接頭辞、ライセンスヘッダ。
+- Steering compliance：C99、`amark_` / `AMARK_` 接頭辞、`AMARK_API`、既定で hidden の可視性、不透明型、アロケータの経由、エラーコード、`include/amark/`、`src/runtime/`、`_internal.h`、`amark__` 接頭辞、ライセンスヘッダ。
 
 ### Technology Stack
 
@@ -170,7 +170,7 @@ graph TB
 │   ├── amark.h                    # すべての公開ヘッダをまとめる
 │   ├── export.h                   # AMARK_API、AMARK_BEGIN_DECLS / AMARK_END_DECLS
 │   ├── version.h                  # 版のマクロ（版の唯一の定義）と実行時の版の関数
-│   ├── status.h                   # amark_status_t と amark_status_string()
+│   ├── error.h                    # amark_error_t と amark_error_string()
 │   ├── allocator.h                # amark_allocator_t と確保の関数
 │   ├── buffer.h                   # amark_buffer_t（不透明型）
 │   ├── utf8.h                     # UTF-8 の復号・検証・符号化
@@ -179,7 +179,7 @@ graph TB
 │   ├── CMakeLists.txt             # amark_objects、amark、amark_internal のターゲット
 │   └── runtime/
 │       ├── version.c
-│       ├── status.c
+│       ├── error.c
 │       ├── allocator.c            # 既定のアロケータ、解決、確保の関数
 │       ├── alloc_internal.h       # amark__allocator_resolve()、桁あふれの検査つきの算術
 │       ├── buffer.c
@@ -198,7 +198,7 @@ graph TB
 │   ├── runtime/
 │   │   ├── CMakeLists.txt
 │   │   ├── version_test.c
-│   │   ├── status_test.c
+│   │   ├── error_test.c
 │   │   ├── allocator_test.c
 │   │   ├── buffer_test.c          # 公開 API のテスト
 │   │   ├── buffer_internal_test.c # 埋め込み用の内部 API のテスト（INTERNAL）
@@ -353,8 +353,8 @@ graph TB
 | 9.4, 9.5 | コンパイル時と実行時の版 | Version | `AMARK_VERSION_*`、`amark_version_number()` | — |
 | 9.6 | 版の唯一の定義 | VersionMod、Packaging | `amark_read_version()` | — |
 | 9.7 | `amark.h` の正規の include の順 | PublicHeaders | `amark.h` | — |
-| 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | 状態コードと失敗の規約 | Status、Error conventions | `amark_status_t`、`amark_status_string()` | — |
-| 10.9 | 表現できないことの状態コード | Status | `AMARK_ERROR_UNREPRESENTABLE`、`amark_status_string()` | — |
+| 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | エラーコードと失敗の規約 | Error、Error conventions | `amark_error_t`、`amark_error_string()` | — |
+| 10.9 | 表現できないことのエラーコード | Error | `AMARK_ERROR_UNREPRESENTABLE`、`amark_error_string()` | — |
 | 10.8 | グローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
 | 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8 | アロケータ | Allocator | `amark_allocator_t`、`amark_alloc()` など | — |
 | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8 | バッファ | Buffer | `amark_buffer_*` | — |
@@ -384,8 +384,8 @@ graph TB
 | RepoDocs | Repo | LICENSE、README、gitattributes | 6.5, 8.1, 8.2, 8.5 | — | — |
 | PublicHeaders / Export | Runtime | 配置、まとめのヘッダ、エクスポート、正規の include の順 | 2.4, 2.5, 9.1–9.3, 9.7 | — | Service |
 | Version | Runtime | 版のマクロと関数 | 9.4, 9.5 | Export (P0) | Service |
-| Status | Runtime | 状態コード | 10.1–10.7, 10.9 | Export (P0) | Service |
-| Allocator | Runtime | 差し替え可能なアロケータ | 11.1–11.8 | Status (P0) | Service |
+| Error | Runtime | エラーコード | 10.1–10.7, 10.9 | Export (P0) | Service |
+| Allocator | Runtime | 差し替え可能なアロケータ | 11.1–11.8 | Error (P0) | Service |
 | Buffer | Runtime | 伸長できるバイトバッファ | 12.1–12.8 | Allocator (P0), Utf8 (P1) | Service, State |
 | Utf8 | Runtime | UTF-8 の処理 | 13.1–13.7 | Export (P0) | Service |
 | Unicode | Runtime | 文字の分類 | 14.1–14.6 | Export (P0) | Service |
@@ -626,7 +626,7 @@ amark_add_fuzzer(<name>
   /* SPDX-License-Identifier: MIT
    * Copyright (c) The Amark Authors */
   ```
-- **HeaderChecks**（4.9, 9.2）：構成時に `include/amark/*.h` のそれぞれについて、そのヘッダを 2 回 include するだけの C のソースを生成し、OBJECT ライブラリ `amark_header_check` としてコンパイルする（失敗はビルドの失敗になる）。C++ のコンパイラがあれば（`check_language(CXX)`）、`cxx_include_test.cpp` を C++11 の Naos のテストとしてビルドし、`amark.h` から `amark_version_number()`、`amark_status_string()`、`amark_buffer_*` を呼んで、C の名前でリンクできることを確かめる。
+- **HeaderChecks**（4.9, 9.2）：構成時に `include/amark/*.h` のそれぞれについて、そのヘッダを 2 回 include するだけの C のソースを生成し、OBJECT ライブラリ `amark_header_check` としてコンパイルする（失敗はビルドの失敗になる）。C++ のコンパイラがあれば（`check_language(CXX)`）、`cxx_include_test.cpp` を C++11 の Naos のテストとしてビルドし、`amark.h` から `amark_version_number()`、`amark_error_string()`、`amark_buffer_*` を呼んで、C の名前でリンクできることを確かめる。
 
 #### CIWorkflow
 
@@ -700,18 +700,18 @@ const amark_allocator_t *amark_test_allocator_get(amark_test_allocator_t *t);
 void amark_test_allocator_reset_counters(amark_test_allocator_t *t);
 
 /* 対象の処理：渡されたアロケータだけを使い、成功でも失敗でも、作ったものをすべて解放してから戻る */
-typedef amark_status_t (*amark_test_oom_scenario_t)(const amark_allocator_t *allocator, void *context);
+typedef amark_error_t (*amark_test_oom_scenario_t)(const amark_allocator_t *allocator, void *context);
 
 typedef struct amark_test_oom_result {
     size_t iterations;             /* 失敗を注入した回数 */
-    size_t wrong_status_at;        /* メモリ不足以外が返った最初の回（0 ならなし） */
+    size_t wrong_error_at;         /* メモリ不足以外が返った最初の回（0 ならなし） */
     size_t leak_at;                /* リークした最初の回（0 ならなし） */
-    amark_status_t final_status;   /* 失敗を注入しない最後の実行の結果 */
+    amark_error_t final_error;     /* 失敗を注入しない最後の実行の結果 */
 } amark_test_oom_result_t;
 
 amark_test_oom_result_t amark_test_oom_sweep(amark_test_oom_scenario_t scenario, void *context, size_t max_iterations);
 
-/* 呼び出し側の行で報告するマクロ：final_status が AMARK_OK、wrong_status_at と leak_at が 0 */
+/* 呼び出し側の行で報告するマクロ：final_error が AMARK_ERROR_NONE、wrong_error_at と leak_at が 0 */
 #define AMARK_CHECK_OOM_SWEEP(scenario, context) /* ... */
 #define AMARK_CHECK_BYTES_EQ(data, size, expected_literal) /* NAOS_CHECK_MEM_EQ を使う */
 #define AMARK_CHECK_BUFFER_EQ(buffer, expected_literal)    /* amark_buffer_data/length と比較 */
@@ -724,7 +724,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_oom_scenario_t scenario,
 #### 公開 API の共通の規約（Error conventions を含む）
 - 公開の関数と型は `amark_`、マクロと定数は `AMARK_`、モジュールをまたぐ内部の関数は `amark__`。typedef した型の名前は末尾に `_t` を付ける（構造体と列挙のタグには付けない）。公開の関数にはすべて `AMARK_API` を付ける。
 - 公開ヘッダは `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS`（C++ のときの `extern "C"`）で宣言を囲む。インクルードガードは `AMARK_<NAME>_H`。
-- 失敗しうる関数は `amark_status_t` を返す。結果は最後の引数の出力引数（名前は `out_` で始める）で返す。
+- 失敗しうる関数は `amark_error_t` を返す。結果は最後の引数の出力引数（名前は `out_` で始める）で返す。
 - 失敗したとき：操作の対象のオブジェクトは呼び出し前の有効な状態のまま（強い保証）。オブジェクトのポインタを返す出力引数には NULL を入れる。それ以外の出力引数は関数ごとに文書化する。
 - 必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT` を返す。解放の関数は NULL を受け付けて何もしない。
 - 失敗し得ない関数（問い合わせ、分類、復号）は値を直接返す。確保の関数（`amark_alloc` など）は `malloc` に倣い、失敗を NULL で示す。
@@ -764,7 +764,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_oom_scenario_t scenario,
 
 | 群 | 所有する spec | ヘッダ（この順） |
 |---|---|---|
-| 1. 共通ランタイム | `foundation` | `export.h`、`version.h`、`status.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h` |
+| 1. 共通ランタイム | `foundation` | `export.h`、`version.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h` |
 | 2. 構文木 | `syntax-tree` | `node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h` |
 | 3. レンダラの共通部と HTML | `html-renderer` | `render.h`、`html.h` |
 | 4. パーサ | `block-parser`、`inline-parser` | `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`（`inline-parser`）、`commonmark.h` |
@@ -792,22 +792,22 @@ AMARK_API const char *amark_version_string(void); /* 静的な文字列。解放
 ```
 - マイナー版とパッチ版は 0–999。
 
-#### Status
+#### Error
 
 **Contracts**: Service [x]
 ```c
-typedef enum amark_status {
-    AMARK_OK = 0,
+typedef enum amark_error {
+    AMARK_ERROR_NONE = 0,
     AMARK_ERROR_OUT_OF_MEMORY = 1,     /* アロケータが確保に失敗した */
     AMARK_ERROR_INVALID_ARGUMENT = 2,  /* NULL の必須引数、範囲外の値、不完全なアロケータ */
     AMARK_ERROR_OVERFLOW = 3,          /* サイズの計算が size_t を超える */
     AMARK_ERROR_LIMIT_EXCEEDED = 4,    /* 文書化された上限（入れ子の深さなど）を超えた */
     AMARK_ERROR_INVALID_STATE = 5,     /* オブジェクトの状態がその操作を許さない */
     AMARK_ERROR_UNREPRESENTABLE = 6    /* 対象を要求された形式で意味を変えずに表せない（例：Markdown の出力） */
-} amark_status_t;
+} amark_error_t;
 
-AMARK_API const char *amark_status_string(amark_status_t status);
-/* 例："out of memory"、"unrepresentable"。未知の値には "unknown status"。静的な文字列で、NULL を返さない */
+AMARK_API const char *amark_error_string(amark_error_t error);
+/* 例："out of memory"、"unrepresentable"。未知の値には "unknown error"。静的な文字列で、NULL を返さない */
 ```
 - 値は固定し、変更しない。新しいコードは末尾に追加する（追加は Revalidation Trigger）。利用者は未知の非 0 の値を一般的な失敗として扱う。
 - `AMARK_ERROR_UNREPRESENTABLE`（10.9）は 2026-11-25 に `markdown-renderer` の依頼で追加した。0–5 の次の空き値 6 を使う。説明の文字列は `"unrepresentable"`。共通ランタイム自身はこのコードを返さない。どの操作がいつ返すか（`amark_markdown_render` など）と、理由の報告は、返す spec が定める。
@@ -830,7 +830,7 @@ typedef struct amark_allocator {
 } amark_allocator_t;
 
 AMARK_API const amark_allocator_t *amark_allocator_default(void); /* malloc/realloc/free に基づく */
-AMARK_API amark_status_t amark_allocator_check(const amark_allocator_t *allocator);
+AMARK_API amark_error_t amark_allocator_check(const amark_allocator_t *allocator);
 
 AMARK_API void *amark_alloc(const amark_allocator_t *allocator, size_t size);
 AMARK_API void *amark_alloc_array(const amark_allocator_t *allocator, size_t count, size_t size);
@@ -838,14 +838,14 @@ AMARK_API void *amark_realloc(const amark_allocator_t *allocator, void *ptr, siz
 AMARK_API void amark_free(const amark_allocator_t *allocator, void *ptr);
 ```
 - `allocator` が NULL なら既定のアロケータ。
-- `amark_allocator_check`：NULL なら `AMARK_OK`。`struct_size` が v1 の最小のサイズ（`deallocate` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
+- `amark_allocator_check`：NULL なら `AMARK_ERROR_NONE`。`struct_size` が v1 の最小のサイズ（`deallocate` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
 - コールバックへの保証：`size` と `new_size` は 0 にならない（0 は 1 として扱う）。`reallocate` と `deallocate` に NULL は渡らない（`amark_realloc(a, NULL, n)` は `allocate` を、`amark_free(a, NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。
 - `amark_alloc_array`：`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す。
 - オブジェクトは作成時に受け取ったアロケータを検査し、内部に値でコピーして保持する（`user_data` の寿命は利用者の責任）。`reallocate` が失敗したとき、元のブロックは有効なまま。
 
 **内部の契約**（`src/runtime/alloc_internal.h`）
 ```c
-amark_status_t amark__allocator_resolve(const amark_allocator_t *in, amark_allocator_t *out); /* 検査して既定を補い、v1 の形にコピー */
+amark_error_t amark__allocator_resolve(const amark_allocator_t *in, amark_allocator_t *out); /* 検査して既定を補い、v1 の形にコピー */
 bool amark__size_add(size_t a, size_t b, size_t *out);   /* 桁あふれなら false */
 bool amark__size_mul(size_t a, size_t b, size_t *out);
 ```
@@ -864,21 +864,21 @@ bool amark__size_mul(size_t a, size_t b, size_t *out);
 ```c
 typedef struct amark_buffer amark_buffer_t;   /* 不透明型 */
 
-AMARK_API amark_status_t amark_buffer_new(const amark_allocator_t *allocator, amark_buffer_t **out_buffer);
+AMARK_API amark_error_t amark_buffer_new(const amark_allocator_t *allocator, amark_buffer_t **out_buffer);
 AMARK_API void amark_buffer_free(amark_buffer_t *buffer);
 
 AMARK_API const char *amark_buffer_data(const amark_buffer_t *buffer);  /* NULL にならない。常に NUL 終端 */
 AMARK_API size_t amark_buffer_length(const amark_buffer_t *buffer);
 
-AMARK_API amark_status_t amark_buffer_reserve(amark_buffer_t *buffer, size_t additional);
-AMARK_API amark_status_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size_t size);
-AMARK_API amark_status_t amark_buffer_append_byte(amark_buffer_t *buffer, unsigned char byte);
-AMARK_API amark_status_t amark_buffer_append_repeat(amark_buffer_t *buffer, unsigned char byte, size_t count);
-AMARK_API amark_status_t amark_buffer_append_cstr(amark_buffer_t *buffer, const char *text);
-AMARK_API amark_status_t amark_buffer_append_codepoint(amark_buffer_t *buffer, uint32_t codepoint);
-AMARK_API amark_status_t amark_buffer_truncate(amark_buffer_t *buffer, size_t length);
+AMARK_API amark_error_t amark_buffer_reserve(amark_buffer_t *buffer, size_t additional);
+AMARK_API amark_error_t amark_buffer_append(amark_buffer_t *buffer, const void *data, size_t size);
+AMARK_API amark_error_t amark_buffer_append_byte(amark_buffer_t *buffer, unsigned char byte);
+AMARK_API amark_error_t amark_buffer_append_repeat(amark_buffer_t *buffer, unsigned char byte, size_t count);
+AMARK_API amark_error_t amark_buffer_append_cstr(amark_buffer_t *buffer, const char *text);
+AMARK_API amark_error_t amark_buffer_append_codepoint(amark_buffer_t *buffer, uint32_t codepoint);
+AMARK_API amark_error_t amark_buffer_truncate(amark_buffer_t *buffer, size_t length);
 AMARK_API void amark_buffer_clear(amark_buffer_t *buffer);
-AMARK_API amark_status_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_t *out_length);
+AMARK_API amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_t *out_length);
 ```
 - State model：`{data, length, capacity, allocator}`。不変条件は `length < capacity`（容量 0 のときは `data` が静的な空文字列を指す）と `data[length] == '\0'`。
 - 伸長：必要な容量の 2 倍か必要量の大きい方へ伸ばす（再確保の回数は対数的）。計算の桁あふれは `AMARK_ERROR_OVERFLOW`、確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。どちらも内容を変えない。
@@ -979,7 +979,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、`SIZE_MAX` 付近の予約が `AMARK_ERROR_OVERFLOW` で内容が変わらないこと（12.5）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
 - **unicode**：各 Zs の文字と 4 つの制御文字（14.1）、P と S の代表（`$`、`+`、`^`、`€`、`¡`、`「`、絵文字の記号）と非該当（文字、数字、結合文字）（14.2）、ASCII 句読点の 32 文字すべてと隣接する値（14.3）、サロゲートと U+110000 以上（14.4）、`AMARK_UNICODE_VERSION_*` が 17.0.0 であること（14.5）。
-- **version / status**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため 0–6 の値を直接検査する）、`AMARK_ERROR_UNREPRESENTABLE` が 6 で他のコードと異なり、説明が `"unrepresentable"` であること（10.9）。
+- **version / error**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため 0–6 の値を直接検査する）、`AMARK_ERROR_UNREPRESENTABLE` が 6 で他のコードと異なり、説明が `"unrepresentable"` であること（10.9）。
 
 ### Integration Tests（CTest）
 - `package.*`：4 つの取り込み方法と、要求した種類がない場合（3.2–3.4, 3.7, 1.5, 4.11）。

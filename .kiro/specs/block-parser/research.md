@@ -177,8 +177,8 @@
 
 ## Upstream Changes
 - **`syntax-tree`**：
-  1. `amark_status_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set)`：文書がすでに使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードの後に解放する。静的な core の構文セット、別の構文セット、2 回目の呼び出しは `AMARK_ERROR_INVALID_ARGUMENT`。
-  2. `amark_status_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent)`：別の文書（または同じ文書）の `source_parent` の子をすべて、1 回の操作で取り込み、`parent` の `before` の前（NULL なら末尾）に順に挿入する。ソースの複製は呼び出し全体で 1 回だけ行う。包含の規則の検査を先に行い、確保の失敗を含めて全か無か（強い保証）。挿入は通常の挿入と同じく編集を記録する。
+  1. `amark_error_t amark_document_take_syntax_set(amark_document_t *document, amark_syntax_set_t *set)`：文書がすでに使っている、ヒープに作られた凍結済みの構文セットの所有権を受け取り、`amark_document_free` でノードの後に解放する。静的な core の構文セット、別の構文セット、2 回目の呼び出しは `AMARK_ERROR_INVALID_ARGUMENT`。
+  2. `amark_error_t amark_node_import_children(amark_node_t *parent, amark_node_t *before, const amark_node_t *source_parent)`：別の文書（または同じ文書）の `source_parent` の子をすべて、1 回の操作で取り込み、`parent` の `before` の前（NULL なら末尾）に順に挿入する。ソースの複製は呼び出し全体で 1 回だけ行う。包含の規則の検査を先に行い、確保の失敗を含めて全か無か（強い保証）。挿入は通常の挿入と同じく編集を記録する。
   3. `extension.h` にこの spec のスロットの種類の名前と番号（0x0100–0x0103）を追記する（`syntax-tree` の design が予定している追記）。
 - **`foundation`**（foundation の design が予定している「必要とする spec が追加する」作業）：
   - `tools/gen_unicode_tables.py` に `CaseFolding.txt` の読み取りを足し、`src/runtime/case_fold_tables.inc` を出力する。`include/amark/unicode.h` に `amark_unicode_case_fold()` を足す。

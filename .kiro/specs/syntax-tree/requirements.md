@@ -15,7 +15,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 - ノード型の登録、構文拡張の記述子、構文セット（パーサとレンダラがスロットを足す土台）
 - 木の比較と、テストで使う S 式のダンプ
 
-現在、`foundation`（ビルド、テスト基盤、アロケータ、バッファ、状態コード、UTF-8）の spec がある。構文木のコードはまだない。
+現在、`foundation`（ビルド、テスト基盤、アロケータ、バッファ、エラーコード、UTF-8）の spec がある。構文木のコードはまだない。
 
 ## Boundary Context
 - **In scope**：
@@ -171,7 +171,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 
 #### Acceptance Criteria
 1. The Amark Syntax Tree shall 文書、ノード、構文セット、走査の状態を不透明型として公開し、公開する構造体には大きさを表すフィールドを持たせる
-2. The Amark Syntax Tree shall `foundation` の状態コード、出力引数、NULL の扱い、アロケータの規約に従う
+2. The Amark Syntax Tree shall `foundation` のエラーコード、出力引数、NULL の扱い、アロケータの規約に従う
 3. The Amark Syntax Tree shall ノードの挿入、切り離し、兄弟や親への移動を、文書のノードの数によらず、挿入先の深さに比例する時間以内で行う
 4. The Amark Syntax Tree shall 編集の記録の祖先への伝播を、連続する編集の全体で、編集の回数に比例する時間で行う
 5. The Amark Syntax Tree shall ソース上の順に追加される構文トークンの記録を、トークンの数に比例する時間で行う

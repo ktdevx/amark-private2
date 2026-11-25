@@ -44,7 +44,7 @@
 - エスケープの方式と、Markdown の出力のスロット（`markdown-renderer`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（status、allocator、buffer、utf8、unicode）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）。`src/parse/inline_*.c` だけが内部 API を使う
+- `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`runtime/alloc_internal.h`、`runtime/buffer_internal.h`）。`src/parse/inline_*.c` だけが内部 API を使う
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`dump.h`、`extension.h`）
 - `block-parser` の公開 API（`parser.h`、`scan.h`、`entity.h`、`commonmark.h`）。`scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`、`amark_scan_html_open_tag` / `_closing_tag`、そのバイト列の版 `amark_scan_html_open_tag_bytes` / `_closing_tag_bytes` を含む（名前と引数は `block-parser` の design に従う）。`src/parse/inline_*.c` は `parse_internal.h` を使わない（公開 API だけを使い、委譲先として呼ばれる）。例外は既定の委譲先を返す `inline_plain.c`（`block-parser` のファイル）が `inline_internal.h` の 1 つの宣言を使うこと
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`block-parser` の `tests/support/gen_examples.cmake`（拡張して使う）、`amark_test_support`、`amark_test_tree`、`amark_test_parse`（`amark_test_parse_check`。`block-parser` が関数の形で実装）、`amark_test_html_gfm`、`amark_test_parse_gfm`（`block-parser` が実装）、`amark_add_fuzzer`
@@ -124,7 +124,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（`src/parse/inline_*`）と構文（`src/syntax/`）。構文の知識をエンジンに置かない。エンジンが知る組み込みのノード型は、テキストのまとめに使う `text` と、改行の受け皿の `softbreak` だけ（`syntax-tree` の組み込みの型で、構文ではない）。
-- Existing patterns preserved：状態コードと出力引数、`struct_size`（スロットは `amark_slot_header_t`）、アロケータの経由（文書のアロケータ）、グローバルな可変状態なし、`amark__` の内部関数、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
+- Existing patterns preserved：エラーコードと出力引数、`struct_size`（スロットは `amark_slot_header_t`）、アロケータの経由（文書のアロケータ）、グローバルな可変状態なし、`amark__` の内部関数、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
 - Steering compliance：構文ごとに 1 ファイル、組み込みも公開 API だけ、parse → tree の一方向、spec.txt はテストデータだけ。
 
 ### Technology Stack
@@ -298,7 +298,7 @@ graph TB
 | 1.2 | 既定の委譲先、単純な委譲先の維持 | Default delegate | `amark_inline_delegate_plain` | — |
 | 1.3 | 区間をつないだ中身、隙間を含めない | InlineContext | `amark_text_input_t`, `amark_inline_record` | — |
 | 1.4 | 逐次の入力の一致 | InlineEngine | 決定的な処理 | — |
-| 1.5 | 失敗とメモリ不足 | InlineEngine, 全コンポーネント | 状態コードの伝播、`leaf_end` | 葉の解析 |
+| 1.5 | 失敗とメモリ不足 | InlineEngine, 全コンポーネント | エラーコードの伝播、`leaf_end` | 葉の解析 |
 | 1.6 | スレッドと構文セットの共有 | InlineDispatch, InlineEngine | 表はパースごと、静的データは const | — |
 | 2.1 | 位置ごとに優先度の順に試す | InlineDispatch, InlineEngine | `priority`, `trigger` | 葉の解析 |
 | 2.2 | テキストのまとめ、空の text なし | InlineText, InlineContext | `amark_inline_append_text` | 葉の解析 |
@@ -392,9 +392,9 @@ graph TB
 | InlineTests / Fuzz / Bench | Test | 要件の検証 | 11.5, 14.1–14.3 | InlineCheck (P0) | Batch |
 
 ### 共通の規約
-- `foundation`・`syntax-tree`・`block-parser` の規約に従う：失敗しうる関数は `amark_status_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。スロットの構造体は `amark_slot_header_t` の `struct_size` が v1 の最小（`user_data` の末尾）以上であること。6 種類のスロットの構造体は、どれも v1 の最後の欄を `void *user_data` にする（コールバックを持たない `amark_inline_special_t` と `amark_inline_node_traits_t` も、慣例をそろえ、後の版で欄を足しても v1 の最小が変わらないように持つ）。
+- `foundation`・`syntax-tree`・`block-parser` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。スロットの構造体は `amark_slot_header_t` の `struct_size` が v1 の最小（`user_data` の末尾）以上であること。6 種類のスロットの構造体は、どれも v1 の最後の欄を `void *user_data` にする（コールバックを持たない `amark_inline_special_t` と `amark_inline_node_traits_t` も、慣例をそろえ、後の版で欄を足しても v1 の最小が変わらないように持つ）。
 - 位置はすべて葉の中身の論理的なバイトの位置（`amark_text_input_t` の位置、区間の隙間を数えない）。範囲は `[start, end)`。
-- `amark_inline_context_t *` はコールバックの間だけ有効。コールバックが `AMARK_OK` 以外を返したら、エンジンは葉の解析を止め、その状態コードを委譲先から返す（パーサは `Failed` になる。`block-parser` の規約）。
+- `amark_inline_context_t *` はコールバックの間だけ有効。コールバックが `AMARK_ERROR_NONE` 以外を返したら、エンジンは葉の解析を止め、そのエラーコードを委譲先から返す（パーサは `Failed` になる。`block-parser` の規約）。
 - コールバックの中で作ったノードと、記録したトークンの所有者は、成立したときにエンジンへ渡すか、自分で解放する。不成立（`NONE`）のとき、文脈の変更（テキストとノードの追加、開きの積み、引き取り）をしてはならない（2.5）。
 
 ### Parse
@@ -436,9 +436,9 @@ typedef struct amark_inline_special_info {
 } amark_inline_special_info_t;
 
 AMARK_API size_t amark_inline_special_count(const amark_syntax_set_t *set);    /* 凍結前は 0 */
-AMARK_API amark_status_t amark_inline_special_at(const amark_syntax_set_t *set, size_t index,
-                                                 amark_inline_special_info_t *out_info);
-AMARK_API amark_status_t amark_inline_special_chars(const amark_syntax_set_t *set, unsigned char out_chars[32]);
+AMARK_API amark_error_t amark_inline_special_at(const amark_syntax_set_t *set, size_t index,
+                                                amark_inline_special_info_t *out_info);
+AMARK_API amark_error_t amark_inline_special_chars(const amark_syntax_set_t *set, unsigned char out_chars[32]);
 ```
 - Preconditions：凍結していない構文セットは `AMARK_ERROR_INVALID_STATE`。`index` が範囲外は `AMARK_ERROR_INVALID_ARGUMENT`。
 
@@ -463,7 +463,7 @@ AMARK_API amark_status_t amark_inline_special_chars(const amark_syntax_set_t *se
 **Contracts**: Service [x]
 ```c
 /* src/parse/inline_internal.h */
-amark_status_t amark__inline_tables_build(amark_parse_context_t *ctx, amark__inline_tables_t *out_tables);
+amark_error_t amark__inline_tables_build(amark_parse_context_t *ctx, amark__inline_tables_t *out_tables);
 void amark__inline_tables_free(amark__inline_tables_t *tables, const amark_allocator_t *allocator);
 ```
 
@@ -500,16 +500,16 @@ AMARK_API uint32_t amark_inline_char_before(const amark_inline_context_t *ctx, s
 AMARK_API uint32_t amark_inline_char_at(const amark_inline_context_t *ctx, size_t pos, size_t *out_length);
 AMARK_API size_t amark_inline_pending_start(const amark_inline_context_t *ctx);
 
-AMARK_API amark_status_t amark_inline_claim_preceding(amark_inline_context_t *ctx, size_t start);
-AMARK_API amark_status_t amark_inline_append_text(amark_inline_context_t *ctx, size_t start, size_t end,
-                                                  uint32_t decode_flags, uint16_t role);
-AMARK_API amark_status_t amark_inline_new_node(amark_inline_context_t *ctx, const char *type_name,
-                                               amark_node_t **out_node);   /* 葉の文書に切り離して作る */
-AMARK_API amark_status_t amark_inline_append_node(amark_inline_context_t *ctx, amark_node_t *node);
-AMARK_API amark_status_t amark_inline_record(amark_inline_context_t *ctx, amark_node_t *owner, size_t start, size_t end,
-                                             amark_token_kind_t kind, uint16_t role);
-AMARK_API amark_status_t amark_inline_lookup_label(amark_inline_context_t *ctx, const amark_label_map_t *map,
-                                                   size_t start, size_t end, void **out_value);
+AMARK_API amark_error_t amark_inline_claim_preceding(amark_inline_context_t *ctx, size_t start);
+AMARK_API amark_error_t amark_inline_append_text(amark_inline_context_t *ctx, size_t start, size_t end,
+                                                 uint32_t decode_flags, uint16_t role);
+AMARK_API amark_error_t amark_inline_new_node(amark_inline_context_t *ctx, const char *type_name,
+                                              amark_node_t **out_node);   /* 葉の文書に切り離して作る */
+AMARK_API amark_error_t amark_inline_append_node(amark_inline_context_t *ctx, amark_node_t *node);
+AMARK_API amark_error_t amark_inline_record(amark_inline_context_t *ctx, amark_node_t *owner, size_t start, size_t end,
+                                            amark_token_kind_t kind, uint16_t role);
+AMARK_API amark_error_t amark_inline_lookup_label(amark_inline_context_t *ctx, const amark_label_map_t *map,
+                                                  size_t start, size_t end, void **out_value);
 ```
 - Preconditions：位置は中身の長さ以下、`start ≤ end`。`append_text` と `append_node` は位置の昇順でしか呼べない（前に追加したものより前の範囲は `AMARK_ERROR_INVALID_ARGUMENT`）。`append_node` のノードは同じ文書の切り離されたインラインのノード。テキストの走査の `scan` の中では、追加・積み・引き取りは `AMARK_ERROR_INVALID_STATE`。
 - Postconditions：成立した構文の範囲 `[引き取りの始まり, out_end)` は、その構文が記録したトークンで覆われていなければならない（エンジンは検査しない。テストの `amark_document_check_tokens` で確かめる）。
@@ -586,23 +586,23 @@ typedef struct amark_inline_run_match {
 /* runs（ソース上の順）の上で process emphasis を行い、一致の順に照合を返す。capacity は
    runs の長さの合計の半分（切り捨て）以上（足りなければ AMARK_ERROR_INVALID_ARGUMENT）。
    作業の配列は allocator で確保して返る前に解放する。時間は O(count + 照合の数) */
-AMARK_API amark_status_t amark_inline_match_delimiters(const amark_allocator_t *allocator, const amark_inline_run_t *runs,
-                                                       size_t count, amark_inline_run_match_t *out_matches,
-                                                       size_t capacity, size_t *out_count);
+AMARK_API amark_error_t amark_inline_match_delimiters(const amark_allocator_t *allocator, const amark_inline_run_t *runs,
+                                                      size_t count, amark_inline_run_match_t *out_matches,
+                                                      size_t capacity, size_t *out_count);
 
 /* 構文が独自の判定で並びを積む（例：文脈で flanking を変える構文）。character は登録済みの種類の文字。
    位置は pos から始まり、成立した構文の out_end までに収まること */
-AMARK_API amark_status_t amark_inline_push_delimiter(amark_inline_context_t *ctx, unsigned char character, size_t start,
-                                                     size_t length, bool can_open, bool can_close);
+AMARK_API amark_error_t amark_inline_push_delimiter(amark_inline_context_t *ctx, unsigned char character, size_t start,
+                                                    size_t length, bool can_open, bool can_close);
 
 /* src/parse/inline_internal.h */
-amark_status_t amark__inline_push_run(amark_inline_context_t *ctx, const amark__inline_delim_kind_t *kind, size_t pos,
-                                      bool *out_pushed, size_t *out_end);
-amark_status_t amark__inline_process_emphasis(amark_inline_context_t *ctx, size_t bottom);
+amark_error_t amark__inline_push_run(amark_inline_context_t *ctx, const amark__inline_delim_kind_t *kind, size_t pos,
+                                     bool *out_pushed, size_t *out_end);
+amark_error_t amark__inline_process_emphasis(amark_inline_context_t *ctx, size_t bottom);
 /* 照合の唯一の実装。steps が NULL でなければ区切り文字の比較の回数を足す（INTERNAL のカウンタ） */
-amark_status_t amark__inline_match_runs(const amark_allocator_t *allocator, const amark_inline_run_t *runs, size_t count,
-                                        amark_inline_run_match_t *out_matches, size_t capacity, size_t *out_count,
-                                        size_t *steps);
+amark_error_t amark__inline_match_runs(const amark_allocator_t *allocator, const amark_inline_run_t *runs, size_t count,
+                                       amark_inline_run_match_t *out_matches, size_t capacity, size_t *out_count,
+                                       size_t *steps);
 ```
 - Preconditions（公開の関数）：`runs` の各要素の `struct_size` が v1 の最小以上、`length` が 1 以上、`rule` が既知（違反は `AMARK_ERROR_INVALID_ARGUMENT`）。`count` が 0 なら確保せず `*out_count = 0`。
 - Postconditions：同じ並びの列について、エンジンのパースと `amark_inline_match_delimiters` は同じ照合を返す（同じ関数を通るため。テストでも確かめる）。`markdown-renderer` は出力の区切り文字の検証にこれを使う。
@@ -629,8 +629,8 @@ amark_status_t amark__inline_match_runs(const amark_allocator_t *allocator, cons
 #define AMARK_BRACKET_OPENER_IMAGE 0x02u      /* ![ */
 #define AMARK_BRACKET_OPENER_USER  0x100u     /* これ以上のビットは利用者が使う */
 
-AMARK_API amark_status_t amark_inline_push_bracket(amark_inline_context_t *ctx, size_t start, size_t length,
-                                                   uint32_t opener_flags, unsigned char closer);
+AMARK_API amark_error_t amark_inline_push_bracket(amark_inline_context_t *ctx, size_t start, size_t length,
+                                                  uint32_t opener_flags, unsigned char closer);
 
 typedef struct amark_bracket_info {
     size_t struct_size;
@@ -656,8 +656,8 @@ typedef struct amark_inline_bracket {
     int32_t priority;
     uint32_t opener_mask;
     size_t leaf_state_size;
-    amark_status_t (*match)(amark_inline_context_t *ctx, const amark_bracket_info_t *info, void *leaf_state,
-                            void *user_data, amark_bracket_result_t *out_result);
+    amark_error_t (*match)(amark_inline_context_t *ctx, const amark_bracket_info_t *info, void *leaf_state,
+                           void *user_data, amark_bracket_result_t *out_result);
     void (*leaf_end)(amark_inline_context_t *ctx, void *leaf_state, void *user_data);   /* 任意 */
     void *user_data;
 } amark_inline_bracket_t;
@@ -700,19 +700,19 @@ typedef struct amark_inline_text_scanner {
     int32_t priority;
     size_t leaf_state_size;
     /* text（リテラル）の from 以降で次の一致を探す。見つかれば *out_found を真にし、[*out_start, *out_end) を入れる */
-    amark_status_t (*scan)(amark_inline_context_t *ctx, const char *text, size_t length, size_t from,
-                           uint32_t prev_char, bool in_link, void *leaf_state, void *user_data,
-                           bool *out_found, size_t *out_start, size_t *out_end);
+    amark_error_t (*scan)(amark_inline_context_t *ctx, const char *text, size_t length, size_t from,
+                          uint32_t prev_char, bool in_link, void *leaf_state, void *user_data,
+                          bool *out_found, size_t *out_start, size_t *out_end);
     /* match（一致した部分だけの切り離した text）を子に持つノードを作って *out_node に返す。NULL ならやめる */
-    amark_status_t (*build)(amark_inline_context_t *ctx, amark_node_t *match, void *leaf_state, void *user_data,
-                            amark_node_t **out_node);
+    amark_error_t (*build)(amark_inline_context_t *ctx, amark_node_t *match, void *leaf_state, void *user_data,
+                           amark_node_t **out_node);
     void (*leaf_end)(amark_inline_context_t *ctx, void *leaf_state, void *user_data);   /* 任意 */
     void *user_data;
 } amark_inline_text_scanner_t;
 
 /* src/parse/inline_internal.h */
-amark_status_t amark__inline_merge_texts(amark_inline_context_t *ctx);
-amark_status_t amark__inline_apply_scanners(amark_inline_context_t *ctx);
+amark_error_t amark__inline_merge_texts(amark_inline_context_t *ctx);
+amark_error_t amark__inline_apply_scanners(amark_inline_context_t *ctx);
 ```
 - Preconditions：`*out_end > *out_start ≥ from`、`*out_end ≤ length`（違反は `AMARK_ERROR_INVALID_STATE`）。`build` が返したノードが `match` の親でなければ `AMARK_ERROR_INVALID_STATE`。
 - 採らなかった一致について `build` は呼ばれない。`scan` は採否を知らずに次の一致を探すだけでよい（拡張の側で採否の規則を実装しない）。
@@ -855,8 +855,8 @@ AMARK_API bool amark_scan_html_closing_tag_bytes(const char *data, size_t length
 **Contracts**: Service [x]
 ```c
 /* src/syntax/link_common_internal.h（link.c と image.c だけが include する） */
-amark_status_t amark__cm_link_match(amark_inline_context_t *ctx, const amark_bracket_info_t *info,
-                                    const char *node_type, amark_bracket_result_t *out_result);
+amark_error_t amark__cm_link_match(amark_inline_context_t *ctx, const amark_bracket_info_t *info,
+                                   const char *node_type, amark_bracket_result_t *out_result);
 ```
 
 #### CommonMarkSet（追記分）
@@ -890,7 +890,7 @@ amark_status_t amark__cm_link_match(amark_inline_context_t *ctx, const amark_bra
 **Contracts**: Service [x]
 ```c
 /* tests/support/inline_check.h */
-typedef amark_status_t (*amark_test_set_factory_t)(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
+typedef amark_error_t (*amark_test_set_factory_t)(const amark_allocator_t *allocator, amark_syntax_set_t **out_set);
 /* factory は凍結した構文セットを返す（amark_syntax_set_new_commonmark、amark_test_gfm_set_new） */
 typedef enum amark_test_expect { AMARK_TEST_EXPECT_DUMP = 1, AMARK_TEST_EXPECT_HTML = 2 } amark_test_expect_t;
 
@@ -1033,7 +1033,7 @@ struct amark_inline_context {
 ### Error Strategy
 - スロットの誤り（必須の関数がない、未知の列挙、型が見つからない、同じ文字の区切り文字の種類、大きすぎる作業領域）は、`begin` で `AMARK_ERROR_INVALID_ARGUMENT` を返し、パースは失敗する。
 - コールバックの誤り（副作用のある `NONE`、`out_end` が進まない、範囲外の位置、段階で許されない文脈の操作、`build` の返したノードが一致の親でない）は `AMARK_ERROR_INVALID_STATE` / `AMARK_ERROR_INVALID_ARGUMENT` で、葉の解析を止める。
-- 確保の失敗とコールバックの失敗は、その状態コードを返す。`leaf_end` と `end` は失敗のときも呼び、リークしない。パーサは `block-parser` の規約で `Failed` になる（1.5）。
+- 確保の失敗とコールバックの失敗は、そのエラーコードを返す。`leaf_end` と `end` は失敗のときも呼び、リークしない。パーサは `block-parser` の規約で `Failed` になる（1.5）。
 - 不正な入力（NUL、不正な UTF-8、閉じのない構文、深い入れ子）はエラーにしない（11.4）。
 
 ### Error Categories and Responses
