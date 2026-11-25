@@ -897,7 +897,7 @@ AMARK_API void amark_buffer_clear(amark_buffer_t *buffer);
 AMARK_API amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_data, size_t *out_length);
 ```
 - State model：`{data, length, capacity}`。不変条件は `length < capacity`（容量 0 のときは `data` が静的な空文字列を指す）と `data[length] == '\0'`。
-- 伸長：必要な容量の 2 倍か必要量の大きい方へ伸ばす（再確保の回数は対数的）。計算の桁あふれは `AMARK_ERROR_OVERFLOW`、確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。どちらも内容を変えない。
+- 伸長：必要な容量は `length + 追加のバイト数 + 1`（終端の NUL）。追加のバイト数が 0 か、必要な容量が現在の容量以下なら確保しない。足りなければ、現在の容量の 2 倍と必要な容量の大きい方へ伸ばす（2 倍が `size_t` を超えるときは必要な容量にする）。`reserve` も同じ規則に従う（再確保の回数は対数的）。必要な容量の計算の桁あふれは、アロケータを呼ばずに `AMARK_ERROR_OVERFLOW`、確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。どちらも内容を変えない。
 - `append(buffer, NULL, 0)` は成功。`data` が NULL で `size` が 0 でなければ `AMARK_ERROR_INVALID_ARGUMENT`。`data` がバッファ自身の内容を指していても正しく動く。
 - `append_codepoint`：`amark_utf8_encode` と同じ規則（範囲外とサロゲートは U+FFFD）。
 - `truncate`：`length` が現在の長さを超えたら `AMARK_ERROR_INVALID_ARGUMENT`。容量は減らさない。`clear` は長さを 0 にする。
@@ -992,7 +992,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 
 ### Unit Tests（Naos、`tests/base/`）
 - **allocator**：未設定と NULL の設定で既定のアロケータになること（11.1, 11.2）、設定した後の確保・0 で初期化する確保・再確保・解放がすべて設定したアロケータを通ること（11.3）、コールバックの欠落の拒否と、拒否の後に設定が変わらないこと（11.5）、`amark_calloc` が `calloc_fn` を呼んで全バイトが 0 の領域を返すこと、その桁あふれでコールバックが呼ばれないこと（11.7）、0 の確保（`amark_calloc` は `count` だけ、`size` だけ、両方が 0 のとき）がコールバックを呼ばずに NULL を返すこと、`amark_realloc(ptr, 0)` が `free_fn` を 1 回だけ呼んで NULL を返し、ほかのコールバックを呼ばないこと。
-- **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、`SIZE_MAX` 付近の予約が `AMARK_ERROR_OVERFLOW` で内容が変わらないこと（12.5）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
+- **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、必要な容量が桁あふれする予約と追加（空のバッファでの `SIZE_MAX` など）が、アロケータを呼ばずに `AMARK_ERROR_OVERFLOW` を返し、内容が変わらないこと（12.5。桁あふれしない巨大な予約は、失敗を注入するテスト用アロケータで試す）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
 - **unicode**：各 Zs の文字と 4 つの制御文字（14.1）、P と S の代表（`$`、`+`、`^`、`€`、`¡`、`「`、絵文字の記号）と非該当（文字、数字、結合文字）（14.2）、ASCII 句読点の 32 文字すべてと隣接する値（14.3）、サロゲートと U+110000 以上（14.4）、`AMARK_UNICODE_VERSION_*` が 17.0.0 であること（14.5）。
 - **version / error**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため 0–6 の値を直接検査する）、`AMARK_ERROR_UNREPRESENTABLE` が 6 で他のコードと異なり、説明が `"unrepresentable"` であること（10.9）。
