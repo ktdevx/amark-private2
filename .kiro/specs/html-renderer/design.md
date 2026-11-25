@@ -23,7 +23,7 @@
 
 ### This Spec Owns
 - 公開ヘッダ `include/amark/render.h`（レンダラが共有する出力先の型）と `include/amark/html.h`（オプション、入口、スロットの構造体、出力の文脈の API、ユーティリティ、組み込みの HTML 出力の構文拡張の取得）
-- `include/amark/extension.h` への追記：スロットの種類の番号 `AMARK_SLOT_HTML_NODE`、`AMARK_SLOT_HTML_HOOKS`（この spec の範囲は 0x0300–0x03FF）
+- `include/amark/extension.h` への追記：スロットの種類の番号 `AMARK_SLOT_HTML_NODE`、`AMARK_SLOT_HTML_HOOKS`（`syntax-tree` の一覧で割り当てた 11、12）
 - `src/render/` の HTML のエンジンのすべて：出力先と書き出しと分類つきのフィルタ、スロットの検査と連鎖の表、部分木のたどり、出力の文脈、前後のフックと拡張ごとの状態、入れ子の出力、エスケープと URL のユーティリティ
 - 組み込みの HTML 出力の構文拡張 `amark.core.html`（名前、19 のノード型のスロット、公開の取得関数）と、その実装 `src/syntax/html_core.c`、`html_blocks.c`、`html_inlines.c`
 - 組み込みの HTML 出力の登録の規則（下記「組み込みの HTML 出力の登録の規則」）
@@ -49,7 +49,7 @@
 - 組み込みの出力の表の変更（cmark との対応）、エスケープの規則、危険な URL の規則の変更 → `inline-parser` の準拠テスト
 - `amark.core.html` の名前・取得関数・登録の規則の変更 → `block-parser`（構文セットの構築関数）
 - `render.h` の型の変更 → `markdown-renderer`
-- `syntax-tree` のスロットの見出し、構文セットの列挙、ソース上の範囲の API の変更 → この spec
+- `syntax-tree` のスロットの基底（`amark_slot_t`）、構文セットの列挙、ソース上の範囲の API の変更 → この spec
 - `gen_html_cases.cmake` のケースの形式（見出し・区切りの行、オプションの語の扱い）、引数（`CHECK=`、`INCLUDE=`）、生成するテストが呼ぶ検査関数の形の変更 → `markdown-renderer`（同じスクリプトで `tests/markdown/data/*_cases.txt` を生成する）
 - `amark_test_html_gfm` の依存（Naos に依存しないこと）の変更 → `inline-parser`（`inline_parse`）と `markdown-renderer`（`md_roundtrip`、`md_edit`）のファジングターゲット（中間のライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_gfm`（`inline-parser`）を通して間接にリンクする）
 - `foundation` の `amark.h` の正規の include の順の変更 → この spec（`amark.h` への追加の位置）
@@ -101,7 +101,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（汎用）と組み込みの出力（個別のノード型）をレイヤーで分ける。エンジンの中は「書き出し」「スロットの解決」「たどりと文脈」に分ける。
-- Existing patterns preserved：`foundation` のエラーコード・出力引数・アロケータ・`struct_size`、`syntax-tree` のスロットの見出しと構文セットの順、`amark.core` が組み込みのノード型をまとめる形。
+- Existing patterns preserved：`foundation` のエラーコード・出力引数・アロケータ・`struct_size`、`syntax-tree` のスロットの基底（`amark_slot_t`）と構文セットの順、`amark.core` が組み込みのノード型をまとめる形。
 - Steering compliance：C99、`amark_` / `AMARK_`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ、組み込みも公開 API だけを使う。
 
 ### 組み込みの HTML 出力の登録の規則
@@ -137,7 +137,7 @@ src/render/
 ├── html_dispatch.c       # スロットの検査、型の識別子ごとの連鎖の表とフックの一覧の構築と解放
 └── html_render.c         # 入口、オプションの検査、反復のたどり、深さごとの文脈、テキストだけのモード、render_next、入れ子の出力、フックと状態
 src/syntax/
-├── html_core_internal.h  # 19 のスロットの extern 宣言（amark_html_slot_<type>）。html_core.c だけが使う
+├── html_core.h           # 19 のスロットの extern 宣言（amark_html_slot_<type>）。html_core.c だけが使う
 ├── html_core.c           # amark.core.html の構文拡張の表と amark_html_core_extension()
 ├── html_blocks.c         # document、block_quote、list、item、code_block、html_block、paragraph、heading、thematic_break、link_definition のスロット
 └── html_inlines.c        # text、softbreak、linebreak、code、html_inline、emph、strong、link、image のスロット（テキストだけのモードを含む）
@@ -168,7 +168,7 @@ fuzz/
 
 ### Modified Files
 - `include/amark/amark.h` — `foundation` の design が定める `amark.h` の正規の include の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）の「`render.h`、`html.h`」の位置に、この 2 つをこの順で追加する。
-- `include/amark/extension.h` — スロットの種類の番号の節に `AMARK_SLOT_HTML_NODE`（0x0301）、`AMARK_SLOT_HTML_HOOKS`（0x0302）と、この spec の範囲（0x0300–0x03FF）の注記を追記する。
+- `include/amark/extension.h` — スロットの種類の一覧で割り当てた番号で `AMARK_SLOT_HTML_NODE`（11）、`AMARK_SLOT_HTML_HOOKS`（12）を追記する。
 - `src/CMakeLists.txt` — `amark_objects` に `src/render/html_*.c` と `src/syntax/html_*.c` を追加する。
 - `tests/CMakeLists.txt` — `add_subdirectory(html)` を追加する。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(html_render SOURCES html_render_fuzz.c CORPUS corpus/html_render)` を追加する。
@@ -284,7 +284,7 @@ graph TB
 
 **Responsibilities & Constraints**
 - `render.h` は `error.h` と `<stddef.h>` だけを include する。`html.h` は `node.h`、`buffer.h`、`extension.h`、`render.h` を include する。どちらも `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS` で囲み、ガードは `AMARK_RENDER_H`、`AMARK_HTML_H`。
-- 公開の構造体（`amark_html_options_t`、`amark_html_node_slot_t`、`amark_html_hooks_slot_t`）は先頭に大きさのフィールドを持つ（スロットは `amark_slot_header_t` の `struct_size`）。ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
+- 公開の構造体（`amark_html_options_t`、`amark_html_node_slot_t`、`amark_html_hooks_slot_t`）は先頭に大きさのフィールドを持つ（スロットは `amark_slot_t` の `struct_size`）。ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
 
 **Contracts**: Service [x]
 ```c
@@ -293,9 +293,9 @@ graph TB
 typedef amark_error_t (*amark_write_fn_t)(void *user_data, const char *data, size_t length);
 
 /* include/amark/extension.h（追記） */
-/* 0x0300–0x03FF：html-renderer */
-#define AMARK_SLOT_HTML_NODE  0x0301u   /* amark_html_node_slot_t */
-#define AMARK_SLOT_HTML_HOOKS 0x0302u   /* amark_html_hooks_slot_t */
+/* html-renderer（syntax-tree の一覧の 11–12） */
+#define AMARK_SLOT_HTML_NODE  11u   /* amark_html_node_slot_t */
+#define AMARK_SLOT_HTML_HOOKS 12u   /* amark_html_hooks_slot_t */
 ```
 
 ### Render
@@ -397,7 +397,7 @@ typedef amark_error_t (*amark_html_node_fn_t)(amark_html_context_t *ctx, const a
 typedef amark_error_t (*amark_html_plain_fn_t)(amark_html_context_t *ctx, const amark_node_t *node, void *user_data);
 
 typedef struct amark_html_node_slot {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_HTML_NODE、struct_size = sizeof(amark_html_node_slot_t) */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_HTML_NODE、struct_size = sizeof(amark_html_node_slot_t) */
     const char *node_type;                /* ノード型の名前（"heading"、"test.table" など） */
     amark_html_node_fn_t render;          /* 必須。入るときと出るときに呼ぶ（葉も両方） */
     amark_html_plain_fn_t render_plain;   /* 任意。テキストだけのモードで入るときに呼ぶ */
@@ -407,7 +407,7 @@ typedef struct amark_html_node_slot {
 #define AMARK_HTML_MAX_STATE_SIZE 65536u
 
 typedef struct amark_html_hooks_slot {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_HTML_HOOKS */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_HTML_HOOKS */
     size_t state_size;                    /* 1 回の出力の間の状態の大きさ。0 なら状態なし */
     amark_error_t (*begin)(amark_html_context_t *ctx, void *state, void *user_data);  /* 任意 */
     amark_error_t (*end)(amark_html_context_t *ctx, void *state, void *user_data);    /* 任意 */
@@ -531,7 +531,7 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 /* include/amark/html.h */
 AMARK_API const amark_extension_t *amark_html_core_extension(void);   /* "amark.core.html"。静的、解放しない */
 
-/* src/syntax/html_core_internal.h（html_core.c だけが include する） */
+/* src/syntax/html_core.h（html_core.c だけが include する） */
 extern const amark_html_node_slot_t amark_html_slot_document;   /* … 19 の型のそれぞれ */
 ```
 

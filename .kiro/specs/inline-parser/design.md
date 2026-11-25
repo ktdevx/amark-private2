@@ -23,7 +23,7 @@
 
 ### This Spec Owns
 - 公開ヘッダ `include/amark/inline.h`（インラインの文脈の API、6 種類のスロットの構造体、エスケープに関わる文字の問い合わせ、パースの文脈なしで使える純粋な関数 `amark_inline_delimiter_flanks`・`amark_inline_match_delimiters`・`amark_inline_scan_raw_html`）と、`extension.h`・`commonmark.h`・`amark.h` への追記
-- スロットの種類 `AMARK_SLOT_INLINE_SYNTAX`（0x0201）、`AMARK_SLOT_INLINE_DELIMITER`（0x0202）、`AMARK_SLOT_INLINE_BRACKET`（0x0203）、`AMARK_SLOT_INLINE_TEXT_SCANNER`（0x0204）、`AMARK_SLOT_INLINE_NODE_TRAITS`（0x0205）、`AMARK_SLOT_INLINE_SPECIAL`（0x0206）。範囲 0x0200–0x02FF
+- スロットの種類 `AMARK_SLOT_INLINE_SYNTAX`（5）、`AMARK_SLOT_INLINE_DELIMITER`（6）、`AMARK_SLOT_INLINE_BRACKET`（7）、`AMARK_SLOT_INLINE_TEXT_SCANNER`（8）、`AMARK_SLOT_INLINE_NODE_TRAITS`（9）、`AMARK_SLOT_INLINE_SPECIAL`（10）。番号は `syntax-tree` の通し番号の一覧で割り当てたもの
 - `src/parse/inline_*.c` のインラインのエンジン（スロットの表、文脈、区切り文字、ブラケット、テキストのまとめと走査、委譲先の本体、文字の問い合わせ）と、既定の委譲先をこのエンジンにする変更
 - `src/syntax/` のインラインの組み込み拡張（構文ごとに 1 ファイル）と、`amark_syntax_set_add_commonmark` に加えるインラインの拡張の一覧と順
 - インラインの構文トークンの役割の番号（`AMARK_CM_ROLE_*` の 0x0100–0x01FF）と、インラインのエンジンの役割の値（`block-parser` が割り当てた 0xFF10–0xFF1F の中で定める）、インラインの優先度（`AMARK_CM_INLINE_PRIORITY_*`）
@@ -46,9 +46,9 @@
 ### Allowed Dependencies
 - `foundation` の公開 API（error、allocator、buffer、utf8、unicode）と内部 API（`base/allocator_internal.h`、`base/buffer_internal.h`）。`src/parse/inline_*.c` だけが内部 API を使う
 - `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`dump.h`、`extension.h`）
-- `block-parser` の公開 API（`parser.h`、`scan.h`、`entity.h`、`commonmark.h`）。`scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`、`amark_scan_html_open_tag` / `_closing_tag`、そのバイト列の版 `amark_scan_html_open_tag_bytes` / `_closing_tag_bytes` を含む（名前と引数は `block-parser` の design に従う）。`src/parse/inline_*.c` は `parse_internal.h` を使わない（公開 API だけを使い、委譲先として呼ばれる）。例外は既定の委譲先を返す `inline_plain.c`（`block-parser` のファイル）が `inline_internal.h` の 1 つの宣言を使うこと
+- `block-parser` の公開 API（`parser.h`、`scan.h`、`entity.h`、`commonmark.h`）。`scan.h` の `AMARK_SCAN_MAX_LINK_PAREN_DEPTH`、`amark_scan_html_open_tag` / `_closing_tag`、そのバイト列の版 `amark_scan_html_open_tag_bytes` / `_closing_tag_bytes` を含む（名前と引数は `block-parser` の design に従う）。`src/parse/inline_*.c` は `parse.h` を使わない（公開 API だけを使い、委譲先として呼ばれる）。例外は既定の委譲先を返す `inline_plain.c`（`block-parser` のファイル）が `inline_internal.h` の 1 つの宣言を使うこと
 - テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`block-parser` の `tests/support/gen_examples.cmake`（拡張して使う）、`amark_test_support`、`amark_test_tree`、`amark_test_parse`（`amark_test_parse_check`。`block-parser` が関数の形で実装）、`amark_test_html_gfm`、`amark_test_parse_gfm`（`block-parser` が実装）、`amark_add_fuzzer`
-- レイヤーの規則：`src/parse/inline_*.c` は `src/syntax/` と `src/render/` を参照しない。`src/syntax/` のインラインの拡張は、`include/amark/` の公開ヘッダと、同じ層（`src/syntax/`）の中だけで共有する内部ヘッダ `src/syntax/link_common_internal.h` だけを include する。同じ層の `*_internal.h` は steering（structure.md）が許す例外で、`src/tree/`・`src/parse/`・`src/render/` の内部ヘッダへの依存とは扱いが違う（後者は禁止）。`link_common_internal.h` を include するのは `link_common.c`、`link.c`、`image.c` だけ
+- レイヤーの規則：`src/parse/inline_*.c` は `src/syntax/` と `src/render/` を参照しない。`src/syntax/` のインラインの拡張は、`include/amark/` の公開ヘッダと、同じ層（`src/syntax/`）の中だけで共有する内部ヘッダ `src/syntax/link_common.h` だけを include する。同じ層の内部ヘッダは steering（structure.md）が許す例外で、`src/tree/`・`src/parse/`・`src/render/` の内部ヘッダへの依存とは扱いが違う（後者は禁止）。`link_common.h` を include するのは `link_common.c`、`link.c`、`image.c` だけ
 - ファジング：`fuzz/inline_parse_fuzz.c` がリンクするテスト支援ライブラリ（`amark_test_gfm` と、その依存の `amark_test_parse_gfm`、`amark_test_html_gfm`、後で `markdown-renderer` が足す `amark_test_md_gfm`）は、`foundation` の規則に従い Naos に依存しない。Naos を使う検査の補助（`amark_test_inline`、`amark_test_parse` など）はファジングのターゲットにリンクしない
 
 ### Revalidation Triggers
@@ -120,11 +120,11 @@ graph TB
     Parse --> RT
 ```
 
-**Dependency direction（`src/parse/` の中）**：`inline_special` → `inline_dispatch` → `inline_context` → `inline_delims` → `inline_brackets` → `inline_text` → `inline_engine` → `inline_plain`（`block-parser` のファイル）。左のファイルは右のファイルの関数を呼ばない。`inline_*` は `block-parser` の他のファイルの内部関数を呼ばない。`src/syntax/` のインラインのファイルは公開ヘッダと、同じ層の内部ヘッダ `link_common_internal.h`（`link_common.c`、`link.c`、`image.c` だけ）だけを include する。違反はレビューでエラーとする。
+**Dependency direction（`src/parse/` の中）**：`inline_special` → `inline_dispatch` → `inline_context` → `inline_delims` → `inline_brackets` → `inline_text` → `inline_engine` → `inline_plain`（`block-parser` のファイル）。左のファイルは右のファイルの関数を呼ばない。`inline_*` は `block-parser` の他のファイルの内部関数を呼ばない。`src/syntax/` のインラインのファイルは公開ヘッダと、同じ層の内部ヘッダ `link_common.h`（`link_common.c`、`link.c`、`image.c` だけ）だけを include する。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（`src/parse/inline_*`）と構文（`src/syntax/`）。構文の知識をエンジンに置かない。エンジンが知る組み込みのノード型は、テキストのまとめに使う `text` と、改行の受け皿の `softbreak` だけ（`syntax-tree` の組み込みの型で、構文ではない）。
-- Existing patterns preserved：エラーコードと出力引数、`struct_size`（スロットは `amark_slot_header_t`）、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、内部関数も `amark_`、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
+- Existing patterns preserved：エラーコードと出力引数、`struct_size`（スロットは `amark_slot_t`）、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、内部関数も `amark_`、ライセンスヘッダ、`block-parser` のパーサの失敗の例外（`Failed` の状態）。
 - Steering compliance：構文ごとに 1 ファイル、組み込みも公開 API だけ、parse → tree の一方向、spec.txt はテストデータだけ。
 
 ### Technology Stack
@@ -160,7 +160,7 @@ src/syntax/
 ├── char_ref.c                   # commonmark.char_ref（実体参照と数値文字参照）
 ├── code_span.c                  # commonmark.code_span（葉ごとのバッククォートの並びの索引）
 ├── emphasis.c                   # commonmark.emphasis（区切り文字の種類 * と _）
-├── link_common_internal.h       # リンクと画像が共有する、後ろの部分の解析・参照の解決・トークンの記録の宣言
+├── link_common.h                # リンクと画像が共有する、後ろの部分の解析・参照の解決・トークンの記録の宣言
 ├── link_common.c                # その実装
 ├── link.c                       # commonmark.link（[ の開き、ブラケットの後処理、link の性質、] の宣言）
 ├── image.c                      # commonmark.image（![ の開き、ブラケットの後処理）
@@ -223,7 +223,7 @@ bench/
 ```
 
 ### Modified Files
-- `include/amark/extension.h` — スロットの種類 0x0201–0x0206 の名前と番号、範囲 0x0200–0x02FF の注記（`syntax-tree` が追加中の範囲の表の `inline-parser` の行）。
+- `include/amark/extension.h` — スロットの種類 5–10 の名前と番号（`syntax-tree` のスロットの種類の一覧で割り当てた番号）。
 - `include/amark/amark.h` — `foundation` が定める正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`・`html.h` → `entity.h`・`scan.h`・`parser.h`・`block.h`・`inline.h`・`commonmark.h` → `markdown.h`）の `inline.h` の位置に追加する。順はこの spec では決めず、`foundation` の定めに従う。
 - `include/amark/commonmark.h` — インラインの拡張の取得関数 10 個、インラインの役割の番号、インラインの優先度を追記する。
 - `src/parse/inline_plain.c` — `amark_inline_delegate_default()` が `amark_inline_engine_delegate` を返すようにする（`block-parser` の design が予定する変更）。
@@ -392,7 +392,7 @@ graph TB
 | InlineTests / Fuzz / Bench | Test | 要件の検証 | 11.5, 14.1–14.3 | InlineCheck (P0) | Batch |
 
 ### 共通の規約
-- `foundation`・`syntax-tree`・`block-parser` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。スロットの構造体は `amark_slot_header_t` の `struct_size` が v1 の最小（`user_data` の末尾）以上であること。6 種類のスロットの構造体は、どれも v1 の最後の欄を `void *user_data` にする（コールバックを持たない `amark_inline_special_t` と `amark_inline_node_traits_t` も、慣例をそろえ、後の版で欄を足しても v1 の最小が変わらないように持つ）。
+- `foundation`・`syntax-tree`・`block-parser` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。スロットの構造体は `amark_slot_t` の `struct_size` が v1 の最小（`user_data` の末尾）以上であること。6 種類のスロットの構造体は、どれも v1 の最後の欄を `void *user_data` にする（コールバックを持たない `amark_inline_special_t` と `amark_inline_node_traits_t` も、慣例をそろえ、後の版で欄を足しても v1 の最小が変わらないように持つ）。
 - 位置はすべて葉の中身の論理的なバイトの位置（`amark_text_input_t` の位置、区間の隙間を数えない）。範囲は `[start, end)`。
 - `amark_inline_context_t *` はコールバックの間だけ有効。コールバックが `AMARK_ERROR_NONE` 以外を返したら、エンジンは葉の解析を止め、そのエラーコードを委譲先から返す（パーサは `Failed` になる。`block-parser` の規約）。
 - コールバックの中で作ったノードと、記録したトークンの所有者は、成立したときにエンジンへ渡すか、自分で解放する。不成立（`NONE`）のとき、文脈の変更（テキストとノードの追加、開きの積み、引き取り）をしてはならない（2.5）。
@@ -415,7 +415,7 @@ graph TB
 ```c
 /* include/amark/inline.h */
 typedef struct amark_inline_special {
-    amark_slot_header_t header;            /* kind = AMARK_SLOT_INLINE_SPECIAL */
+    amark_slot_t base;                     /* kind = AMARK_SLOT_INLINE_SPECIAL */
     const unsigned char *chars;            /* 256 ビットの集合（32 バイト）。NULL 可 */
     const char *const *sequences;          /* 構文を始める文字の並び（例："![", "www."）。NULL 可 */
     size_t sequence_count;
@@ -549,7 +549,7 @@ typedef enum amark_delimiter_rule {
 } amark_delimiter_rule_t;
 
 typedef struct amark_inline_delimiter {
-    amark_slot_header_t header;          /* kind = AMARK_SLOT_INLINE_DELIMITER */
+    amark_slot_t base;                   /* kind = AMARK_SLOT_INLINE_DELIMITER */
     const char *name;                    /* 診断用 */
     unsigned char character;
     int32_t priority;                    /* 同じバイトのインライン構文との順 */
@@ -651,7 +651,7 @@ typedef struct amark_bracket_result {
 } amark_bracket_result_t;
 
 typedef struct amark_inline_bracket {
-    amark_slot_header_t header;                 /* kind = AMARK_SLOT_INLINE_BRACKET */
+    amark_slot_t base;                          /* kind = AMARK_SLOT_INLINE_BRACKET */
     const char *name;
     int32_t priority;
     uint32_t opener_mask;
@@ -665,7 +665,7 @@ typedef struct amark_inline_bracket {
 #define AMARK_INLINE_TRAIT_LINK 0x01u   /* リンクを含めない。ブラケットで作られたら前の LINK の開きを無効にする。
                                            テキストの走査に in_link を伝える */
 typedef struct amark_inline_node_traits {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_INLINE_NODE_TRAITS */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_INLINE_NODE_TRAITS */
     const char *node_type;
     uint32_t traits;
     void *user_data;                    /* v1 のスロットの慣例どおり末尾に置く。エンジンは読まない */
@@ -695,7 +695,7 @@ typedef struct amark_inline_node_traits {
 ```c
 /* include/amark/inline.h */
 typedef struct amark_inline_text_scanner {
-    amark_slot_header_t header;           /* kind = AMARK_SLOT_INLINE_TEXT_SCANNER */
+    amark_slot_t base;                    /* kind = AMARK_SLOT_INLINE_TEXT_SCANNER */
     const char *name;
     int32_t priority;
     size_t leaf_state_size;
@@ -854,7 +854,7 @@ AMARK_API bool amark_scan_html_closing_tag_bytes(const char *data, size_t length
 
 **Contracts**: Service [x]
 ```c
-/* src/syntax/link_common_internal.h（link.c と image.c だけが include する） */
+/* src/syntax/link_common.h（link.c と image.c だけが include する） */
 amark_error_t amark_cm_link_match(amark_inline_context_t *ctx, const amark_bracket_info_t *info,
                                   const char *node_type, amark_bracket_result_t *out_result);
 ```
@@ -1094,7 +1094,7 @@ struct amark_inline_context {
   2. 生の HTML の判定の関数を公開する（依頼の時点の名前は `amark_scan_raw_html`。cross-spec review r1 で `inline.h` の名前の空間に揃えて `amark_inline_scan_raw_html` に改名。引数と規則は変えない）。所有の判断：タグの規則は `block-parser`（`scan_html.c` の 1 つの実装。バイト列の版と区間の並びの版）、コメント・処理命令・宣言・CDATA の規則と振り分けはこの spec の `raw_html.c` が持ち、構文と公開の関数が同じ実装を使う（7.7、RawHtml）。`markdown-renderer` は HTML ブロックの開始と終わりの条件を `block-parser` の `amark_scan_html_block_start` / `_end` から、インラインの生の HTML をこの関数から得る。→ この spec のタスク 1.2（前提の確認）、4.5。
   3. テキストの走査の一致の範囲に `ESCAPE` か `CHAR_REF` のトークンの文字が含まれるなら採らない規則を InlineText に加える（4.5）。→ この spec のタスク 2.7、3.4、7.2。
   4. `gen_examples.cmake` に `CHECK=` を足す（14.4、InlineCheck）。ファイルは `block-parser` のタスク 1.4 が先に作り、この spec のタスク 1.4 が予約済みの `EXPECT=html`・`FACTORY=`・`CHECK=` を追加で足す。→ この spec のタスク 1.4。`tests/extensions/gfm_set.c` に `amark_test_md_gfm` を加える編集と `amark_test_gfm` の依存の追加は、`markdown-renderer` のタスク 4.2 が行う（この spec は部品の並びを 1 か所の配列にしておくだけ）。
-- **`syntax-tree`**：並行して追加中の `amark_document_take_syntax_set`、`amark_node_import_children`、スロットの範囲の表に依存する。範囲の表の `inline-parser` の行（0x0200–0x02FF、0x0201–0x0206 の名前）をこの spec が `extension.h` に追記する。それ以外の変更は要らない。
+- **`syntax-tree`**：並行して追加中の `amark_document_take_syntax_set`、`amark_node_import_children`、スロットの種類の一覧に依存する。一覧で割り当てた 5–10 の種類をこの spec が `extension.h` に追記する。それ以外の変更は要らない。
 - **`html-renderer`**：変更は要らない。`gfm_html_ext.h` が公開する記述子（`test.strikethrough`、`test.footnote_ref` とそのラベルの設定）と部品の拡張をそのまま使う。準拠テストで出力の差が見つかったら、`html-renderer` の出力の表を直す。
 - **`foundation`**：予定どおり、`.gitattributes` に spec.txt の `export-ignore` を加える。CI の構成に `AMARK_REQUIRE_SPEC_TESTS=ON` を加える。`amark.h` の `inline.h` の位置は `foundation` の正規の順に従う。ファジングのターゲットがリンクするテスト支援ライブラリの規則（Naos に依存しない、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` で定義される、`LIBRARIES` のターゲットがなければ `amark_add_fuzzer` が構成を失敗させる）に `amark_test_gfm` を合わせる。
 - **`block-parser`（例の生成の手順とベンチマーク）**：`tests/support/gen_examples.cmake` は `block-parser` のタスク 1.4 が spec.txt の形式の唯一のパーサとして先に作る（基本の契約は `block-parser` の design）。この spec は予約済みの名前を追加で足して拡張し、基本の経路の出力を変えない。`bench/CMakeLists.txt`（`amark_add_bench` の定義と登録）も `block-parser` が所有し（`AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は最上位の `CMakeLists.txt` の `foundation` の拡張点）、この spec は `amark_add_bench(inline_pathological ...)` の 1 行を追記する。`amark_parser_create` は構文セットを借りるだけで、所有権を渡すのは `amark_parser_create_take_syntax_set`（`AMARK_PARSE_TAKE_SYNTAX_SET` の印はない）。この spec のテストと補助は、構文セットを渡すとき `block-parser` のこの取り決めに従う。

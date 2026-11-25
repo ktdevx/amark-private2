@@ -205,6 +205,32 @@
 ### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
 - **`amark_test_tree` の定義の条件**：`tree_builder.h` は Naos のマクロ `AMARK_CHECK_TREE_DUMP` を宣言するので `amark_test_tree` は Naos に依存する。`foundation` の規則 7.7 では `tests/` は `AMARK_FUZZ` だけが ON の構成でも入るため、`amark_test_tree` の定義と `add_subdirectory(tree)` を `if(AMARK_BUILD_TESTS)` の中に置くと明記した（design の Modified Files、TreeBuilder、タスクの該当箇所）。ファジングターゲットはこのライブラリをリンクしない。承認は維持する。
 
+### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
+- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
+- **変更**：`src/tree/tree_internal.h` を `src/tree/tree.h` に、`src/tree/syntax_set_internal.h` を `src/tree/syntax_set.h` に改名した（File Structure Plan、Dependency direction、Components、TreeInvariants、Logical Data Model）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
+
+### 2026-11-25：`src/tree/` のソースファイル名をコンポーネント名にそろえる
+- **Context**：`edit.c`（編集の記録）と `node_edit.c`（構造の編集）は、名前から役割を区別できなかった。また `node_` の接頭辞が、ノードを扱うファイルの一部にだけ付いていた。
+- **変更**：`edit.c` を `edit_tracking.c` に、`node_edit.c` を `structure_edit.c` に、`node_copy.c` を `copy_import.c` に、`node_attr.c` を `attr.c` に改名した（File Structure Plan、Dependency direction）。コンポーネント名（EditTracking、StructureEdit、CopyImport、LiteralAttr）とテストのファイル名に合わせ、`node_` は NodeCore の `node.c` だけに残す。steering（structure.md）のファイル名の例も `structure_edit.c` に直した。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲と依存の順は変わらない。承認は維持する。
+
+### 2026-11-25：ノード型の識別子の定数を `#define` にする
+- **Context**：ノード型の識別子は `typedef uint32_t amark_node_type_t` で、定数は無名の `enum` だった。enum 型の変数がないので、`switch` の網羅の警告やデバッガでの名前の表示は得られず、使われるのは値だけだった。識別子の値（組み込みは 1–19、1–255 は予約、拡張は 256 から）は ABI の一部で、集合は拡張で増える。
+- **変更**：`AMARK_NODE_*` を、同じ名前と値の `#define`（`u` 付き）にした（NodeCore の Contracts）。あわせて steering（tech.md）に、閉じた集合は `typedef enum`、固定幅の型に入れる開いた集合・予約範囲・ビットの印は `#define` に `u` を付ける、という規約を加えた。
+- **Implications**：名前と値は変わらず、使い方（比較、`switch` の `case`）も同じ。定数の型が `int` から符号なしになる。要件・タスクの範囲は変わらない。承認は維持する。
+
+### 2026-11-25：スロットの種類の番号を、spec ごとの範囲から通し番号の一覧に変える（要件 8.13 の変更）
+- **Context**：スロットの種類の番号は、各 spec の design を別々に書いていた段階で衝突を防ぐため、spec ごとに 256 ずつの範囲（`0x0100`–`0x04FF`）を割り当て、利用者の範囲を `0x10000` 以上としていた。全 spec の design が揃い、Amark の種類は 14 個に確定した。種類は 1 つの公開ヘッダ（`extension.h`）の 1 か所で管理するので、範囲の区切りがなくても、一覧への追記で衝突を防げる。範囲と桁は必要に対して過剰だった。
+- **変更**：Amark の範囲を 1–255、利用者の範囲を 256 以上にした（ノード型の識別子と同じ境界）。spec ごとの範囲の定数（`AMARK_SLOT_KIND_CORE_FIRST` など 10 個）をやめ、通し番号の一覧（`block-parser` 1–4、`inline-parser` 5–10、`html-renderer` 11–12、`markdown-renderer` 13–14、15–255 は予約）を design と `extension.h` の注記に置いた。`kind` の型（`uint32_t`）と `amark_slot_header_t` の形は変えない。
+- **要件の変更**：8.13 を「spec ごとに重ならない範囲に分けた表」から「重ならない通し番号の 1 つの一覧」に書き換え、Boundary Context の 2 か所の記述を合わせた。8.9（Amark の範囲と利用者の範囲を分ける）はそのまま満たす。受け入れ基準の意味が変わるが、利用者の要望による見直しであり、承認はこの改訂を含めて維持する。
+- **Implications**：タスク 1.1（公開ヘッダの定数と注記）とテスト（一覧の番号が重ならず Amark の範囲に含まれること）の記述を合わせた。下流の 4 つの spec は、種類の番号を一覧の値に置き換えた。種類の名前、構造体、API は変わらない。
+
+### 2026-11-25：スロットの基底の型を `amark_slot_t` に改名する
+- **Context**：スロットの基底の型 `amark_slot_header_t`（メンバー名 `header`）は、API の上で受け渡すもの（拡張の `slots`、`amark_syntax_set_slot_at` の戻り値）が「スロットそのもの」なのに「スロットのヘッダ」と読める名前だった。また日本語の文書では「スロットの見出し」と訳しており、ノード型の heading の「見出し」やヘッダファイルと紛れた。
+- **変更**：型を `amark_slot_t`（タグ `struct amark_slot`）に改名した。種類ごとの構造体が先頭に埋め込むメンバーの名前は `base` にする（下流の spec が合わせる）。文書の中では「スロットの基底」と呼ぶ。フィールド（`struct_size`、`kind`）、構造体の形、API の振る舞いは変えない。
+- **Implications**：型とメンバーの名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則

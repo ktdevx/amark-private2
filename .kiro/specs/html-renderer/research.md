@@ -146,11 +146,26 @@
 ### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
 - Revalidation Triggers の `amark_test_html_gfm` の依存の行で、影響先を `block-parser` のファジングターゲット（`amark_test_html_gfm` をリンクしない）から、`inline-parser`（`inline_parse`）と `markdown-renderer`（`md_roundtrip`、`md_edit`）のファジングターゲットに直し、中間のライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_gfm`（`inline-parser`）を明記した。承認の状態は変えない。
 
+### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
+- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
+- **変更**：`src/syntax/html_core_internal.h` を `src/syntax/html_core.h` に改名した（File Structure Plan、該当のコンポーネント）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
+
+### 2026-11-25：スロットの種類の番号を、`syntax-tree` の通し番号の一覧に合わせる
+- **Context**：スロットの種類の番号は、各 spec の design を別々に書いていた段階で衝突を防ぐため、spec ごとに 256 ずつの範囲（`0x0100`–`0x04FF`）を割り当て、利用者の範囲を `0x10000` 以上としていた。全 spec の design が揃い、Amark の種類は 14 個に確定した。種類は 1 つの公開ヘッダ（`extension.h`）の 1 か所で管理するので、範囲の区切りがなくても、一覧への追記で衝突を防げる。範囲と桁は必要に対して過剰だった。`syntax-tree` が要件 8.13 を改め、spec ごとの範囲をやめて通し番号の一覧にした。
+- **変更**：この spec のスロットの種類の番号を、一覧で割り当てた 11–12 に置き換えた。範囲の注記は削除した。種類の名前と構造体は変えない。
+- **Implications**：番号の値と記述だけの変更で、この spec の要件・API の形・タスクの範囲は変わらない。承認は維持する。
+
+### 2026-11-25：スロットの基底の型の改名（`syntax-tree`）に合わせる
+- **Context**：スロットの基底の型 `amark_slot_header_t`（メンバー名 `header`）は、API の上で受け渡すもの（拡張の `slots`、`amark_syntax_set_slot_at` の戻り値）が「スロットそのもの」なのに「スロットのヘッダ」と読める名前だった。また日本語の文書では「スロットの見出し」と訳しており、ノード型の heading の「見出し」やヘッダファイルと紛れた。`syntax-tree` が型を `amark_slot_t` に改名した。
+- **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
+- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - cmark 0.31.1 `src/html.c`、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re` — 出力とエスケープと危険な URL の規則
 - CommonMark Spec 0.31.2 — 準拠の対象
 - cmark-gfm `extensions/table.c`、`strikethrough.c`、`tasklist.c`、`tagfilter.c`、`src/html.c` — GFM 相当の出力の形
 - GitHub Flavored Markdown Spec 0.29 — 表、取り消し線、タスクリスト、タグフィルタ、脚注の期待値
 - markdown-it の renderer rules — 規則の置き換えと元の規則の呼び出しの先行例
-- `.kiro/specs/syntax-tree/design.md` — ノードモデル、レジストリ、スロットの見出し、テストの補助
+- `.kiro/specs/syntax-tree/design.md` — ノードモデル、レジストリ、スロットの基底、テストの補助
 - `.kiro/specs/foundation/design.md` — エラーコード、アロケータ、バッファ、テストとファジングの仕組み

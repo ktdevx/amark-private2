@@ -27,9 +27,9 @@
 - `src/tree/`：ノード、構文トークン、編集、拡張のレジストリ
 - `src/parse/`：ブロックとインラインのエンジン
 - `src/render/`：HTML と Markdown のエンジン
-- `src/syntax/`：CommonMark の組み込み構文（1 つの構文につき 1 ファイル。例：`atx_heading.c`、`emphasis.c`）と、コア出力拡張（`html_*.c`、`md_*.c`）。同じ層の中だけで共有する内部ヘッダ（`*_internal.h`）は使ってよい。
+- `src/syntax/`：CommonMark の組み込み構文（1 つの構文につき 1 ファイル。例：`atx_heading.c`、`emphasis.c`）と、コア出力拡張（`html_*.c`、`md_*.c`）。`src/syntax/` の中だけで共有する内部ヘッダは使ってよい。
 
-内部でだけ使うヘッダは、`src/` の中に置く。ファイル名には `_internal.h` などの接尾辞を付けて、公開ヘッダと区別する。
+内部でだけ使うヘッダは、`src/` の中に置く。公開ヘッダとは、置き場所（`include/amark/` と `src/`）と include の書き方（`<amark/...>` と `"<層>/..."`）で区別する。そのため、内部ヘッダのファイル名には原則として接尾辞を付けない（`tree/tree.h`、`parse/parse.h`）。同じ名前の公開ヘッダがある内部ヘッダだけ、`_internal.h` の接尾辞を付けて区別する（公開の `buffer.h` に対する `base/buffer_internal.h`）。後から同じ名前の公開ヘッダを追加するときは、内部ヘッダの名前に接尾辞を付けて改める。
 
 ### テスト
 **Location**：`tests/`
@@ -48,7 +48,7 @@
 
 ## Naming Conventions
 
-- **Files**：snake_case（`block_quote.c`、`node_edit.c`）
+- **Files**：snake_case（`block_quote.c`、`structure_edit.c`）
 - **公開関数**：`amark_<対象>_<動作>`（`amark_node_insert_after`、`amark_parser_feed`、`amark_render_html`）
 - **生成と破棄の関数の組**：領域は呼び出し側（または埋め込み先、エンジン）が用意し、構造体の中身だけを生成・破棄する組は `_init` / `_deinit` とする（`amark_buffer_init` / `amark_buffer_deinit`）。不透明型のオブジェクトの領域ごと生成・破棄する組は `_create` / `_destroy` とする（`amark_buffer_create` / `amark_buffer_destroy`）。`malloc` と同じ形の `amark_malloc` / `amark_free` は、メモリそのものの確保と解放なので対象外とする。関数表のコールバックも同じ（`init` / `deinit`）。`init` の対は必ず `deinit` とする。0 で埋めるだけで初期化が済むなら、`init` を置かず `deinit` だけでよい（`deinit_block_data`）。破棄するものがなければ `_deinit` は置かない（`amark_parse_options_init`）。
 - **typedef した型**：構造体、列挙、関数ポインタ、整数の別名のすべてで、末尾に `_t` を付ける。公開型も、モジュールをまたぐ内部の型も `amark_<名前>_t` とする。構造体と列挙のタグには `_t` を付けない。不透明型は `typedef struct amark_node amark_node_t;` の形で宣言する。
@@ -64,7 +64,7 @@
 /* 2. 公開ヘッダ */
 #include <amark/node.h>
 /* 3. 他の内部ヘッダ（src/ からの相対パス） */
-#include "base/buffer.h"
+#include "base/buffer_internal.h"
 /* 4. 標準ライブラリ */
 #include <string.h>
 ```
@@ -75,7 +75,7 @@
 ## Code Organization Principles
 
 - **下位のレイヤーは上位のレイヤーを参照しない**。例えば、tree は parse や render を知らない。
-- **組み込みの構文も公開 API だけを使う**。`src/syntax/` から `src/tree/`・`src/parse/`・`src/render/` の内部ヘッダに依存するのは禁止する（`src/syntax/` 内の `*_internal.h` は可）。必要なら API を公開する。
+- **組み込みの構文も公開 API だけを使う**。`src/syntax/` から `src/tree/`・`src/parse/`・`src/render/` の内部ヘッダに依存するのは禁止する（`src/syntax/` の中の内部ヘッダは可）。必要なら API を公開する。
 - **すべてのソースファイルの先頭にライセンスヘッダを付ける**。
 
   ```c

@@ -234,6 +234,21 @@
 - **ベンチマークの構成の置き場所**：`AMARK_BUILD_BENCH` と `add_subdirectory(bench)` は最上位の `CMakeLists.txt`（`foundation` の拡張点）に置き、`bench/CMakeLists.txt` は `amark_add_bench` の定義と登録だけを持つ、と Boundary Commitments の「共同で編集するファイル」を書き直した。
 - approvals は維持した。
 
+### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
+- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
+- **変更**：`src/parse/parse_internal.h` を `src/parse/parse.h` に、参照する `syntax-tree` の内部ヘッダを `tree/tree.h` に改めた（Allowed Dependencies、File Structure Plan、各コンポーネントの宣言の場所）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
+- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
+
+### 2026-11-25：スロットの種類の番号を、`syntax-tree` の通し番号の一覧に合わせる
+- **Context**：スロットの種類の番号は、各 spec の design を別々に書いていた段階で衝突を防ぐため、spec ごとに 256 ずつの範囲（`0x0100`–`0x04FF`）を割り当て、利用者の範囲を `0x10000` 以上としていた。全 spec の design が揃い、Amark の種類は 14 個に確定した。種類は 1 つの公開ヘッダ（`extension.h`）の 1 か所で管理するので、範囲の区切りがなくても、一覧への追記で衝突を防げる。範囲と桁は必要に対して過剰だった。`syntax-tree` が要件 8.13 を改め、spec ごとの範囲をやめて通し番号の一覧にした。
+- **変更**：この spec のスロットの種類の番号を、一覧で割り当てた 1–4 に置き換えた。範囲の注記は削除した。種類の名前と構造体は変えない。
+- **Implications**：番号の値と記述だけの変更で、この spec の要件・API の形・タスクの範囲は変わらない。承認は維持する。
+
+### 2026-11-25：スロットの基底の型の改名（`syntax-tree`）に合わせる
+- **Context**：スロットの基底の型 `amark_slot_header_t`（メンバー名 `header`）は、API の上で受け渡すもの（拡張の `slots`、`amark_syntax_set_slot_at` の戻り値）が「スロットそのもの」なのに「スロットのヘッダ」と読める名前だった。また日本語の文書では「スロットの見出し」と訳しており、ノード型の heading の「見出し」やヘッダファイルと紛れた。`syntax-tree` が型を `amark_slot_t` に改名した。
+- **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
+- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — ブロック構造、タブ、不正な文字、リンク参照定義、付録の parsing strategy
 - [cmark](https://github.com/commonmark/cmark) — `blocks.c`、`inlines.c`、`utf8.c`（case fold）、`houdini_html_u.c`（文字参照）
