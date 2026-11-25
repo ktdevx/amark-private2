@@ -187,16 +187,27 @@ foreach(_line IN LISTS _lines)
       set(_name "${CMAKE_MATCH_1}")
     endif()
   else()
-    # The lines "\t<ordinal> <name>" of the "<Ordinal/Name Pointer> Table".
-    if(_line MATCHES "Ordinal/Name Pointer> Table")
+    # The rows of the "<Ordinal/Name Pointer> Table" (or "[Ordinal/Name Pointer]
+    # Table" of older binutils). The row format depends on the binutils version:
+    #   "\t[   0] <name>"                        (older)
+    #   "\t<0> <name>"
+    #   "\t< 0> +base< 1> 0000 <name>"           (binutils 2.4x)
+    # so a row is a line starting with an index in brackets, and the name is its
+    # last field. Blank lines and the "Ordinal Hint Name" heading are skipped; the
+    # first other line after the rows ends the table.
+    if(_line MATCHES "Ordinal/Name Pointer[]>] Table")
       set(_in_table TRUE)
+      set(_table_rows 0)
       continue()
     endif()
     if(_in_table)
-      if(_line MATCHES "^[ \t]*$")
-        set(_in_table FALSE)
-      elseif(_line MATCHES "^[ \t]*<[ \t]*[0-9]+> ([^ \t]+)[ \t]*$")
+      if(_line MATCHES "^[ \t]*$" OR _line MATCHES "^[ \t]*Ordinal[ \t]+Hint[ \t]+Name[ \t]*$")
+        # Not a row; the table goes on.
+      elseif(_line MATCHES "^[ \t]*[[<][ \t]*[0-9]+[]>].*[ \t]([^ \t]+)[ \t]*$")
         set(_name "${CMAKE_MATCH_1}")
+        math(EXPR _table_rows "${_table_rows} + 1")
+      elseif(_table_rows GREATER 0)
+        set(_in_table FALSE)
       endif()
     endif()
   endif()
