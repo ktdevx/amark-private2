@@ -39,6 +39,7 @@
 - spec.txt、準拠テスト、往復のプロパティテスト、検証用拡張（`tests/spec/`、`tests/extensions/` など）
 - 特定の構文だけが使う文字データ（case fold、HTML の文字参照）と、その生成手順への追加（`block-parser` が Downstream Extension Points の拡張点に追加する）
 - spec.txt の `export-ignore` と CI の `AMARK_REQUIRE_SPEC_TESTS=ON`（`inline-parser` が追加する）
+- `bench/` の中身、最上位の `AMARK_BUILD_BENCH` と `add_subdirectory(bench)`、`spec_blocks.txt` の `export-ignore`（`block-parser` が追加する）
 - 入れ子の深さの上限の値など、パーサ固有の制限（状態コード `AMARK_ERROR_LIMIT_EXCEEDED` だけを用意する）
 
 ### Allowed Dependencies
@@ -51,23 +52,26 @@
 ### Revalidation Triggers
 - 状態コードの追加・意味の変更、出力引数の規約の変更 → すべての後続の spec
 - `amark_allocator` のフィールドの追加、`amark_buffer` の API の変更 → `syntax-tree`、`html-renderer`、`markdown-renderer`
-- `amark_add_test()` / `amark_add_generated_tests()` / `amark_add_fuzzer()` の引数の変更、テスト生成の補助の契約の変更 → テストやファジングターゲットを持つすべての spec
+- `amark_add_test()` / `amark_add_generated_tests()` / `amark_add_fuzzer()` の引数の変更、テスト生成の補助の契約の変更、ファジングターゲットがリンクするテスト用の補助ライブラリの規則（FuzzInfra の「ファジング用の補助ライブラリの規則」）の変更 → テストやファジングターゲットを持つすべての spec
 - 文字の分類の定義の変更、Unicode の版の更新、準拠対象の CommonMark の版の変更 → `inline-parser`、`block-parser`
-- 公開ヘッダの配置、`amark.h` の構成、`AMARK_API` の規則の変更 → すべての後続の spec
+- 公開ヘッダの配置、`amark.h` の構成と正規の include の順（PublicHeaders）、`AMARK_API` の規則の変更 → すべての後続の spec
 - インストールの配置、パッケージの選択の規則の変更 → 利用者とリリースのワークフロー
-- 下の Downstream Extension Points の拡張点（生成スクリプトの表の一覧と出力の形、`.gitattributes` の規則、`ci.yml` の構成の段、状態コードの末尾への追加）の形の変更 → その拡張点に追加する spec（`block-parser`、`inline-parser`、`markdown-renderer`）
+- 下の Downstream Extension Points の拡張点（生成スクリプトの表の一覧と出力の形、`.gitattributes` の規則、`ci.yml` の構成の段、状態コードの末尾への追加、最上位の `CMakeLists.txt` のオプションとサブディレクトリの組み立て）の形の変更 → その拡張点に追加する spec（`block-parser`、`inline-parser`、`markdown-renderer`）
 
 ### Downstream Extension Points
-この spec が所有するファイルのうち、後続の spec が追加を行うことが予定されている箇所（2026-11-25 に確認）。ファイル全体の所有と、追加を受け入れる形（拡張点）はこの spec が持ち、追加した部分の実装・テスト・保守は追加する spec が持つ。これらの追加はこの spec のタスクに含めない。追加する spec は拡張点の形を変えず、形の変更が必要ならこの spec の改訂として依頼する。
+この spec が所有するファイルのうち、後続の spec が追加を行うことが予定されている箇所（2026-11-25 に確認、同日の cross-spec review r1 で `block-parser` の 2 行を追加）。ファイル全体の所有と、追加を受け入れる形（拡張点）はこの spec が持ち、追加した部分の実装・テスト・保守は追加する spec が持つ。これらの追加はこの spec のタスクに含めない。追加する spec は拡張点の形を変えず、形の変更が必要ならこの spec の改訂として依頼する。
 
 | 追加する spec | 対象のファイル | 追加の内容 | 受け入れる拡張点 |
 |---|---|---|---|
 | `block-parser` | `tools/gen_unicode_tables.py`、`include/amark/unicode.h`、`src/runtime/unicode.c` | `CaseFolding.txt`（状態 C と F）の読み取り、`src/runtime/case_fold_tables.inc`、`amark_unicode_case_fold()`、`--check` の対象への追加 | UnicodeTableGen の拡張（別の UCD のファイルを読む生成の関数と別の `.inc`）、`unicode.h` の末尾への関数の追加 |
 | `block-parser` | `tools/gen_entity_table.py`（新規）、`src/runtime/entity.c`、`src/runtime/entity_tables.inc`、`include/amark/entity.h` | WHATWG `entities.json` からの名前付き文字参照の表と生成手順 | UnicodeTableGen と同じ方式（保守者が手で実行、生成物をリポジトリに入れる、`--check`、ビルドでは実行しない）。`src/runtime/` のレイヤーの規則に従う |
+| `block-parser` | `CMakeLists.txt`（最上位） | オプション `AMARK_BUILD_BENCH`（既定 `OFF`）と、それが ON のときの `add_subdirectory(bench)`。`bench/` の中身（`bench/CMakeLists.txt` を含む）は `block-parser` が所有し、他の spec のベンチマークの追加は `block-parser` の拡張点で受け入れる | BuildCore のオプションの表とサブディレクトリの組み立て（新しいオプションは組み込み時に既定で無効、`add_subdirectory(fuzz)` の後に置く） |
+| `block-parser` | `.gitattributes` | `tests/syntax/data/spec_blocks.txt` の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
 | `inline-parser` | `.gitattributes` | `tests/spec/data/` の spec.txt と NOTICE.txt の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
 | `inline-parser` | `.github/workflows/ci.yml` | 全ジョブの構成に `-DAMARK_REQUIRE_SPEC_TESTS=ON` を加える | CIWorkflow の構成の段（構成のオプションを追加できる） |
 | `markdown-renderer` | `include/amark/status.h`、`src/runtime/status.c` | `AMARK_ERROR_UNREPRESENTABLE` | 状態コードの末尾への追加（10.7）。2026-11-25 にこの spec に取り込み済み（値 6、要件 10.9、タスク 2.1） |
 
+- 表のほかに、すべての後続の spec が行う定型の追加として、`src/CMakeLists.txt` へのソース、`include/amark/amark.h` への公開ヘッダ（PublicHeaders の正規の順の自分の位置に）、`tests/CMakeLists.txt` と `fuzz/CMakeLists.txt` へのサブディレクトリ（FuzzInfra の「ファジング用の補助ライブラリの規則」に従う）がある。
 - 上の追加で `src/runtime/` に入るファイルは、This Spec Owns の「`src/runtime/` のすべて」の例外として、追加する spec が所有する。ライセンスヘッダ、`amark_` 接頭辞、アロケータの経由、レイヤーの規則などの規約はこの spec のものに従う。
 
 ## Architecture
@@ -186,7 +190,7 @@ graph TB
 ├── tools/
 │   └── gen_unicode_tables.py      # UCD から unicode_tables.inc を生成する（保守者用）
 ├── tests/
-│   ├── CMakeLists.txt             # テストの組み立て、検査のテスト、各サブディレクトリ
+│   ├── CMakeLists.txt             # テストの組み立て、検査のテスト、各サブディレクトリ（AMARK_FUZZ だけでも入る。FuzzInfra の規則）
 │   ├── support/
 │   │   ├── test_allocator.h       # テスト用アロケータと確保失敗の総当たりの補助
 │   │   ├── test_allocator.c
@@ -229,7 +233,7 @@ graph TB
 ```
 
 ### Modified Files
-- なし（greenfield）。後続の spec は `src/CMakeLists.txt` にソースを、`include/amark/amark.h` に自分の公開ヘッダを、`tests/CMakeLists.txt` と `fuzz/CMakeLists.txt` にサブディレクトリを追加する。
+- なし（greenfield）。後続の spec は `src/CMakeLists.txt` にソースを、`include/amark/amark.h` に自分の公開ヘッダを（PublicHeaders の正規の順の自分の位置に）、`tests/CMakeLists.txt` と `fuzz/CMakeLists.txt` にサブディレクトリを追加する。
 
 ## System Flows
 
@@ -338,6 +342,8 @@ graph TB
 | 7.4 | コーパスの再生の登録 | FuzzInfra | `fuzz.<name>.corpus` | — |
 | 7.5 | ターゲットの追加の容易さ | FuzzInfra | `amark_add_fuzzer()` | — |
 | 7.6 | UTF-8 とバッファのターゲット | FuzzTargets | `utf8_fuzz`、`buffer_fuzz` | — |
+| 7.7 | ファジング用の補助ライブラリが Naos に依存せず、ファジングだけの構成が通ること | FuzzInfra、BuildCore、Testing、CIWorkflow | ファジング用の補助ライブラリの規則、`fuzz` ジョブ | — |
+| 7.8 | リンク対象のライブラリの欠落と Naos への依存の検出 | FuzzInfra | `amark_add_fuzzer()` の `LIBRARIES` の検査 | — |
 | 8.1, 8.2 | LICENSE と README | RepoDocs | — | — |
 | 8.3, 8.4 | ライセンスヘッダとその検査 | LicenseCheck | `check_license_headers.cmake` | — |
 | 8.5 | テストデータのバイトの同一性 | RepoDocs | `.gitattributes` | — |
@@ -346,6 +352,7 @@ graph TB
 | 9.3 | 接頭辞 | PublicHeaders、SymbolCheck | 命名規約 | — |
 | 9.4, 9.5 | コンパイル時と実行時の版 | Version | `AMARK_VERSION_*`、`amark_version_number()` | — |
 | 9.6 | 版の唯一の定義 | VersionMod、Packaging | `amark_read_version()` | — |
+| 9.7 | `amark.h` の正規の include の順 | PublicHeaders | `amark.h` | — |
 | 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | 状態コードと失敗の規約 | Status、Error conventions | `amark_status`、`amark_status_string()` | — |
 | 10.9 | 表現できないことの状態コード | Status | `AMARK_ERROR_UNREPRESENTABLE`、`amark_status_string()` | — |
 | 10.8 | グローバルな可変状態を持たない | Runtime 全体 | 規約 | — |
@@ -359,23 +366,23 @@ graph TB
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| BuildCore | Infra | プロジェクト、オプション、ライブラリのターゲット | 1.1, 1.3, 1.7, 2.1–2.3, 2.5, 2.6, 3.3, 4.3, 4.4 | CompilerOptions (P0), VersionMod (P0) | Service |
+| BuildCore | Infra | プロジェクト、オプション、ライブラリのターゲット | 1.1, 1.3, 1.7, 2.1–2.3, 2.5, 2.6, 3.3, 4.3, 4.4, 7.7 | CompilerOptions (P0), VersionMod (P0) | Service |
 | CompilerOptions | Infra | C99、警告、可視性、サニタイザ | 1.2, 1.4–1.6, 2.4, 5.2 | — | Service |
 | VersionMod | Infra | 版の読み取りと派生値 | 2.6, 9.6 | Version (P0) | Service |
 | Packaging | Infra | install、export、パッケージ設定、pc | 2.3, 2.5, 2.7, 3.1–3.7, 6.5, 9.6 | BuildCore (P0) | Service |
-| Testing | Infra | Naos の統合とテストの登録 | 4.1–4.4, 4.7, 4.8 | Naos (P0), BuildCore (P0) | Service |
+| Testing | Infra | Naos の統合とテストの登録 | 4.1–4.4, 4.7, 4.8, 7.7 | Naos (P0), BuildCore (P0) | Service |
 | TestGen | Infra | 生成スクリプトの補助 | 4.7, 4.8 | — | Service |
 | TestSupport | Test | テスト用アロケータ、比較のマクロ | 4.5, 4.6 | Naos (P0), allocator.h (P0) | Service |
 | HeaderChecks | Test | 公開ヘッダの単独コンパイル | 4.9, 9.2 | PublicHeaders (P0) | Batch |
 | SymbolCheck | Test | エクスポートの検査 | 2.4, 4.10, 4.12, 9.3 | nm 等 (P1) | Batch |
 | LicenseCheck | Test | ライセンスヘッダの検査 | 8.3, 8.4 | — | Batch |
 | PackageTests | Test | 4 つの取り込み方法の検査 | 1.5, 3.2–3.4, 3.7, 4.11, 4.12, 5.5 | Packaging (P0) | Batch |
-| FuzzInfra | Infra | ファジングの仕組み | 5.3, 7.1–7.5 | BuildCore (P0) | Service |
+| FuzzInfra | Infra | ファジングの仕組み | 5.3, 7.1–7.5, 7.7, 7.8 | BuildCore (P0) | Service |
 | FuzzTargets | Fuzz | ランタイムのファジング | 7.6 | Utf8, Buffer (P0) | Batch |
-| CIWorkflow | CI | マトリクス、サニタイザ、ファジング、二重インストール | 1.1, 5.1–5.5 | BuildCore (P0) | Batch |
+| CIWorkflow | CI | マトリクス、サニタイザ、ファジング、二重インストール | 1.1, 5.1–5.5, 7.7 | BuildCore (P0) | Batch |
 | ReleaseWorkflow | CI | 成果物の作成と公開 | 6.1–6.5, 3.6 | Packaging (P0) | Batch |
 | RepoDocs | Repo | LICENSE、README、gitattributes | 6.5, 8.1, 8.2, 8.5 | — | — |
-| PublicHeaders / Export | Runtime | 配置、まとめのヘッダ、エクスポート | 2.4, 2.5, 9.1–9.3 | — | Service |
+| PublicHeaders / Export | Runtime | 配置、まとめのヘッダ、エクスポート、正規の include の順 | 2.4, 2.5, 9.1–9.3, 9.7 | — | Service |
 | Version | Runtime | 版のマクロと関数 | 9.4, 9.5 | Export (P0) | Service |
 | Status | Runtime | 状態コード | 10.1–10.7, 10.9 | Export (P0) | Service |
 | Allocator | Runtime | 差し替え可能なアロケータ | 11.1–11.8 | Status (P0) | Service |
@@ -426,7 +433,7 @@ target_sources(amark_objects PRIVATE tree/node.c ...)
 - Postconditions：`amark` と `amark_internal` に自動的に含まれる。
 
 **Implementation Notes**
-- Integration：`include(CTest)` は最上位のときだけ行う。`add_subdirectory(tests)` は `AMARK_BUILD_TESTS`、`add_subdirectory(fuzz)` は `AMARK_FUZZ` か `AMARK_BUILD_TESTS` のとき。
+- Integration：`include(CTest)` は最上位のときだけ行う。`AmarkTesting.cmake` と `AmarkFuzz.cmake` は常に include する（関数を常に定義し、無効なときは何もしない）。`add_subdirectory(tests)` と `add_subdirectory(fuzz)` はどちらも `AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに、この順で行う（ファジングターゲットがリンクする補助ライブラリを `tests/` で先に定義するため。FuzzInfra の「ファジング用の補助ライブラリの規則」）。後続の spec が追加するサブディレクトリ（`bench/` など）はこの後に置く。
 - Risks：OBJECT ライブラリを `target_link_libraries` でつなぐと export の対象に入るため、`target_sources` と `$<TARGET_OBJECTS>` を使う。
 
 #### CompilerOptions
@@ -506,6 +513,7 @@ target_link_libraries(app PRIVATE Amark::amark)
 | Requirements | 4.1–4.4, 4.7, 4.8 |
 
 **Responsibilities & Constraints**
+- `AMARK_BUILD_TESTS` が OFF なら Naos を取得せず、`AMARK_FUZZ` だけが ON の構成でも同じ（7.7）。
 - `AMARK_BUILD_TESTS` のときだけ、`FetchContent_Declare(Naos GIT_REPOSITORY https://github.com/vabelorg/naos.git GIT_TAG v0.4.0)` と `FetchContent_MakeAvailable(Naos)` を行う。タグの値は `AmarkTesting.cmake` の 1 か所にだけ書く。
 - `amark_add_test()`：`naos_add_executable()` で作り、`amark_target_defaults()` を適用し、`RUNTIME_OUTPUT_DIRECTORY` を `${PROJECT_BINARY_DIR}/bin` にする。既定で `amark` を、`INTERNAL` のときは `amark_internal` をリンクする（両方はリンクしない）。常に `amark_test_support` をリンクする。
 - `amark_add_generated_tests()`：`DATA` の各ファイルについて、`add_custom_command` で `${CMAKE_CURRENT_BINARY_DIR}/<target>_gen/<suite>.c` を生成する。`DEPENDS` はデータ、生成スクリプト、`AmarkTestGen.cmake`。スイートの名前は `<target>` の接頭辞とデータのファイル名（拡張子なし）を C の識別子にしたもの。生成したスイートと `EXTRA_SUITES` を `NAOS_DECLARE_SUITE` と `NAOS_MAIN` に並べた `main` のソースも構成時に生成する（データファイルの一覧は構成時に決まり、中身の変更は再構成を要さない）。
@@ -527,7 +535,7 @@ amark_add_generated_tests(<target>
     [ARGS <name>=<value>...]       # 生成スクリプトへ -D で渡す
     [INTERNAL] [LIBRARIES <library>...] [LABELS <label>...])
 ```
-- Preconditions：`AMARK_BUILD_TESTS` が ON（OFF のときは何もしない）。
+- Preconditions：`AMARK_BUILD_TESTS` が ON（OFF のときは何もしない。`AMARK_FUZZ` だけが ON の構成で `tests/` に入っても、Naos を必要とせずに呼べる）。
 - Postconditions：各テストが `<target>.<suite>.<test>` で CTest に登録される。
 
 #### TestGen
@@ -563,7 +571,7 @@ amark_testgen_write(<file> <content>)            # 内容が同じなら書き�
 | Field | Detail |
 |-------|--------|
 | Intent | ファジングターゲットの追加、libFuzzer の有無の吸収、コーパスの再生、短時間実行 |
-| Requirements | 5.3, 7.1–7.5 |
+| Requirements | 5.3, 7.1–7.5, 7.7, 7.8 |
 
 **Responsibilities & Constraints**
 - libFuzzer の対応は、`AMARK_FUZZ` が ON のときに `-fsanitize=fuzzer` で小さなプログラムをリンクできるかで判定する（`check_c_source_compiles`）。対応するときは、最上位のディレクトリ単位で `-fsanitize=fuzzer-no-link` をコンパイルとリンクに加える（ライブラリにもカバレッジの計測を入れる）。
@@ -572,6 +580,12 @@ amark_testgen_write(<file> <content>)            # 内容が同じなら書き�
   - libFuzzer なし（`AMARK_FUZZ` が OFF の場合を含む）：`amark_fuzz_standalone`（`fuzz/standalone_main.c` の OBJECT ライブラリ）をリンクする。
   - `AMARK_BUILD_TESTS` のとき：`CORPUS` のファイルを `file(GLOB ... CONFIGURE_DEPENDS)` で集め、`fuzz.<name>.corpus` という CTest のテストとして、すべてのファイルを引数に実行する。ラベル `fuzz`。
   - 既定で `amark_internal` をリンクする（内部関数も対象にでき、静的版の計測が入る）。
+  - `LIBRARIES` の検査（7.8）：各要素について、`TARGET` でなければ `message(FATAL_ERROR "amark_add_fuzzer(<name>): LIBRARIES target '<lib>' is not defined; fuzzer support libraries must be defined in tests/ whenever AMARK_FUZZ or AMARK_BUILD_TESTS is ON")` で構成を失敗させる。ターゲットの `LINK_LIBRARIES` か `INTERFACE_LINK_LIBRARIES` に `Naos::naos`（または `naos`）が直接含まれていても、名前を示して失敗させる（直接の依存だけを見る。推移的な依存は CI の `fuzz` ジョブの構成で検出する）。検査はテストを有効にした通常の構成でも行い、ファジングだけの構成で初めて壊れることを防ぐ。
+- ファジング用の補助ライブラリの規則（7.7、後続の spec も従う）：
+  - ファジングターゲットが `LIBRARIES` でリンクするテスト用の補助ライブラリ（例：後続の spec の `amark_test_gfm`）は Naos に依存してはならない（`Naos::naos` をリンクせず、Naos のヘッダを include しない）。Naos に依存する検査の補助は、ファジングターゲットにリンクしない別のターゲットに分ける。
+  - そのような補助ライブラリは `AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON なら必ず定義する。`tests/` とその下のサブディレクトリは両方の場合に入り、Naos に依存するターゲット（`amark_test_support`、`amark_header_check`、検査のテストなど）は `if(AMARK_BUILD_TESTS)` の中に置く。`amark_add_test()` と `amark_add_generated_tests()` は OFF のとき何もしないので、そのまま呼んでよい。
+  - この spec のファジングターゲット（`utf8_fuzz`、`buffer_fuzz`）は `amark_internal` だけをリンクし、`buffer_fuzz` の失敗を注入するアロケータは `buffer_fuzz.c` の中に持つ（`amark_test_support` は Naos をリンクするため使わない）。
+  - CI の `fuzz` ジョブは `-DAMARK_BUILD_TESTS=OFF` で構成し、ファジングだけの構成が Naos なしに構成・ビルドできることを常に確かめる。
 - `amark_fuzz_smoke`（libFuzzer ありのときだけ）：各ターゲットを、コーパスをビルドディレクトリにコピーした場所で `-max_total_time=${AMARK_FUZZ_SMOKE_SECONDS}` で順に実行するカスタムターゲット。ソースツリーのコーパスは書き換えない。
 - `standalone_main.c`：各引数のファイルを読み、`LLVMFuzzerTestOneInput` を 1 回ずつ呼ぶ。`LLVMFuzzerInitialize` は弱いシンボルに頼らず、使わない（C99 の範囲）。読めないファイルがあれば非 0 で終わる。
 
@@ -629,7 +643,7 @@ amark_add_fuzzer(<name>
 |---|---|---|---|
 | `build` | ubuntu（GCC、Clang、Ninja）、macos（AppleClang、Ninja）、windows（MSVC、Visual Studio のジェネレータ）、windows（MSYS2 UCRT64 の GCC、Ninja、pkgconf） | 各環境 × `BUILD_SHARED_LIBS` ∈ {OFF, ON}、ubuntu の GCC だけ Release も | 構成、ビルド、`ctest --output-on-failure`（package を含む全ラベル） |
 | `sanitizers` | ubuntu（Clang と GCC） | — | `-DAMARK_SANITIZE="address;undefined"`、Debug、全テスト。`ASAN_OPTIONS=detect_leaks=1` |
-| `fuzz` | ubuntu（Clang） | — | `-DAMARK_FUZZ=ON -DAMARK_SANITIZE="address;undefined"`、`cmake --build build --target amark_fuzz_smoke` |
+| `fuzz` | ubuntu（Clang） | — | `-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF -DAMARK_SANITIZE="address;undefined"`、`cmake --build build --target amark_fuzz_smoke`（テストを無効にして、ファジングだけの構成が Naos なしに通ることも確かめる。7.7） |
 | `package-dual` | ubuntu（GCC）、windows（MSVC） | — | 静的版と動的版を同じ接頭辞にインストールし、`run_package_test.cmake` を `PREFIX` と `COMPONENT` ∈ {static, shared, なし} で実行 |
 
 - 失敗の報告（5.4）：どのジョブが失敗してもワークフローは失敗になる（`fail-fast: false` で全ジョブを最後まで走らせる）。失敗時は `Testing/Temporary/LastTest.log` と、ファジングのクラッシュ入力を成果物として保存する。
@@ -654,7 +668,7 @@ amark_add_fuzzer(<name>
 
 - `LICENSE`：MIT の全文、`Copyright (c) The Amark Authors`。
 - `README.md`：概要、対応環境（3 OS と 5 つのコンパイラ環境）、ビルド（構成・ビルド・テスト、主なオプション）、取り込み（4 つの方法の例と、種類の選択の規則）、ライセンスの節を持つ骨子。
-- `.gitattributes`：`* text=auto eol=lf`。`tests/**/data/**` と `fuzz/corpus/**` は `-text`（バイナリ扱い）。後続の spec がテストデータを置くときは、`data/` の下に置けば同じ扱いになる。配布しないテストデータには `export-ignore` を付ける（spec.txt は `inline-parser` が追加する。Downstream Extension Points）。
+- `.gitattributes`：`* text=auto eol=lf`。`tests/**/data/**` と `fuzz/corpus/**` は `-text`（バイナリ扱い）。後続の spec がテストデータを置くときは、`data/` の下に置けば同じ扱いになる。配布しないテストデータには `export-ignore` を付ける（spec.txt は `inline-parser`、`spec_blocks.txt` は `block-parser` が追加する。Downstream Extension Points）。
 
 ### Test
 
@@ -666,7 +680,7 @@ amark_add_fuzzer(<name>
 | Requirements | 4.5, 4.6 |
 
 **Responsibilities & Constraints**
-- 静的ライブラリ `amark_test_support`。Amark の関数を呼ばず、公開ヘッダの型だけを使う（`amark` と `amark_internal` のどちらと組み合わせても重複しない）。`Naos::naos` をリンクする。
+- 静的ライブラリ `amark_test_support`。Amark の関数を呼ばず、公開ヘッダの型だけを使う（`amark` と `amark_internal` のどちらと組み合わせても重複しない）。`Naos::naos` をリンクするため、`AMARK_BUILD_TESTS` のときだけ定義し、ファジングターゲットにはリンクしない（FuzzInfra の「ファジング用の補助ライブラリの規則」）。
 - 確保ごとに小さな前置きの領域を付け、サイズと目印を記録する。見知らぬポインタの解放や二重解放を検出して `NAOS_FAIL` にする。
 
 **Contracts**: Service [x]
@@ -746,7 +760,18 @@ amark_test_oom_result amark_test_oom_sweep(amark_test_oom_scenario scenario, voi
 #endif
 ```
 - 可視性の属性は C99 の範囲外なので、この条件付きの定義だけを例外として認める。他のファイルでコンパイラ固有の機能を使わない。
-- `amark.h` は `export.h`、`version.h`、`status.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h` をこの順に include する。後続の spec は自分の公開ヘッダをここに足す。
+- `amark.h` の正規の include の順（9.7）：この spec が `amark.h` を所有し、全 spec の公開ヘッダを並べる唯一の順を次のとおり定める。後続の spec は「この spec の正規の順」の自分の群の位置に、群の中の順のとおりに追加する（「`extension.h` の後に」のような個別の指定ではなく、この順を参照する）。群の中の順は所有する spec の依存の順（左は右を include しない）に合わせてある。
+
+| 群 | 所有する spec | ヘッダ（この順） |
+|---|---|---|
+| 1. 共通ランタイム | `foundation` | `export.h`、`version.h`、`status.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h` |
+| 2. 構文木 | `syntax-tree` | `node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h` |
+| 3. レンダラの共通部と HTML | `html-renderer` | `render.h`、`html.h` |
+| 4. パーサ | `block-parser`、`inline-parser` | `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`（`inline-parser`）、`commonmark.h` |
+| 5. Markdown の出力 | `markdown-renderer` | `markdown.h` |
+
+  - 各公開ヘッダは単独でコンパイルできる（4.9）ので、この順は正しさのためではなく、`amark.h` の内容を一意にして並行する spec の追加の衝突を避けるためのもの。実装の時点でまだ存在しない群は飛ばし、後から来る spec はその群の位置に挿入する（末尾に足すとは限らない）。
+  - 新しい公開ヘッダを持つ spec が増えるとき、またはこの表にない公開ヘッダを足すときは、この表の改訂として依頼する（Revalidation Trigger）。
 
 #### Version
 
