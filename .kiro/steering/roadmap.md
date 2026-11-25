@@ -60,12 +60,16 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
     - 拡張オートリンク（きっかけの文字がないインライン構文）
     - タグフィルタ（レンダラ側での出力の差し替え）
   - **エラー処理とメモリ管理の規約**（`foundation`）：すべての spec が同じ規約に従う。
+- **spec 間の依存の理由**（spec の作成と整合性レビューで判明したもの）：
+  - block-parser → html-renderer：CommonMark の構文セットに `amark.core.html` を含め、GFM 相当のテストで HTML 側のテスト用拡張（`amark_test_html_gfm`）を使う。
+  - markdown-renderer → block-parser / html-renderer：`render.h` の出力 API を共有し、block-parser の `commonmark.c`（`amark.core.markdown` の追加）と inline-parser の `gfm_set.c`（Markdown 側の部品）に追記する。
+  - 出力はノード型に結び付け、組み込みのノード型の出力はコア出力拡張（`amark.core.html`、`amark.core.markdown`）が持つ。
 - **Revisiting boundaries**：spec の境界は作業を分けるための手段であり、設計の制約ではない。後の spec で前の spec の API に問題が見つかったら、その spec に戻って直す。
 
 ## Specs (dependency order)
 - [ ] foundation -- CMake ビルド（静的/動的ライブラリ、install、パッケージ設定）、Naos によるテスト基盤、3 OS の CI/CD、ライセンス、共通ランタイム（アロケータ、バッファ、エラー、バージョン、UTF-8 ユーティリティ）。Dependencies: none
 - [ ] syntax-tree -- ノードモデル、ロスレス構文トークン、走査と編集の API、編集済みの追跡、拡張レジストリ（ノード型の登録と構文セット）。Dependencies: foundation
 - [ ] html-renderer -- 構文木から HTML への出力、CommonMark 互換、安全モード、ノード型ごとの HTML 出力のスロット。Dependencies: syntax-tree
-- [ ] block-parser -- パーサの入口、ブロック構文エンジンと公開ブロック構文 API、文書の後処理フック、CommonMark の全ブロック構文とリンク参照定義、構文トークンの記録。Dependencies: syntax-tree
+- [ ] block-parser -- パーサの入口、ブロック構文エンジンと公開ブロック構文 API、文書の後処理フック、CommonMark の全ブロック構文とリンク参照定義、構文トークンの記録。Dependencies: syntax-tree, html-renderer
 - [ ] inline-parser -- インライン構文エンジン（区切り文字の処理を含む）と公開インライン構文 API、CommonMark の全インライン構文、CommonMark spec 100% の準拠テスト、拡張 API の表現力を検証するテスト専用拡張。Dependencies: block-parser, html-renderer
-- [ ] markdown-renderer -- ロスレスな Markdown への書き戻し、編集した部分の局所的な出力（意味を保つ。方式は design で決める）、新しいノードの出力、ノード型ごとの Markdown 出力のスロット、往復と意味の保存のプロパティテスト。Dependencies: inline-parser
+- [ ] markdown-renderer -- ロスレスな Markdown への書き戻し、編集した部分の局所的な出力（意味を保つ。方式は design で決める）、新しいノードの出力、ノード型ごとの Markdown 出力のスロット、往復と意味の保存のプロパティテスト。Dependencies: inline-parser, block-parser, html-renderer

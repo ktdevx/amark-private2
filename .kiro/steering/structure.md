@@ -6,8 +6,10 @@
 
 - 依存の方向は、次の一方向に限る。
   - 共通ランタイム（runtime）→ 構文木（tree）→ パースエンジン（parse）とレンダラ（render）→ 組み込みの構文（syntax）
-- エンジンは、個別の構文の知識を持たない。CommonMark の各構文は、構文ごとに 1 つのファイルとして実装する。そのファイルが、パースの規則と HTML/Markdown の出力をまとめて持つ。
-- 「構文を 1 つ追加する」作業が、1 つのファイルとその登録で終わる状態を保つ。
+- エンジンは、個別の構文の知識を持たない。CommonMark の各構文は、構文ごとに 1 つのファイルとして実装し、パースの規則を持つ（`commonmark.*` 拡張）。
+- 出力は構文ではなく**ノード型**に結び付ける。組み込みのノード型の HTML/Markdown 出力は、出力ごとの「コア出力拡張」（`amark.core.html`、`amark.core.markdown`）にまとめる。複数の構文が同じノード型を作る（ATX と setext の見出し、インデントとフェンスのコードブロック）ため、構文を無効化しても出力が消えないようにするためである。
+- 拡張が**新しいノード型**を足す場合は、その拡張がパースの規則と出力をまとめて持てる。「構文を 1 つ追加する」作業が、1 つの拡張とその登録で終わる状態を保つ。
+- CommonMark の構文セットは `amark.core` → `amark.core.html` → `amark.core.markdown` → ブロック構文 → インライン構文 の順に組み立てる。
 
 > 現時点ではコードはまだない。以下は、これから作るときに従う規約である。実装時に合理的な理由があって変える場合は、このファイルを更新する。
 
@@ -25,13 +27,13 @@
 - `src/tree/`：ノード、構文トークン、編集、拡張のレジストリ
 - `src/parse/`：ブロックとインラインのエンジン
 - `src/render/`：HTML と Markdown のエンジン
-- `src/syntax/`：CommonMark の組み込み構文（1 つの構文につき 1 ファイル。例：`atx_heading.c`、`emphasis.c`）
+- `src/syntax/`：CommonMark の組み込み構文（1 つの構文につき 1 ファイル。例：`atx_heading.c`、`emphasis.c`）と、コア出力拡張（`html_*.c`、`md_*.c`）。同じ層の中だけで共有する内部ヘッダ（`*_internal.h`）は使ってよい。
 
 内部でだけ使うヘッダは、`src/` の中に置く。ファイル名には `_internal.h` などの接尾辞を付けて、公開ヘッダと区別する。
 
 ### テスト
 **Location**：`tests/`
-**Purpose**：Naos のテストを置く。モジュールごとのテスト（`tests/tree/`、`tests/parse/` など）、CommonMark の準拠テスト（`tests/spec/`。spec.txt とテストを生成するスクリプト）、往復のプロパティテスト、テスト専用の検証用拡張（`tests/extensions/`。GFM 相当）に分ける。
+**Purpose**：Naos のテストを置く。モジュールごとのテスト（`tests/tree/`、`tests/parse/` など）、CommonMark の準拠テスト（`tests/spec/`。spec.txt とテストを生成するスクリプト）、往復のプロパティテスト、テスト専用の GFM 相当の検証用拡張に分ける。検証用拡張は、その部品を使う spec のテストディレクトリに置く（HTML 側：`tests/html/support/`、ブロック側：`tests/parse/`、インライン側と組み合わせ：`tests/extensions/`、Markdown 側：`tests/markdown/support/`）。fuzz からも使う部品は Naos に依存させない。複数のテストで共有する生成スクリプトなどは `tests/support/` に置く。
 
 ### ファジングとベンチマーク
 **Location**：`fuzz/`、`bench/`
@@ -72,7 +74,7 @@
 ## Code Organization Principles
 
 - **下位のレイヤーは上位のレイヤーを参照しない**。例えば、tree は parse や render を知らない。
-- **組み込みの構文も公開 API だけを使う**。`src/syntax/` から `src/parse/` や `src/render/` の内部ヘッダに依存するのは禁止する。必要なら API を公開する。
+- **組み込みの構文も公開 API だけを使う**。`src/syntax/` から `src/tree/`・`src/parse/`・`src/render/` の内部ヘッダに依存するのは禁止する（`src/syntax/` 内の `*_internal.h` は可）。必要なら API を公開する。
 - **すべてのソースファイルの先頭にライセンスヘッダを付ける**。
 
   ```c
