@@ -127,7 +127,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：インフラはファイル単位で責務を分ける（ビルドの中核、パッケージ、テスト、テスト生成、ファジング、検査、ワークフロー）。共通ランタイムは 1 つの機能につき 1 つの公開ヘッダと 1 つのソースにする。
-- Steering compliance：C99、`amark_` / `AMARK_` 接頭辞、`AMARK_API`、既定で hidden の可視性、不透明型、アロケータの経由、エラーコード、`include/amark/`、`src/runtime/`、`_internal.h`、`amark__` 接頭辞、ライセンスヘッダ。
+- Steering compliance：C99、`amark_` / `AMARK_` 接頭辞、`AMARK_API`、既定で hidden の可視性、不透明型、アロケータの経由、エラーコード、`include/amark/`、`src/runtime/`、`_internal.h`、ライセンスヘッダ。
 
 ### Technology Stack
 
@@ -611,7 +611,7 @@ amark_add_fuzzer(<name>
 
 #### SymbolCheck、LicenseCheck、HeaderChecks
 
-- **SymbolCheck**（2.4, 4.10, 4.12, 9.3）：動的版のときだけ `abi.exported_symbols` を登録する。ELF と Mach-O では `CMAKE_NM`（Linux は `-D --defined-only`、macOS は `-gU` で、先頭の `_` を除く）、Windows では `dumpbin /exports`、`llvm-readobj --coff-exports`、`CMAKE_OBJDUMP -p` のうち見つかったもので一覧を取る。すべてのシンボルが `^amark_[a-z0-9][a-z0-9_]*$` に一致し、`amark__` で始まらないことを確かめる。ツールがなければ `AMARK_SKIP:` でスキップ。
+- **SymbolCheck**（2.4, 4.10, 4.12, 9.3）：動的版のときだけ `abi.exported_symbols` を登録する。ELF と Mach-O では `CMAKE_NM`（Linux は `-D --defined-only`、macOS は `-gU` で、先頭の `_` を除く）、Windows では `dumpbin /exports`、`llvm-readobj --coff-exports`、`CMAKE_OBJDUMP -p` のうち見つかったもので一覧を取る。すべてのシンボルが `^amark_[a-z0-9][a-z0-9_]*$` に一致し、`include/amark/` の公開ヘッダで `AMARK_API` を付けて宣言された関数の名前に含まれることを確かめる（内部の関数も `amark_` で始まるので、接頭辞だけでは区別できない）。関数の名前は、ヘッダの `AMARK_API` から最初の `(` までの、最後の識別子として取り出す（戻り値の型が `amark_` で始まる場合と、宣言が複数行にわたる場合を含む）。1 つも取り出せなければ失敗する。ツールがなければ `AMARK_SKIP:` でスキップ。
 - **LicenseCheck**（8.3, 8.4）：`lint.license_headers`。`include/`、`src/`、`tests/`、`fuzz/`、`bench/`、`tools/` の `*.c`、`*.h`、`*.cpp`、`*.inc` を調べ、先頭の 2 行が次と一致することを確かめる。`data/` と `corpus/` の下は対象外。欠けているファイルをすべて列挙して失敗する。
   ```c
   /* SPDX-License-Identifier: MIT
@@ -720,7 +720,7 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 ### Runtime
 
 #### 公開 API の共通の規約（Error conventions を含む）
-- 公開の関数と型は `amark_`、マクロと定数は `AMARK_`、モジュールをまたぐ内部の関数は `amark__`。typedef した型の名前は末尾に `_t` を付ける（構造体と列挙のタグには付けない）。公開の関数にはすべて `AMARK_API` を付ける。
+- 公開の関数と型、モジュールをまたぐ内部の関数と型は `amark_`、マクロと定数は `AMARK_`。内部のものは内部ヘッダだけで宣言し、`AMARK_API` を付けない。公開の名前と重複させない。typedef した型の名前は末尾に `_t` を付ける（構造体と列挙のタグには付けない）。公開の関数にはすべて `AMARK_API` を付ける。
 - 公開ヘッダは `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS`（C++ のときの `extern "C"`）で宣言を囲む。インクルードガードは `AMARK_<NAME>_H`。
 - 失敗しうる関数は `amark_error_t` を返す。結果は最後の引数の出力引数（名前は `out_` で始める）で返す。
 - 失敗したとき：操作の対象のオブジェクトは呼び出し前の有効な状態のまま（強い保証）。オブジェクトのポインタを返す出力引数には NULL を入れる。それ以外の出力引数は関数ごとに文書化する。
@@ -862,8 +862,8 @@ AMARK_API void amark_free(void *ptr);
 
 **内部の契約**（`src/runtime/alloc_internal.h`）
 ```c
-bool amark__size_add(size_t a, size_t b, size_t *out);   /* 桁あふれなら false */
-bool amark__size_mul(size_t a, size_t b, size_t *out);
+bool amark_size_add(size_t a, size_t b, size_t *out);   /* 桁あふれなら false */
+bool amark_size_mul(size_t a, size_t b, size_t *out);
 ```
 
 **Implementation Notes**
@@ -906,8 +906,8 @@ AMARK_API amark_error_t amark_buffer_detach(amark_buffer_t *buffer, char **out_d
 **内部の契約**（`src/runtime/buffer_internal.h`）
 ```c
 struct amark_buffer { char *data; size_t length; size_t capacity; };
-void amark__buffer_init(amark_buffer_t *buffer); /* 確保しない */
-void amark__buffer_destroy(amark_buffer_t *buffer);
+void amark_buffer_init(amark_buffer_t *buffer); /* 確保しない */
+void amark_buffer_destroy(amark_buffer_t *buffer);
 ```
 - 内部のモジュールは、構造体に `amark_buffer_t` を値で埋め込み、公開の追加の関数をそのまま使える。
 
@@ -964,13 +964,13 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 **Contracts**: Batch [x]
 - Trigger：保守者が手で実行する（`python3 tools/gen_unicode_tables.py --ucd-dir <dir> [--check]`。`--fetch` で unicode.org から固定の版の `UnicodeData.txt` を取得する）。
 - Input：`UnicodeData.txt`（範囲の項目 `<..., First>` / `<..., Last>` を展開する）。
-- Output：`src/runtime/unicode_tables.inc`（ライセンスヘッダ、Unicode の版、生成の手順を書いたコメント、`static const amark__unicode_range_t amark__unicode_zs[]`、`amark__unicode_punct[]`）。`--check` は生成結果と既存のファイルを比べ、違えば非 0 で終わる。
+- Output：`src/runtime/unicode_tables.inc`（ライセンスヘッダ、Unicode の版、生成の手順を書いたコメント、`static const amark_unicode_range_t amark_unicode_zs[]`、`amark_unicode_punct[]`）。`--check` は生成結果と既存のファイルを比べ、違えば非 0 で終わる。
 - 拡張：表の定義は、スクリプト内の「名前とカテゴリの集合」の一覧で決まる。後続の spec は一覧に項目を足すか、別の UCD のファイル（`CaseFolding.txt` など）を読む生成の関数を足して、同じ出力ファイルか別の `.inc` に書き出す。`block-parser` が `CaseFolding.txt` と `case_fold_tables.inc` を、同じ方式の別のスクリプトで文字参照の表を追加する予定（Downstream Extension Points）。追加した生成の関数も `--check` と Unicode の版の照合の対象にする。
 - Unicode の版はスクリプトの定数 1 か所と `unicode.h` のマクロで持ち、スクリプトは両者が一致しなければ失敗する。
 
 ## Data Models
 - 永続的なデータはない。共通ランタイムの状態は `amark_buffer_t`（State model は Buffer を参照）と、グローバルのアロケータの設定（`amark_allocator_t` 1 つ）だけ。
-- Unicode の範囲の表：`typedef struct { uint32_t first; uint32_t last; } amark__unicode_range_t;` の昇順で重ならない配列。隣り合う範囲は生成時に結合する。
+- Unicode の範囲の表：`typedef struct { uint32_t first; uint32_t last; } amark_unicode_range_t;` の昇順で重ならない配列。隣り合う範囲は生成時に結合する。
 
 ## Error Handling
 
@@ -999,7 +999,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 
 ### Integration Tests（CTest）
 - `package.*`：4 つの取り込み方法と、種類の指定がない場合、要求した種類と一致しない場合（3.2–3.4, 3.6, 3.7, 1.5, 4.11）。
-- `abi.exported_symbols`：動的版のエクスポートが `amark_` だけ（2.4, 4.10）。
+- `abi.exported_symbols`：動的版のエクスポートが、公開ヘッダで `AMARK_API` を付けて宣言された `amark_` の関数だけ（2.4, 4.10）。
 - `amark_header_check` と `cxx_include_test`：公開ヘッダの単独コンパイルと C++ からのリンク（4.9, 9.2）。
 - `lint.license_headers`：ライセンスヘッダの欠落の検出（8.3, 8.4）。
 - `testgen_test`：NUL、CR、不正な UTF-8、`;`、`[`、LF で終わらない最後の行を含むデータが、生成されたテストの中でバイト単位で一致すること（4.7）。

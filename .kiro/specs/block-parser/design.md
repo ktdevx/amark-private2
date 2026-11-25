@@ -139,7 +139,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（`src/parse/`）、構文（`src/syntax/`）、文字データ（`src/runtime/`）。構文の知識はエンジンに置かない。
-- Existing patterns preserved：エラーコードと出力引数、強い保証（パーサの失敗だけは例外。下記）、不透明型、`struct_size`、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、`amark__` の内部関数、ライセンスヘッダ。
+- Existing patterns preserved：エラーコードと出力引数、強い保証（パーサの失敗だけは例外。下記）、不透明型、`struct_size`、グローバルのアロケータの経由、その設定のほかにグローバルな可変状態なし、内部関数も `amark_`、ライセンスヘッダ。
 - Steering compliance：構文ごとに 1 ファイル、組み込みも公開 API だけ、parse → tree の一方向。
 
 ### Technology Stack
@@ -396,7 +396,7 @@ stateDiagram-v2
 | 10.4 | 全か無か | Fragment | `amark_node_import_children`（上流） | — |
 | 10.5 | 挿入の記録 | Fragment | `syntax-tree` の挿入の規則 | — |
 | 11.1 | 追跡を有効にして返す | ParserAPI | `amark_document_set_edit_tracking` | パースの全体 |
-| 11.2 | 不変条件 | 全コンポーネント | `amark__tree_check`（テスト） | — |
+| 11.2 | 不変条件 | 全コンポーネント | `amark_tree_check`（テスト） | — |
 | 11.3 | パーサからの独立 | ParserAPI | `amark_document_take_syntax_set`（上流） | — |
 | 12.1, 12.2 | 深さの上限と劣化 | BlockEngine | `max_container_depth` | 1 行の処理 |
 | 12.3 | 計算量 | BlockEngine, BlockLines, LabelMap | 内部のカウンタ | — |
@@ -448,7 +448,7 @@ stateDiagram-v2
 | Requirements | 1.1–1.8, 2.7, 4.8, 5.2, 5.4, 5.5, 6.1, 6.4, 6.6, 11.1–11.3 |
 
 **Responsibilities & Constraints**
-- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）を受け取る。文書を作り（`amark_document_new`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_new` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_new_take_syntax_set` だけが行う。これは `amark_parser_new` と同じ内部の生成（`amark__parser_create`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_new_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
+- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）を受け取る。文書を作り（`amark_document_new`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_new` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_new_take_syntax_set` だけが行う。これは `amark_parser_new` と同じ内部の生成（`amark_parser_create`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_new_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
 - 入力：バイト列をソースに追加し（`amark_document_append_source`）、LineReader が切り出した完全な行を BlockEngine に渡す。
 - 終了：最後の行を処理し、開いているブロックをすべて閉じる → 後処理（インラインの前）→ インラインの段階 → 後処理（インラインの後）→ パースの状態の `destroy` とパースの間のデータの解放 → 追跡の有効化（オプションで無効にしない限り）→ 文書を返す。構文セットの所有権は生成のときに文書へ渡してあるので、返した文書はそれを保持し続け、パーサと独立する（11.3）。
 - インラインの段階：根から前順にたどり、インラインの入力が登録されたノードごとに `delegate->parse` を呼ぶ。`begin` は最初の呼び出しの前に 1 回、`end` は最後（失敗のときも）に 1 回。
@@ -530,9 +530,9 @@ AMARK_API const amark_inline_delegate_t *amark_inline_delegate_plain(void);
 **Contracts**: Service [x] / State [x]
 ```c
 /* src/parse/parse_internal.h */
-typedef struct amark__line { size_t start; size_t content_end; size_t ending_length; } amark__line_t;
-bool amark__line_reader_next(amark__line_reader_t *reader, const char *data, size_t length, bool final,
-                             amark__line_t *out_line);
+typedef struct amark_line { size_t start; size_t content_end; size_t ending_length; } amark_line_t;
+bool amark_line_reader_next(amark_line_reader_t *reader, const char *data, size_t length, bool final,
+                            amark_line_t *out_line);
 ```
 
 #### BlockEngine
@@ -557,8 +557,8 @@ bool amark__line_reader_next(amark__line_reader_t *reader, const char *data, siz
 **Contracts**: Service [x]
 ```c
 /* src/parse/parse_internal.h */
-amark_error_t amark__engine_process_line(amark_parser_t *parser, const amark__line_t *line);
-amark_error_t amark__engine_finish(amark_parser_t *parser);
+amark_error_t amark_engine_process_line(amark_parser_t *parser, const amark_line_t *line);
+amark_error_t amark_engine_finish(amark_parser_t *parser);
 ```
 
 #### BlockContext
@@ -1086,7 +1086,7 @@ typedef struct amark_test_parse_spec {
     uint32_t dump_flags;                  /* AMARK_DUMP_TOKENS など */
 } amark_test_parse_spec_t;
 
-/* input を一括でパースし、(1) amark_document_check_tokens が OK、(2) amark__tree_check が成功（INTERNAL のときだけ）、
+/* input を一括でパースし、(1) amark_document_check_tokens が OK、(2) amark_tree_check が成功（INTERNAL のときだけ）、
    (3) 1 バイトずつ・2 分割・ランダムな区切りの逐次の入力のダンプ（spec->dump_flags）が一括と一致、を確かめる。
    すべて通れば AMARK_ERROR_NONE を返し、一括でパースした文書を *out_document に渡す（呼び出し側が amark_document_free で解放する）。
    パースが失敗したらそのエラーコードを、検査が失敗したら入力・失敗した検査・両方のダンプを表示して
@@ -1185,22 +1185,22 @@ graph TB
 ### Logical Data Model（内部）
 ```c
 /* src/parse/parse_internal.h */
-typedef struct amark__open_block {
+typedef struct amark_open_block {
     amark_node_t *node;
     const amark_block_syntax_t *handler;
     void *block_data;
     bool last_line_blank;
     size_t open_line;
-} amark__open_block_t;
+} amark_open_block_t;
 
-typedef struct amark__node_entry {          /* ノードを鍵とする内部の表の要素（開いた順の配列 ＋ 索引） */
+typedef struct amark_node_entry {          /* ノードを鍵とする内部の表の要素（開いた順の配列 ＋ 索引） */
     const amark_node_t *node;
     const amark_block_syntax_t *handler;
     void *block_data;
     amark_block_line_info_t *lines; size_t line_count, line_capacity;
     void **consumer_states; size_t *consumer_scanned; uint8_t *consumer_done;
     amark_text_input_t *inline_input;
-} amark__node_entry_t;
+} amark_node_entry_t;
 
 struct amark_parser {
     const amark_syntax_set_t *syntax;
@@ -1208,11 +1208,11 @@ struct amark_parser {
     amark_parse_options_t options;
     amark_document_t *document;
     amark_source_id_t source;
-    amark__line_reader_t reader;
-    amark__open_block_t *chain; size_t chain_length, chain_capacity, container_depth;
+    amark_line_reader_t reader;
+    amark_open_block_t *chain; size_t chain_length, chain_capacity, container_depth;
     const amark_block_syntax_t **candidates; size_t candidate_count;
     struct amark_parse_context *ctx;        /* 拡張の状態、表、後処理の一覧 */
-    enum { AMARK__FEEDING, AMARK__FINISHED, AMARK__FAILED } state;
+    enum { AMARK_FEEDING, AMARK_FINISHED, AMARK_FAILED } state;
     size_t stat_continue_calls, stat_start_calls, stat_consumer_lines;   /* INTERNAL のテスト用 */
 };
 ```
@@ -1232,7 +1232,7 @@ struct amark_parser {
 - **規定しない使い方（文書化する）**：コールバックの外での文脈の使用、インラインの入力を持つノードを `discard` / `move` なしに後処理で解放すること、パースの間の利用者による木の変更（後処理を除く）。
 
 ### Monitoring
-- テストとファジングで、ロスレス性の検証（`amark_document_check_tokens`）と木の不変条件の検査（`amark__tree_check`）を常に行う。INTERNAL のカウンタで計算量を見る。
+- テストとファジングで、ロスレス性の検証（`amark_document_check_tokens`）と木の不変条件の検査（`amark_tree_check`）を常に行う。INTERNAL のカウンタで計算量を見る。
 
 ## Testing Strategy
 
@@ -1264,7 +1264,7 @@ struct amark_parser {
 - **bench**：`block_pathological` が上記の入力の大きさを 1、2、4、8 倍にして時間を表示する（CI では実行しない）。`bench/CMakeLists.txt` は `amark_add_bench(<name> SOURCES <source>... [INTERNAL])` を定義する（実行ファイルを作り、`amark_target_defaults()` を適用し、`amark`（`INTERNAL` なら `amark_internal`）をリンクし、出力を `${PROJECT_BINARY_DIR}/bin` に置く。CTest には登録しない）。この spec は `amark_add_bench(block_pathological SOURCES block_pathological.c INTERNAL)` を置き、`inline-parser` などは同じ形の 1 行を追記する。
 
 ## Security Considerations
-- 信頼できない入力に対して、範囲の検査、サイズの計算の桁あふれの検査（`amark__size_add` / `amark__size_mul`）、再帰の不使用、深さの上限、決定的な平衡木（衝突を狙った入力への耐性）で、時間とメモリを入力の大きさにほぼ比例させる。
+- 信頼できない入力に対して、範囲の検査、サイズの計算の桁あふれの検査（`amark_size_add` / `amark_size_mul`）、再帰の不使用、深さの上限、決定的な平衡木（衝突を狙った入力への耐性）で、時間とメモリを入力の大きさにほぼ比例させる。
 - NUL は値の中で U+FFFD に置き換える（CommonMark 2.3）。HTML の安全性（生の HTML の出力の抑制）は `html-renderer` の責務。
 
 ## Performance & Scalability

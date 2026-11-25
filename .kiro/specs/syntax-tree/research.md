@@ -55,7 +55,7 @@
 - **Sources Consulted**：`.kiro/specs/foundation/design.md`
 - **Findings**：
   - エラーコード（`AMARK_ERROR_NONE`、`OUT_OF_MEMORY`、`INVALID_ARGUMENT`、`OVERFLOW`、`LIMIT_EXCEEDED`、`INVALID_STATE`）、出力引数は最後で `out_` で始める、失敗時は強い保証、解放の関数は NULL を受け付ける、公開の構造体は先頭に `struct_size`。
-  - 確保はグローバルのアロケータ（`amark_malloc` など）で行い、オブジェクトはアロケータを持たない。`amark_buffer_t` は内部で埋め込める（`buffer_internal.h` の `amark__buffer_init` / `amark__buffer_destroy`）。
+  - 確保はグローバルのアロケータ（`amark_malloc` など）で行い、オブジェクトはアロケータを持たない。`amark_buffer_t` は内部で埋め込める（`buffer_internal.h` の `amark_buffer_init` / `amark_buffer_destroy`）。
   - `amark_utf8_validate` で UTF-8 を検査できる。
   - テストは `amark_add_test(... [INTERNAL] [LIBRARIES ...])`、確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP`、比較は `AMARK_CHECK_BYTES_EQ` / `AMARK_CHECK_BUFFER_EQ`。ファジングは `amark_add_fuzzer`。
   - `amark_test_support` は Amark の関数を呼ばない約束（`amark` と `amark_internal` の両方と組み合わせるため）。

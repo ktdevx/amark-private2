@@ -95,12 +95,12 @@ graph TB
     RenderEngine --> Runtime
 ```
 
-**Dependency direction（`src/render/` の中）**：`markdown_escape` → `markdown_source` → `markdown_lines` → `markdown_inline` → `markdown_blocks` → `markdown_dispatch` → `markdown_render`。左のファイルは右のファイルの関数を呼ばない。`markdown_internal.h` は構造体と、ファイルをまたぐ `amark__md_*` の宣言だけを持つ。`src/syntax/md_*.c` は `markdown.h` を通してだけエンジンを使う。違反はレビューでエラーとする。
+**Dependency direction（`src/render/` の中）**：`markdown_escape` → `markdown_source` → `markdown_lines` → `markdown_inline` → `markdown_blocks` → `markdown_dispatch` → `markdown_render`。左のファイルは右のファイルの関数を呼ばない。`markdown_internal.h` は構造体と、ファイルをまたぐ `amark_md_*` の宣言だけを持つ。`src/syntax/md_*.c` は `markdown.h` を通してだけエンジンを使う。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Existing patterns preserved：`html-renderer` の Renderer slot conventions（ノード型ごとのスロットとフックのスロット、名前でのノード型の指定、構文セットの順の連鎖と `render_next`、子の省略、拡張ごとの状態、`begin` は順・`end` と `finish` は逆順、不透明な文脈、バッファと `amark_write_fn_t` の 2 つの入口、`struct_size` と未知のビットの拒否、組み込みの出力は 1 つの core 拡張）。`foundation` のエラーコード・アロケータ・`struct_size`。`syntax-tree` のトークンと編集の記録。
 - New components rationale：行（接頭辞）、葉（エスケープと区切り文字）、ブロックの区切り（空行）の 3 つの境目は、ノードごとの処理では判断できないため、エンジンのコンポーネントにする。
-- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし、ライセンスヘッダ、組み込みも公開 API だけを使う、spec の境界を守るための回避策を作らない（上流の変更として示す）。
+- Steering compliance：C99、`amark_` / `AMARK_`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし、ライセンスヘッダ、組み込みも公開 API だけを使う、spec の境界を守るための回避策を作らない（上流の変更として示す）。
 
 ### ノードの扱いの判定
 エンジンは、各ノードについて次の印（`amark_markdown_node_state` で処理にも渡す）を求める。
@@ -147,7 +147,7 @@ graph TB
 include/amark/
 └── markdown.h               # オプション、報告、入口、スロットの構造体、文脈の API、ユーティリティ、core 拡張の取得、CommonMark の補助
 src/render/
-├── markdown_internal.h      # struct amark_markdown_context、断片、行、ノードの情報の表、ファイル間の amark__md_* の宣言
+├── markdown_internal.h      # struct amark_markdown_context、断片、行、ノードの情報の表、ファイル間の amark_md_* の宣言
 ├── markdown_escape.c        # MdEscape：エスケープと文字参照のユーティリティ（文脈なしの純粋な関数）、文字の分類の判定
 ├── markdown_source.c        # MdSource：部分木のトークンの出力順の列挙、元の行の特定、タブの元の幅、文書の改行コードの判定
 ├── markdown_lines.c         # MdLines：出力先、行のため置き、アンカー、接頭辞の積み重ねと選択、部分的なタブ、列の規則、改行
@@ -367,7 +367,7 @@ graph TB
 - `amark_markdown_escape`：`chars`（256 ビットの集合）に含まれるバイトのうち、ASCII の句読点は `\` を前に置き、それ以外（空白、英数字など）は 10 進の数値文字参照 `&#N;` にする。UTF-8 の多バイトの並びは変えない。
 - `amark_markdown_char_ref`：符号位置を `&#N;` で追加する（範囲外とサロゲートは `AMARK_ERROR_INVALID_ARGUMENT`）。
 - 失敗時は出力のバッファを呼び出し前の長さに戻す。数の書式は内部の 10 進の変換で書く（ロケールに依存しない）。
-- 内部の契約（`markdown_internal.h`）：`bool amark__md_is_ascii_punct(unsigned char c)`、`size_t amark__md_char_ref_length(uint32_t cp)`。
+- 内部の契約（`markdown_internal.h`）：`bool amark_md_is_ascii_punct(unsigned char c)`、`size_t amark_md_char_ref_length(uint32_t cp)`。
 
 **Contracts**: Service [x]
 ```c
@@ -394,10 +394,10 @@ AMARK_API amark_error_t amark_markdown_char_ref(amark_buffer_t *out, uint32_t co
 **Contracts**: Service [x]
 ```c
 /* src/render/markdown_internal.h */
-amark_error_t amark__md_cursor_init(amark__md_cursor_t *cursor, const amark_node_t *root, amark_markdown_context_t *ctx);
-bool amark__md_cursor_next(amark__md_cursor_t *cursor, const amark_node_t **out_owner, amark_token_t *out_token);
-size_t amark__md_line_start(const amark_document_t *doc, amark_source_id_t source, size_t offset);
-unsigned amark__md_tab_width(const amark_document_t *doc, amark_source_id_t source, size_t offset);
+amark_error_t amark_md_cursor_init(amark_md_cursor_t *cursor, const amark_node_t *root, amark_markdown_context_t *ctx);
+bool amark_md_cursor_next(amark_md_cursor_t *cursor, const amark_node_t **out_owner, amark_token_t *out_token);
+size_t amark_md_line_start(const amark_document_t *doc, amark_source_id_t source, size_t offset);
+unsigned amark_md_tab_width(const amark_document_t *doc, amark_source_id_t source, size_t offset);
 ```
 
 #### MdLines
@@ -415,7 +415,7 @@ unsigned amark__md_tab_width(const amark_document_t *doc, amark_source_id_t sour
 - `amark_markdown_write_prefix_tokens` が書くトークン：`FIRST` では、コンテナの最初の元の行の接頭辞のトークン（その行がアンカーでなくても、表記の希望として使える）。`NEXT` と `BLANK` では、行のアンカーの元の行にコンテナが持つ接頭辞のトークン（`LAZY_CONTINUATION` を含む）。ただし、それがコンテナの最初の元の行のものなら書かない。同じ元の行をアンカーにできるのは最初の 1 つの出力の行だけ（2 つ目からはアンカーなしとして扱う）。書くトークンがなければ何も書かず、`*out_written` を偽にする。
 - 葉の続く行の字下げ：作り直す葉の中身で改行の後に始まる行がアンカーを持ち、葉がその元の行の先頭に自分の接頭辞でない `SPACE` のトークン（段落の行頭の字下げなど）を持てば、接頭辞の後にそれを書く（中身の最初の行の字下げは、処理が `amark_markdown_write_own_tokens` で書く）。
 - 部分的なタブ：同じタブのバイトの部分を、すべて元のトークンとして同じ行で続けて出すときだけタブのバイトを 1 回出す。それ以外は、出す部分を `tab_columns` 個の空白にする。
-- 列の規則：行の中で、合成した接頭辞か、元と異なる長さの断片の後ろに来る、列に依存するトークン（`SPACE` と `PARTIAL_TAB` と接頭辞のトークン）のタブは、`amark__md_tab_width` の元の幅の空白にする（8.4）。テキストとコードの中身のタブはそのまま。
+- 列の規則：行の中で、合成した接頭辞か、元と異なる長さの断片の後ろに来る、列に依存するトークン（`SPACE` と `PARTIAL_TAB` と接頭辞のトークン）のタブは、`amark_md_tab_width` の元の幅の空白にする（8.4）。テキストとコードの中身のタブはそのまま。
 - 合成した改行は、オプション（`DOCUMENT` は文書の改行コード、`LF`、`CRLF`）。
 - 内部のカウンタ（INTERNAL）：行の数、合成した接頭辞の数、元の表記の行の数。テスト用に、元の表記をそのまま出したブロックの（ノード、出力の範囲）を報告する追跡の関数を持つ。
 
@@ -650,7 +650,7 @@ typedef struct amark_markdown_hooks_slot {
 
   - `capacity`：`amark_inline_match_delimiters` は「長さの合計の半分（切り捨て）以上」を求める。フックは作業の配列（`amark_inline_run_t` を `count` 個、`amark_inline_run_match_t` を長さの合計の半分の個数）を、`amark_calloc` で確保して状態に持ち、葉の間で使い回して `finish` で解放する。受け取った `capacity`（長さの合計以上）は上流の要求を満たすので、上流の `INVALID_ARGUMENT` は起きない。写した `*out_count` は `capacity` 以下。
   - 失敗：確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`、上流の失敗はそのまま返す。`count` が 0 なら確保せず `*out_count = 0`。
-- 内部の契約：`amark__md_dispatch_build(ctx)`、`amark__md_dispatch_free(ctx)`、`amark__md_chain_of(ctx, type)`。
+- 内部の契約：`amark_md_dispatch_build(ctx)`、`amark_md_dispatch_free(ctx)`、`amark_md_chain_of(ctx, type)`。
 
 #### MdEngine
 
@@ -863,31 +863,31 @@ graph TB
 ### Logical Data Model（内部）
 ```c
 /* src/render/markdown_internal.h（要点） */
-typedef struct amark__md_piece {
+typedef struct amark_md_piece {
     size_t start, length;            /* 葉のバッファの中の位置 */
     uint8_t kind;                    /* TEXT、FIXED、MARKUP、DELIMITER、LINE_BREAK */
     uint8_t encoding;                /* 0：素、1：バックスラッシュ、2：文字参照（TEXT の各文字は別の配列） */
     const amark_node_t *owner;
     amark_source_id_t source; size_t origin;   /* 元の位置（なければ SIZE_MAX） */
     uint32_t delimiter;              /* DELIMITER のとき：区切りの表の添字 */
-} amark__md_piece_t;
+} amark_md_piece_t;
 
-typedef struct amark__md_info {     /* ノードの情報の表の要素 */
+typedef struct amark_md_info {     /* ノードの情報の表の要素 */
     const amark_node_t *node;
     uint32_t state;                  /* AMARK_MARKDOWN_STATE_* と、汚れた子孫を持つ印 */
     amark_source_id_t source;
     size_t first_offset, first_line, last_offset, last_line;
     size_t trailing_blank_lines, trailing_blank_offset;
-} amark__md_info_t;
+} amark_md_info_t;
 
 struct amark_markdown_context {
     const amark_document_t *document; const amark_node_t *root;
     amark_markdown_options_t options; /* 既定を補った値 */
-    amark__md_dispatch_t dispatch;    /* 連鎖の表、フックの一覧と状態 */
-    amark__md_info_t *info; size_t info_capacity;
-    amark__md_lines_t lines;         /* 出力先、現在の行、接頭辞の積み重ね */
-    amark__md_leaf_t leaf;           /* 断片、行の表示、区切りの表、要求 */
-    amark__md_call_t call;           /* 現在の呼び出しの文脈 */
+    amark_md_dispatch_t dispatch;    /* 連鎖の表、フックの一覧と状態 */
+    amark_md_info_t *info; size_t info_capacity;
+    amark_md_lines_t lines;         /* 出力先、現在の行、接頭辞の積み重ね */
+    amark_md_leaf_t leaf;           /* 断片、行の表示、区切りの表、要求 */
+    amark_md_call_t call;           /* 現在の呼び出しの文脈 */
     amark_error_t error; amark_markdown_report_t report;
 };
 ```

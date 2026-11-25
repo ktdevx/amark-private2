@@ -38,7 +38,7 @@
 - 木の変更（出力は木を変えない）、ノード型の登録とレジストリの API（`syntax-tree`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`。内部 API：`runtime/alloc_internal.h`（`amark__size_add`、`amark__size_mul`）、`runtime/buffer_internal.h`（`amark__buffer_init`、`amark__buffer_destroy`）。`src/render/` だけが内部 API を使う
+- `foundation` の公開 API：`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_destroy`）。`src/render/` だけが内部 API を使う
 - `syntax-tree` の公開 API：`node.h`、`document.h`、`extension.h`（`amark_syntax_set_find_node_type`、`amark_syntax_set_slot_count`、`amark_syntax_set_slot_at`、`amark_node_source_span`、`amark_document_position`、`amark_document_source_data`、属性とリテラルの取得関数）。`src/tree/` の内部ヘッダは使わない
 - テスト時：Naos、`amark_add_test()`、`amark_add_generated_tests()`、`AmarkTestGen.cmake`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`、`amark_test_allocator_t`）、`amark_test_tree`（`amark_test_tree_build`）、`amark_add_fuzzer()`
 - レイヤーの規則：`src/render/` は `src/syntax/` と `src/parse/` を参照しない。`src/syntax/html_*.c` は公開ヘッダだけを include する（`src/render/` の内部ヘッダを使わない）。公開ヘッダは他の公開ヘッダだけを include する
@@ -97,12 +97,12 @@ graph TB
     HtmlH --> RenderH
 ```
 
-**Dependency direction（`src/render/` の中）**：`html_escape.c` → `html_output.c` → `html_dispatch.c` → `html_render.c`。左のファイルは右のファイルの関数を呼ばない。`html_internal.h` は文脈の構造体と、ファイル間の `amark__html_*` の宣言を持つ。`src/syntax/html_blocks.c` と `html_inlines.c` → `html_core.c`（拡張の表）。`src/syntax/` から `src/render/` への依存は公開ヘッダ（`html.h`）だけ。違反はレビューでエラーとする。
+**Dependency direction（`src/render/` の中）**：`html_escape.c` → `html_output.c` → `html_dispatch.c` → `html_render.c`。左のファイルは右のファイルの関数を呼ばない。`html_internal.h` は文脈の構造体と、ファイル間の `amark_html_*` の宣言を持つ。`src/syntax/html_blocks.c` と `html_inlines.c` → `html_core.c`（拡張の表）。`src/syntax/` から `src/render/` への依存は公開ヘッダ（`html.h`）だけ。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Domain boundaries：エンジン（汎用）と組み込みの出力（個別のノード型）をレイヤーで分ける。エンジンの中は「書き出し」「スロットの解決」「たどりと文脈」に分ける。
 - Existing patterns preserved：`foundation` のエラーコード・出力引数・アロケータ・`struct_size`、`syntax-tree` のスロットの見出しと構文セットの順、`amark.core` が組み込みのノード型をまとめる形。
-- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ、組み込みも公開 API だけを使う。
+- Steering compliance：C99、`amark_` / `AMARK_`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ、組み込みも公開 API だけを使う。
 
 ### 組み込みの HTML 出力の登録の規則
 1. 組み込みの 19 のノード型の HTML の処理は、この spec が `src/syntax/html_blocks.c`（ブロックの 10 型）と `src/syntax/html_inlines.c`（インラインの 9 型）に実装し、`src/syntax/html_core.c` の構文拡張 `amark.core.html` のスロットとしてだけ登録する。処理の関数は公開しない（スロットを通してだけ使う）。
@@ -131,13 +131,13 @@ include/amark/
 ├── render.h              # amark_write_fn_t（レンダラが共有する出力先の書き出しの関数の型）
 └── html.h                # オプション、入口、スロットの構造体、出力の文脈の API、ユーティリティ、amark_html_core_extension()
 src/render/
-├── html_internal.h       # struct amark_html_context、連鎖の表、フックの記録、ファイル間の amark__html_* の宣言
+├── html_internal.h       # struct amark_html_context、連鎖の表、フックの記録、ファイル間の amark_html_* の宣言
 ├── html_escape.c         # HTML のエスケープ、href のエスケープ、危険な URL の判定（文脈を使わない純粋な関数）
 ├── html_output.c         # 出力先（バッファ／書き出しの関数と中継のバッファ）、分類つきの書き出し、フィルタの連鎖、cr の追跡、sourcepos の書き出し
 ├── html_dispatch.c       # スロットの検査、型の識別子ごとの連鎖の表とフックの一覧の構築と解放
 └── html_render.c         # 入口、オプションの検査、反復のたどり、深さごとの文脈、テキストだけのモード、render_next、入れ子の出力、フックと状態
 src/syntax/
-├── html_core_internal.h  # 19 のスロットの extern 宣言（amark__html_slot_<type>）。html_core.c だけが使う
+├── html_core_internal.h  # 19 のスロットの extern 宣言（amark_html_slot_<type>）。html_core.c だけが使う
 ├── html_core.c           # amark.core.html の構文拡張の表と amark_html_core_extension()
 ├── html_blocks.c         # document、block_quote、list、item、code_block、html_block、paragraph、heading、thematic_break、link_definition のスロット
 └── html_inlines.c        # text、softbreak、linebreak、code、html_inline、emph、strong、link、image のスロット（テキストだけのモードを含む）
@@ -322,7 +322,7 @@ AMARK_API bool amark_html_url_is_safe(const char *data, size_t length);   /* 危
 ```
 - Preconditions：`out` が NULL、または `data` が NULL で `length` が 0 でなければ `AMARK_ERROR_INVALID_ARGUMENT`。
 - Postconditions：失敗時（メモリ不足など）は `out` を呼び出し前の長さに戻す。
-- 内部の契約（`html_internal.h`）：`const char *amark__html_escape_byte(unsigned char c)`（置き換えの文字列。そのままなら NULL）、`bool amark__html_href_safe_byte(unsigned char c)` を `html_output.c` に提供し、出力先へ直接エスケープしながら書けるようにする（中間のバッファを作らない。`html_escape.c` は文脈を知らない）。
+- 内部の契約（`html_internal.h`）：`const char *amark_html_escape_byte(unsigned char c)`（置き換えの文字列。そのままなら NULL）、`bool amark_html_href_safe_byte(unsigned char c)` を `html_output.c` に提供し、出力先へ直接エスケープしながら書けるようにする（中間のバッファを作らない。`html_escape.c` は文脈を知らない）。
 
 #### HtmlOutput
 
@@ -417,7 +417,7 @@ typedef struct amark_html_hooks_slot {
     void *user_data;
 } amark_html_hooks_slot_t;
 ```
-- 内部の契約（`html_internal.h`）：`amark__html_dispatch_build(ctx)`、`amark__html_dispatch_free(ctx)`、`amark__html_chain_of(ctx, type, plain)`。
+- 内部の契約（`html_internal.h`）：`amark_html_dispatch_build(ctx)`、`amark_html_dispatch_free(ctx)`、`amark_html_chain_of(ctx, type, plain)`。
 
 #### HtmlEngine
 
@@ -483,7 +483,7 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 - Concurrency strategy：文脈は呼び出しごとに独立。共有するのは凍結した構文セットと `const` の静的データ（`amark.core.html` の表、エスケープの表）と、グローバルのアロケータの設定だけ。
 
 **Implementation Notes**
-- Integration：`html_render.c` が `amark__html_dispatch_build` と HtmlOutput の初期化・終了を呼ぶ。数の書式（`start`、行と列）は `snprintf` を使わず、内部の 10 進の変換で書く（ロケールに依存しない）。
+- Integration：`html_render.c` が `amark_html_dispatch_build` と HtmlOutput の初期化・終了を呼ぶ。数の書式（`start`、行と列）は `snprintf` を使わず、内部の 10 進の変換で書く（ロケールに依存しない）。
 - Validation：`render_entry_test`、`slot_test`、`context_test`、`hooks_filter_test`、`oom_test`、`scale_test`。
 - Risks：連鎖の呼び出しの深さは同じ型のスロットの数に、入れ子の出力の深さは `AMARK_HTML_MAX_NESTING` に比例してスタックを使う（ノードの深さには比例しない）。
 
@@ -532,7 +532,7 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 AMARK_API const amark_extension_t *amark_html_core_extension(void);   /* "amark.core.html"。静的、解放しない */
 
 /* src/syntax/html_core_internal.h（html_core.c だけが include する） */
-extern const amark_html_node_slot_t amark__html_slot_document;   /* … 19 の型のそれぞれ */
+extern const amark_html_node_slot_t amark_html_slot_document;   /* … 19 の型のそれぞれ */
 ```
 
 **Implementation Notes**
@@ -613,46 +613,46 @@ graph TB
 ### Logical Data Model（内部）
 ```c
 /* src/render/html_internal.h */
-typedef struct amark__html_handler {
+typedef struct amark_html_handler {
     const amark_html_node_slot_t *slot;
     const amark_extension_t *extension;
-} amark__html_handler_t;
+} amark_html_handler_t;
 
-typedef struct amark__html_chain {      /* handlers[] の範囲 */
+typedef struct amark_html_chain {      /* handlers[] の範囲 */
     size_t first, count;                /* 通常の処理の連鎖 */
     size_t plain_first, plain_count;    /* render_plain を持つものの連鎖（plain_handlers[] の範囲） */
-} amark__html_chain_t;
+} amark_html_chain_t;
 
-typedef struct amark__html_hook {
+typedef struct amark_html_hook {
     const amark_html_hooks_slot_t *slot;
     const amark_extension_t *extension;
     void *state;                        /* state_size が 0 なら NULL */
-} amark__html_hook_t;
+} amark_html_hook_t;
 
-typedef struct amark__html_call {
+typedef struct amark_html_call {
     const amark_node_t *node;
     bool entering, plain, active;
-    const amark__html_handler_t *chain; /* 現在の連鎖の先頭 */
+    const amark_html_handler_t *chain; /* 現在の連鎖の先頭 */
     size_t position;                    /* 現在の処理の位置 */
     const amark_extension_t *extension;
     bool skip_children, start_plain;
-} amark__html_call_t;
+} amark_html_call_t;
 
 struct amark_html_context {
     const amark_document_t *document;
     const amark_node_t *root;
     uint32_t flags;
-    amark__html_handler_t *handlers, *plain_handlers;
-    amark__html_chain_t *chains; size_t chain_count;
-    amark__html_hook_t *hooks; size_t hook_count;
+    amark_html_handler_t *handlers, *plain_handlers;
+    amark_html_chain_t *chains; size_t chain_count;
+    amark_html_hook_t *hooks; size_t hook_count;
     size_t *filter_hooks; size_t filter_count; size_t filter_index;   /* フィルタの外は SIZE_MAX */
     amark_buffer_t *out; size_t out_start;         /* バッファの出力先 */
     amark_write_fn_t write; void *write_user_data; /* 書き出しの関数の出力先 */
-    amark_buffer_t staging;                        /* amark__buffer_init で埋め込む */
+    amark_buffer_t staging;                        /* amark_buffer_init で埋め込む */
     unsigned char last_byte; bool wrote_any;
     unsigned char *tight; size_t depth, depth_capacity, depth_base;
     const amark_node_t *plain_owner;
-    amark__html_call_t call;
+    amark_html_call_t call;
     size_t nesting;
     amark_error_t error;
 };
@@ -663,7 +663,7 @@ struct amark_html_context {
 ### Error Strategy
 - 公開の関数は `foundation` の規約に従う。入口は、検査（オプション、スロット）を出力の前にすべて行い、違反なら何も出力しない。
 - 出力の途中の失敗（確保、書き出しの関数、処理、フック、フィルタ）は、最初の失敗を文脈に保持して以降の出力を止め、`finish` と解放を行ってから返す。バッファの出力先は呼び出し前の長さに戻す。
-- サイズの計算（深さの配列、中継のバッファ、状態）は `amark__size_add` / `amark__size_mul` で検査し、桁あふれは `AMARK_ERROR_OVERFLOW`。
+- サイズの計算（深さの配列、中継のバッファ、状態）は `amark_size_add` / `amark_size_mul` で検査し、桁あふれは `AMARK_ERROR_OVERFLOW`。
 
 ### Error Categories and Responses
 - **利用者の誤り**：NULL の必須引数、未知のオプション、不正なスロット、別の文書のノード、現在のノードでない `render_next` → `AMARK_ERROR_INVALID_ARGUMENT`。

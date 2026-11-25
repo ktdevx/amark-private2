@@ -38,7 +38,7 @@
 - CommonMark の構文セットの構築関数、パーサの入口
 
 ### Allowed Dependencies
-- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark__size_add`、`amark__size_mul`）、`runtime/buffer_internal.h`（`amark__buffer_init`、`amark__buffer_destroy`）
+- `foundation` の公開 API：`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`export.h`。内部 API：`runtime/alloc_internal.h`（`amark_size_add`、`amark_size_mul`）、`runtime/buffer_internal.h`（`amark_buffer_init`、`amark_buffer_destroy`）
 - テスト時：Naos、`amark_add_test()`、`amark_test_support`（`AMARK_CHECK_OOM_SWEEP`、`AMARK_CHECK_BUFFER_EQ`）、`amark_add_fuzzer()`
 - C99 の標準ライブラリ（`<stddef.h>`、`<stdint.h>`、`<stdbool.h>`、`<string.h>`、`<limits.h>`）
 - レイヤーの規則：`src/tree/` は `src/parse/`、`src/render/`、`src/syntax/` を参照しない。公開ヘッダは他の公開ヘッダだけを include する
@@ -110,7 +110,7 @@ graph TB
 
 **Architecture Integration**：
 - Domain boundaries：公開ヘッダは機能ごとに 1 つ。実装は 1 ファイル 1 責務。
-- Steering compliance：C99、`amark_` / `AMARK_` / `amark__`、`AMARK_API`、`AMARK_BEGIN_DECLS`、不透明型、`struct_size`、アロケータの経由、エラーコード、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ。
+- Steering compliance：C99、`amark_` / `AMARK_`、`AMARK_API`、`AMARK_BEGIN_DECLS`、不透明型、`struct_size`、アロケータの経由、エラーコード、アロケータの設定のほかにグローバルな可変状態なし（静的なデータは `const`）、ライセンスヘッダ。
 
 ### Technology Stack
 
@@ -133,13 +133,13 @@ include/amark/
 ├── dump.h            # S 式のダンプとダンプの書き手
 └── extension.h       # ノード型の記述子、構文拡張の記述子、スロットの見出し、構文セット
 src/tree/
-├── tree_internal.h   # struct amark_document / amark_node / amark__token / amark__source と、モジュール間の内部関数
+├── tree_internal.h   # struct amark_document / amark_node / amark_token_record / amark_source と、モジュール間の内部関数
 ├── syntax_set_internal.h  # struct amark_syntax_set、識別子から記述子を引く内部関数、組み込みの記述子の表の宣言
 ├── builtin_types.c   # 組み込みの 19 の型の記述子（関数表を含む）と amark.core 拡張
 ├── syntax_set.c      # 構文セットの生成・変更・複製・凍結・検索・スロットの索引、静的な core の構文セット
 ├── document.c        # 文書の生成と解放、ソースの登録と追加、行の先頭の索引、位置、追跡の切り替え
 ├── node.c            # ノードの生成・部分木の解放（内部）・参照・型の問い合わせ・関連付けたポインタ・型のデータ
-├── edit.c            # 編集の記録と祖先への伝播（amark__edit_mark）
+├── edit.c            # 編集の記録と祖先への伝播（amark_edit_mark）
 ├── token.c           # 構文トークンの検査・整列した挿入・削除・移動・取得
 ├── literal.c         # 文字列の検査と正規化、リテラルの取得と設定、テキストの一括設定
 ├── node_attr.c       # 組み込みの属性の取得と設定
@@ -150,7 +150,7 @@ src/tree/
 ├── iterator.c        # 走査
 ├── equal.c           # 意味の比較（テキストの正規化を含む）
 ├── dump.c            # ダンプとダンプの書き手
-└── tree_check.c      # 木の不変条件の検査（amark__tree_check。テストとファジング用）
+└── tree_check.c      # 木の不変条件の検査（amark_tree_check。テストとファジング用）
 tests/
 ├── support/
 │   ├── tree_builder.h     # S 式から木を組み立てる補助と AMARK_CHECK_TREE_DUMP
@@ -231,7 +231,7 @@ graph TB
 | 1.1, 1.2 | 文書の生成、既定の構文セット | Document, SyntaxSet | `amark_document_new`, `amark_syntax_set_core` | 組み立て |
 | 1.3 | 文書の解放ですべて解放 | Document, NodeCore | `amark_document_free` | — |
 | 1.4, 1.5 | ソースの登録と追加 | Document | `amark_document_add_source`, `amark_document_append_source` | 組み立て |
-| 1.6, 1.7 | 切り離しと解放 | StructureEdit, NodeCore | `amark_node_unlink`, `amark_node_free`, `amark__node_destroy_subtree` | — |
+| 1.6, 1.7 | 切り離しと解放 | StructureEdit, NodeCore | `amark_node_unlink`, `amark_node_free`, `amark_node_destroy_subtree` | — |
 | 1.8 | 確保失敗時の強い保証 | 全コンポーネント | エラーコード | — |
 | 1.9 | スレッドと構文セットの共有 | SyntaxSet, Document | 凍結、`const` の静的データ | — |
 | 1.10, 1.11 | 文書による構文セットの所有 | Document, SyntaxSet | `amark_document_take_syntax_set` | 組み立て |
@@ -458,7 +458,7 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 - Concurrency strategy：凍結後は読み取りだけ。静的な core の構文セットは `const` のデータ。
 
 **Implementation Notes**
-- Integration：`syntax_set_internal.h` は `amark__syntax_set_desc(set, type)`（文書とノードが使う定数時間の検索）を宣言する。組み込みの型は `amark__builtin_types[]`（識別子で添字）から引く。
+- Integration：`syntax_set_internal.h` は `amark_syntax_set_desc(set, type)`（文書とノードが使う定数時間の検索）を宣言する。組み込みの型は `amark_builtin_types[]`（識別子で添字）から引く。
 - Validation：`syntax_set_test.c` と `oom_test.c`。
 - Risks：下流の spec が包含やスロットに不足を見つけたら、この spec を更新する（回避策をとらない）。
 
@@ -576,7 +576,7 @@ AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *documen
 
 **Responsibilities & Constraints**
 - ノードは 1 回の確保で、ヘッダと型のデータ（`data_size`、`max_align` の境界）を持つ。型のデータは 0 で埋めてから `init` を呼ぶ。`init` が失敗したら確保を戻して失敗を返す。
-- 部分木の解放の内部関数 `amark__node_destroy_subtree`：切り離されたノードの部分木を後順に反復で解放する（各ノードの `destroy`、リテラル、トークン、全ノードの環からの除去）。公開の `amark_node_free` は StructureEdit が実装する。
+- 部分木の解放の内部関数 `amark_node_destroy_subtree`：切り離されたノードの部分木を後順に反復で解放する（各ノードの `destroy`、リテラル、トークン、全ノードの環からの除去）。公開の `amark_node_free` は StructureEdit が実装する。
 - 生成時、追跡が有効なら `CREATED` を記録する。
 - 子を持てるかは `accepts != 0 || can_contain != NULL` で決まる。
 
@@ -626,7 +626,7 @@ AMARK_API const void *amark_node_data_const(const amark_node_t *node);
 | `AMARK_EDIT_CREATED` | 0x10 | 追跡中に作られた（トークンを持たない） |
 | 0x20 以上 | 予約 | 将来の追加。利用者は未知のビットを `CONTENT` として扱う |
 
-- `amark__edit_mark(node, bits)`：追跡が無効なら何もしない。有効なら `node->edits |= bits` とし、親から順に `DESCENDANTS` を付け、すでに `DESCENDANTS` を持つ祖先で止める。
+- `amark_edit_mark(node, bits)`：追跡が無効なら何もしない。有効なら `node->edits |= bits` とし、親から順に `DESCENDANTS` を付け、すでに `DESCENDANTS` を持つ祖先で止める。
 - 不変条件：`DESCENDANTS` を持つノードの祖先はすべて `DESCENDANTS` を持つ。記録を持つ部分木を挿入するときは、追跡の有無にかかわらず、挿入先の祖先に `DESCENDANTS` を伝播してこの条件を保つ。
 - 値が同じ設定（バイト列が同じ、数値が同じ）は記録しない。トークンの操作と関連付けたポインタの変更は記録しない。
 - 切り離されたノードは、再び挿入されるときに `RELOCATED` を受ける（`CREATED` を持つノードを除く）。
@@ -778,8 +778,8 @@ AMARK_API amark_error_t amark_node_set_link_label(amark_node_t *node, const char
 - 挿入するノードが木にあれば、先に元の位置から外す（元の親に `CHILDREN`）。挿入後、新しい親に `CHILDREN`、挿入したノードに `RELOCATED`（`CREATED` でなければ）。
 - `replace(old, new)`：`new` を `old` の位置に置き、`old` を切り離す。`old` が切り離されていれば `AMARK_ERROR_INVALID_ARGUMENT`。
 - `unlink`：根なら `AMARK_ERROR_INVALID_ARGUMENT`、切り離し済みなら何もせず成功。
-- `free`：木にあれば切り離し（親に `CHILDREN`）、`amark__node_destroy_subtree` で解放する。根を渡したときは何もしない。
-- 包含の判定（検査の順の 3）と、検査を済ませた切り離しのノードを親の指定の位置（兄弟の前、NULL なら末尾）につなぐ処理（記録つき）は、`tree_internal.h` の内部関数（`amark__node_allows_child`、`amark__node_link_child`）として、CopyImport の子をまとめた取り込みからも使う（規則を 1 か所に保つ）。
+- `free`：木にあれば切り離し（親に `CHILDREN`）、`amark_node_destroy_subtree` で解放する。根を渡したときは何もしない。
+- 包含の判定（検査の順の 3）と、検査を済ませた切り離しのノードを親の指定の位置（兄弟の前、NULL なら末尾）につなぐ処理（記録つき）は、`tree_internal.h` の内部関数（`amark_node_allows_child`、`amark_node_link_child`）として、CopyImport の子をまとめた取り込みからも使う（規則を 1 か所に保つ）。
 
 **Contracts**: Service [x]
 ```c
@@ -812,10 +812,10 @@ AMARK_API amark_error_t amark_node_replace(amark_node_t *old_node, amark_node_t 
 - 子をまとめた取り込み（`amark_node_import_children(parent, before, source_parent)`、4.10、4.11）：`source_parent` の子の部分木をすべて複製し、`parent` の `before` の前（NULL なら末尾）に元の順で挿入する。一時的な文書でパースした断片を既存の文書に差し込む用途（`block-parser` の断片のパース）を想定する。手順は次のとおりで、木を変える前にすべての検査と確保を終える。
   1. 引数の検査：`parent` と `source_parent` が NULL でない。`before` は NULL か、`parent` の子（`before->parent == parent`）。違反は `AMARK_ERROR_INVALID_ARGUMENT`。
   2. 型の対応付け：`source_parent` のすべての子の部分木の型の記述子を、取り込み先の構文セットで対応付ける（単一の取り込みの手順 1 と同じ）。見つからなければ `AMARK_ERROR_INVALID_ARGUMENT`。
-  3. 包含の検査：直接の子のそれぞれについて、StructureEdit と同じ規則（`amark__node_allows_child`：`parent` の型の `can_contain`、なければ `accepts & provides`）で `parent` に置けることを確かめる。1 つでも反すれば `AMARK_ERROR_INVALID_ARGUMENT`。複製は新しいノードなので循環の検査は要らない。
+  3. 包含の検査：直接の子のそれぞれについて、StructureEdit と同じ規則（`amark_node_allows_child`：`parent` の型の `can_contain`、なければ `accepts & provides`）で `parent` に置けることを確かめる。1 つでも反すれば `AMARK_ERROR_INVALID_ARGUMENT`。複製は新しいノードなので循環の検査は要らない。
   4. ソースの複製：すべての子の部分木のトークンが参照するソースを、識別子で重複を除いて集め、それぞれを取り込み先に 1 回だけ複製して登録し、識別子の対応表を作る（取り込み元と取り込み先が同じ文書なら複製しない）。
   5. ノードの複製：子ごとに、切り離された複製を作る（単一の取り込みの手順 3 と同じ）。呼び出しの時点の子の並びを写すので、`source_parent` が `parent` やその祖先でもよい。
-  6. 挿入：作った複製を順に `amark__node_link_child` で `before` の前へつなぐ（確保なし、失敗しない）。`parent` に `CHILDREN` を 1 回、各複製に `RELOCATED`（`CREATED` でなければ）を記録し、複製が編集の記録を持てば祖先へ `DESCENDANTS` を伝播する（EditTracking の不変条件）。
+  6. 挿入：作った複製を順に `amark_node_link_child` で `before` の前へつなぐ（確保なし、失敗しない）。`parent` に `CHILDREN` を 1 回、各複製に `RELOCATED`（`CREATED` でなければ）を記録し、複製が編集の記録を持てば祖先へ `DESCENDANTS` を伝播する（EditTracking の不変条件）。
 - 子をまとめた取り込みの失敗（手順 4、5 の確保の失敗）：作った複製をすべて解放し、追加したソースを取り除いて、取り込み先の文書を呼び出し前の状態に戻す（全か無か）。取り込み元は変えない。
 - `source_parent` が子を持たなければ、何もせず成功する（記録もしない）。計算量は、子の部分木のノードとトークンの数と、複製するソースのバイト数に比例する。
 
@@ -991,7 +991,7 @@ AMARK_API amark_error_t amark_dump_attr_symbol(amark_dump_writer_t *writer, cons
 | Requirements | 4.5, 6.1, 7.5 の検証 |
 
 **Responsibilities & Constraints**
-- `amark_error_t amark__tree_check(const amark_document_t *document, const char **out_reason)`（`tree_internal.h`）：親子と兄弟のリンクの対称性、包含の規則、`DESCENDANTS` の不変条件、トークンの整列と範囲、全ノードの環に属すること、を反復で検査する。違反は `AMARK_ERROR_INVALID_STATE` と理由の静的な文字列。
+- `amark_error_t amark_tree_check(const amark_document_t *document, const char **out_reason)`（`tree_internal.h`）：親子と兄弟のリンクの対称性、包含の規則、`DESCENDANTS` の不変条件、トークンの整列と範囲、全ノードの環に属すること、を反復で検査する。違反は `AMARK_ERROR_INVALID_STATE` と理由の静的な文字列。
 - 文書は内部のカウンタ（祖先への伝播の段数、トークンの移動の回数）を持ち、INTERNAL のテストが計算量（10.3–10.5）を確かめる。公開しない。
 
 ### Test
@@ -1046,7 +1046,7 @@ graph TB
 ### Logical Data Model（内部）
 ```c
 /* src/tree/tree_internal.h */
-typedef struct amark__token {
+typedef struct amark_token_record {
     size_t offset;
     size_t length;
     uint32_t source;
@@ -1055,7 +1055,7 @@ typedef struct amark__token {
     uint8_t flags;
     uint8_t tab_column_offset;
     uint8_t tab_columns;
-} amark__token_t;
+} amark_token_record_t;
 
 struct amark_node {
     amark_document_t *document;
@@ -1066,25 +1066,25 @@ struct amark_node {
     amark_node_t *ring_prev, *ring_next;    /* 文書の全ノードの環 */
     char *literal;                          /* NULL なら "" */
     size_t literal_length;
-    amark__token_t *tokens;
+    amark_token_record_t *tokens;
     size_t token_count, token_capacity;
     void *user_data;
     /* 型のデータはこの後ろ（max_align の境界） */
 };
 
-typedef struct amark__source {
-    amark_buffer_t bytes;                     /* amark__buffer_init で埋め込む */
+typedef struct amark_source {
+    amark_buffer_t bytes;                     /* amark_buffer_init で埋め込む */
     size_t *line_starts;
     size_t line_count, line_capacity;
     bool pending_cr;                        /* 末尾が CR で終わった（次の追加の LF と組む） */
-} amark__source_t;
+} amark_source_t;
 
 struct amark_document {
     const amark_syntax_set_t *syntax;
     amark_syntax_set_t *owned_syntax;         /* take_syntax_set で受け取った構文セット。なければ NULL */
     amark_node_t *root;
     amark_node_t *ring;
-    amark__source_t *sources;
+    amark_source_t *sources;
     size_t source_count, source_capacity;
     bool tracking;
     size_t stat_propagation_steps;          /* INTERNAL のテスト用のカウンタ */
@@ -1098,7 +1098,7 @@ struct amark_document {
 - すべての公開の関数は `foundation` の規約に従う。表現できない値の設定、包含の規則の違反、循環、別の文書のノード、型の合わない操作は `AMARK_ERROR_INVALID_ARGUMENT` で、木を変えない。
 - 凍結した構文セットの変更、凍結していない構文セットでの文書の生成は `AMARK_ERROR_INVALID_STATE`。
 - 構文セットの所有の受け渡しで、文書が使っていない構文セット、静的な構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT`（所有権は呼び出し側に残る）。
-- サイズの計算（トークンの配列、ソースの追加、リテラルの複製）は `amark__size_add` / `amark__size_mul` で検査し、桁あふれは `AMARK_ERROR_OVERFLOW`。
+- サイズの計算（トークンの配列、ソースの追加、リテラルの複製）は `amark_size_add` / `amark_size_mul` で検査し、桁あふれは `AMARK_ERROR_OVERFLOW`。
 - 確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。複数の確保を伴う操作（一括設定、複製、取り込み、子をまとめた取り込み、凍結）は、確保をすべて先に行ってから木を変える。
 
 ### Error Categories and Responses
@@ -1108,7 +1108,7 @@ struct amark_document {
 - **規定しない使い方（文書化する）**：解放したノードの使用、構文セットや記述子の寿命の違反（所有を渡した構文セットを呼び出し側が解放する、所有する文書を同じ構文セットを使う他の文書より先に解放する、を含む）、走査中に現在のノードを動かした後の `next`、追跡を無効にした状態での利用者の編集（元の表記が古いまま出力されうる）。
 
 ### Monitoring
-- 内部の不変条件の検査（`amark__tree_check`）とロスレス性の検証を、テストとファジングで使う。
+- 内部の不変条件の検査（`amark_tree_check`）とロスレス性の検証を、テストとファジングで使う。
 
 ## Testing Strategy
 
@@ -1133,7 +1133,7 @@ struct amark_document {
 - 公開ヘッダの単独コンパイルと C++ からの利用、エクスポートの検査（`foundation` の仕組み。10.1, 10.2）。
 
 ### Fuzzing
-- `tree_edit_fuzz`：入力のバイトを操作列（生成、挿入、移動、置換、切り離し、解放、リテラルの設定、一括設定、トークンの追加と移動、複製、取り込み、子をまとめた取り込み、追跡の切り替え）として解釈し、確保の失敗を注入するアロケータを `amark_allocator_set` で設定して実行する（終わりに既定へ戻す）。各操作の後に `amark__tree_check` が成功し、最後にダンプと複製の比較が一致することを確かめる。
+- `tree_edit_fuzz`：入力のバイトを操作列（生成、挿入、移動、置換、切り離し、解放、リテラルの設定、一括設定、トークンの追加と移動、複製、取り込み、子をまとめた取り込み、追跡の切り替え）として解釈し、確保の失敗を注入するアロケータを `amark_allocator_set` で設定して実行する（終わりに既定へ戻す）。各操作の後に `amark_tree_check` が成功し、最後にダンプと複製の比較が一致することを確かめる。
 
 ## Performance & Scalability
 - 挿入・切り離し・兄弟と親への移動は定数時間（子を持つノードの挿入だけ、循環の検査で挿入先の深さに比例）。
