@@ -81,7 +81,7 @@
   1. Lua 方式の 1 関数（`realloc` だけ）
   2. 確保・再確保・解放の 3 関数（サイズ情報なし）
   3. 3 関数に旧サイズも渡す（サイズつきの解放）
-- **Selected Approach**：2。メンバ名は `allocate` / `reallocate` / `deallocate`（`malloc` や `free` を関数形式のマクロで置き換えるデバッグ用ツールとの衝突を避ける）。`struct_size` を先頭に置く。
+- **Selected Approach**：2。メンバ名は `malloc_fn` / `realloc_fn` / `free_fn`（`malloc` や `free` を関数形式のマクロで置き換えるデバッグ用ツールとの衝突を避ける）。`struct_size` を先頭に置く。
 - **Rationale**：標準ライブラリと同じ形で、利用者が既存のアロケータをそのままつなげる。バッファの所有権の移転（detach）でサイズを持ち回る必要がない。
 - **Trade-offs**：サイズを必要とするアリーナ型のアロケータは自前でサイズを記録する必要がある。将来、`struct_size` で判定できる任意のフィールドとしてサイズつきの解放を足す余地を残す。
 

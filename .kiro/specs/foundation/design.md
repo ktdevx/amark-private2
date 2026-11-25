@@ -687,7 +687,7 @@ amark_add_fuzzer(<name>
 ```c
 typedef struct amark_test_allocator {
     amark_allocator_t base;        /* amark_test_allocator_get() が返すもの */
-    size_t fail_at;                /* この回数目の確保（allocate と reallocate）を失敗させる。0 なら失敗させない */
+    size_t fail_at;                /* この回数目の確保（malloc_fn と realloc_fn）を失敗させる。0 なら失敗させない */
     size_t calls;                  /* 確保の呼び出しの回数 */
     size_t failures;               /* 注入した失敗の回数 */
     size_t live_blocks;            /* 解放されていないブロックの数 */
@@ -824,9 +824,9 @@ AMARK_API const char *amark_error_string(amark_error_t error);
 typedef struct amark_allocator {
     size_t struct_size;   /* sizeof(amark_allocator_t) を入れる */
     void *user_data;      /* コールバックにそのまま渡す */
-    void *(*allocate)(void *user_data, size_t size);
-    void *(*reallocate)(void *user_data, void *ptr, size_t new_size);
-    void (*deallocate)(void *user_data, void *ptr);
+    void *(*malloc_fn)(void *user_data, size_t size);
+    void *(*realloc_fn)(void *user_data, void *ptr, size_t new_size);
+    void (*free_fn)(void *user_data, void *ptr);
 } amark_allocator_t;
 
 AMARK_API const amark_allocator_t *amark_allocator_default(void); /* malloc/realloc/free に基づく */
@@ -838,10 +838,10 @@ AMARK_API void *amark_realloc(const amark_allocator_t *allocator, void *ptr, siz
 AMARK_API void amark_free(const amark_allocator_t *allocator, void *ptr);
 ```
 - `allocator` が NULL なら既定のアロケータ。
-- `amark_allocator_check`：NULL なら `AMARK_ERROR_NONE`。`struct_size` が v1 の最小のサイズ（`deallocate` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
-- コールバックへの保証：`size` と `new_size` は 0 にならない（0 は 1 として扱う）。`reallocate` と `deallocate` に NULL は渡らない（`amark_realloc(a, NULL, n)` は `allocate` を、`amark_free(a, NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。
+- `amark_allocator_check`：NULL なら `AMARK_ERROR_NONE`。`struct_size` が v1 の最小のサイズ（`free_fn` の末尾まで）未満か、コールバックのどれかが NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
+- コールバックへの保証：`size` と `new_size` は 0 にならない（0 は 1 として扱う）。`realloc_fn` と `free_fn` に NULL は渡らない（`amark_realloc(a, NULL, n)` は `malloc_fn` を、`amark_free(a, NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。
 - `amark_alloc_array`：`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す。
-- オブジェクトは作成時に受け取ったアロケータを検査し、内部に値でコピーして保持する（`user_data` の寿命は利用者の責任）。`reallocate` が失敗したとき、元のブロックは有効なまま。
+- オブジェクトは作成時に受け取ったアロケータを検査し、内部に値でコピーして保持する（`user_data` の寿命は利用者の責任）。`realloc_fn` が失敗したとき、元のブロックは有効なまま。
 
 **内部の契約**（`src/runtime/alloc_internal.h`）
 ```c
@@ -851,7 +851,7 @@ bool amark__size_mul(size_t a, size_t b, size_t *out);
 ```
 
 **Implementation Notes**
-- Risks：`allocate` などの名前は、`malloc` や `free` を関数形式のマクロで置き換えるデバッグ用ツールと衝突しないように選んだ。将来、サイズつきの解放などを任意のフィールドとして末尾に追加できる（`struct_size` で判定）。
+- Risks：`malloc_fn` などの名前は、`malloc` や `free` を関数形式のマクロで置き換えるデバッグ用ツールと衝突しないように選んだ。将来、サイズつきの解放などを任意のフィールドとして末尾に追加できる（`struct_size` で判定）。
 
 #### Buffer
 
