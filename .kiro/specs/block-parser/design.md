@@ -572,7 +572,7 @@ amark_error_t amark_engine_finish(amark_parser_t *parser);
 - 行の位置は「バイトの位置」と「列」の組で持つ。タブを途中まで消費したとき、残りの列を持つ（`partial_tab_columns`）。列は行の先頭（1 行目は BOM の後）から数える。
 - 消費の関数は、消費した部分をトークンとして指定したノードに記録する。タブの一部だけを消費したときは `PARTIAL_TAB`（`tab_column_offset`、`tab_columns`）のトークンを作り、残りの列を次の消費に回す（2.2）。
 - `amark_block_open`：照合できなかったブロックを閉じ、さらに親が新しい型を受け入れられる（`amark_node_can_contain`）まで閉じながら上へたどり、ノードを作って親の末尾に付け、鎖の最も内側に加える（3.3）。根まで受け入れられなければ `AMARK_ERROR_INVALID_ARGUMENT`。同じ開始の呼び出しの中で複数回呼べる（4.3。例：リストとリスト項目）。
-- ブロックのデータ：`handler->block_data_size` の大きさで 0 で埋めて確保し、パースの終わりまで保つ（閉じた後も `close` と後の構文が読める）。`destroy_block_data` があればパースの終わりに呼ぶ。
+- ブロックのデータ：`handler->block_data_size` の大きさで 0 で埋めて確保し、パースの終わりまで保つ（閉じた後も `close` と後の構文が読める）。`deinit_block_data` があればパースの終わりに呼ぶ。 0 で埋めた状態を初期状態とし、`init` のコールバックは設けない。`deinit_block_data` は中身だけを破棄し、`block_data` の領域は解放しない（領域はエンジンが解放する）。0 で埋めたままのデータ（開いた直後に失敗した場合）も受け付けなければならない。
 
 **Contracts**: Service [x]
 
@@ -616,7 +616,7 @@ struct amark_block_syntax {
                                    amark_block_continue_result_t *out_result);
     amark_error_t (*add_line)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
     amark_error_t (*close)(amark_block_context_t *ctx, amark_node_t *node, void *block_data, void *user_data);
-    void (*destroy_block_data)(void *block_data, void *user_data);
+    void (*deinit_block_data)(void *block_data, void *user_data);
     void *user_data;
 };
 /* start が NULL の構文は、他の構文が amark_block_open の handler に指定するだけのもの（例：リスト） */
@@ -1222,7 +1222,7 @@ struct amark_parser {
 ### Error Strategy
 - 引数の誤り（NULL、未知の印、上限外の深さ、不足した `struct_size`、範囲外の消費、別の文書のノード）は `AMARK_ERROR_INVALID_ARGUMENT` で、パーサの状態を変えない。
 - 状態の誤り（凍結していない構文セット、終了後の操作、`close` の中の行の操作、副作用のある `NONE`）は `AMARK_ERROR_INVALID_STATE`。
-- 確保の失敗とコールバック・委譲先の失敗は、そのエラーコードを返してパーサを `Failed` にする（共通の規約の例外）。拡張の状態の `deinit`、委譲先の `end`、ブロックのデータの `destroy_block_data` は失敗時にも呼ぶ。リークしない。
+- 確保の失敗とコールバック・委譲先の失敗は、そのエラーコードを返してパーサを `Failed` にする（共通の規約の例外）。拡張の状態の `deinit`、委譲先の `end`、ブロックのデータの `deinit_block_data` は失敗時にも呼ぶ。リークしない。
 - 不正な入力（不正な UTF-8、NUL、深すぎる入れ子）はエラーにしない（2.5、12.2）。
 
 ### Error Categories and Responses
