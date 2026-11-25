@@ -500,17 +500,29 @@ AMARK_API const amark_slot_header_t *amark_syntax_set_slot_at(const amark_syntax
 **Contracts**: Service [x]
 ```c
 /* include/amark/node.h */
-enum {
-    AMARK_NODE_NONE = 0,
-    AMARK_NODE_DOCUMENT = 1, AMARK_NODE_BLOCK_QUOTE = 2, AMARK_NODE_LIST = 3, AMARK_NODE_ITEM = 4,
-    AMARK_NODE_CODE_BLOCK = 5, AMARK_NODE_HTML_BLOCK = 6, AMARK_NODE_PARAGRAPH = 7, AMARK_NODE_HEADING = 8,
-    AMARK_NODE_THEMATIC_BREAK = 9, AMARK_NODE_LINK_DEFINITION = 10,
-    AMARK_NODE_TEXT = 11, AMARK_NODE_SOFTBREAK = 12, AMARK_NODE_LINEBREAK = 13, AMARK_NODE_CODE = 14,
-    AMARK_NODE_HTML_INLINE = 15, AMARK_NODE_EMPH = 16, AMARK_NODE_STRONG = 17, AMARK_NODE_LINK = 18,
-    AMARK_NODE_IMAGE = 19,
-    AMARK_NODE_BUILTIN_LAST = 255,     /* 1–255 は組み込みに予約 */
-    AMARK_NODE_DYNAMIC_FIRST = 256     /* 拡張の型の識別子の始まり */
-};
+/* amark_node_type_t（uint32_t）の値。拡張で増える開いた集合なので enum にしない */
+#define AMARK_NODE_NONE              0u
+#define AMARK_NODE_DOCUMENT          1u
+#define AMARK_NODE_BLOCK_QUOTE       2u
+#define AMARK_NODE_LIST              3u
+#define AMARK_NODE_ITEM              4u
+#define AMARK_NODE_CODE_BLOCK        5u
+#define AMARK_NODE_HTML_BLOCK        6u
+#define AMARK_NODE_PARAGRAPH         7u
+#define AMARK_NODE_HEADING           8u
+#define AMARK_NODE_THEMATIC_BREAK    9u
+#define AMARK_NODE_LINK_DEFINITION  10u
+#define AMARK_NODE_TEXT             11u
+#define AMARK_NODE_SOFTBREAK        12u
+#define AMARK_NODE_LINEBREAK        13u
+#define AMARK_NODE_CODE             14u
+#define AMARK_NODE_HTML_INLINE      15u
+#define AMARK_NODE_EMPH             16u
+#define AMARK_NODE_STRONG           17u
+#define AMARK_NODE_LINK             18u
+#define AMARK_NODE_IMAGE            19u
+#define AMARK_NODE_BUILTIN_LAST    255u   /* 1–255 は組み込みに予約 */
+#define AMARK_NODE_DYNAMIC_FIRST   256u   /* 拡張の型の識別子の始まり */
 ```
 
 ### Tree
