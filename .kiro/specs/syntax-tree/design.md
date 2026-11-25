@@ -25,13 +25,14 @@
 - 公開ヘッダ `include/amark/{node,document,token,iterator,dump,extension}.h` と、`amark.h` への追加
 - `src/tree/` のすべて：文書、ソースと行の索引、ノード、構造の編集、複製と取り込み、リテラルと属性、組み込みのノード型の記述子、編集の追跡、構文トークン、ロスレス性の検証、走査、ソース上の位置、比較、ダンプ、構文セット（レジストリ）、木の不変条件の検査
 - 木の意味の不変条件：包含の規則、リテラルと属性の値の規則（LF への正規化を含む）
-- 構文トークンの種類と印の定義、編集の記録のビットの定義、スロットの種類の番号の範囲
+- 構文トークンの種類と印の定義、編集の記録のビットの定義、スロットの種類の番号の範囲と、spec ごとの範囲の割り当ての表
+- 文書による構文セットの所有（`amark_document_take_syntax_set`）と、子をまとめた取り込み（`amark_node_import_children`）の意味論
 - テスト用の補助 `tests/support/tree_builder.{h,c}`（S 式から木を組み立てる）と INTERFACE ライブラリ `amark_test_tree`
 - `tests/tree/` のテストと、`fuzz/tree_edit_fuzz.c` のファジングターゲット
 
 ### Out of Boundary
 - 構文トークンを実際に記録する処理、トークンの役割の番号の値（構文ごとに `block-parser`、`inline-parser` が定める）
-- スロットの種類ごとの構造体と、その番号の名前（スロットを実行する spec が `extension.h` に追記する）
+- スロットの種類ごとの構造体と、その番号の名前と値（スロットを実行する spec が、範囲の表で割り当てた自分の範囲の中で `extension.h` に追記する）
 - 編集した部分の作り直し、出力時の表現可否の判定（例：リンクの中のリンク）、エスケープ（`markdown-renderer`）
 - HTML の出力（リンク参照定義を出さないことを含む。`html-renderer`）
 - CommonMark の構文セットの構築関数、パーサの入口
@@ -46,8 +47,9 @@
 - 構文トークンの種類・印・フィールドの追加や意味の変更 → `block-parser`、`inline-parser`、`markdown-renderer`
 - 編集の記録のビットの追加や伝播の規則の変更 → `markdown-renderer`
 - 組み込みのノード型の追加、属性・リテラルの規則（LF の正規化、検査）の変更 → すべての下流の spec
-- 包含の規則、`amark_node_type_desc` / `amark_extension` / `amark_slot_header` の形、識別子の割り当て規則、スロットの番号の範囲の変更 → すべての下流の spec と利用者の拡張
+- 包含の規則、`amark_node_type_desc` / `amark_extension` / `amark_slot_header` の形、識別子の割り当て規則、スロットの番号の範囲と spec ごとの範囲の表の変更 → すべての下流の spec と利用者の拡張
 - ソースの扱い（追加、取り込み時の複製）の変更 → `block-parser`、`markdown-renderer`
+- 構文セットの所有の受け渡しの規則（受け付ける条件、解放の順序）、子をまとめた取り込みの規則（検査の順、全か無か、編集の記録）の変更 → `block-parser`（便宜の関数と断片のパース）と、同じ関数を使う上位の spec
 - ダンプの形式の変更 → ダンプで期待値を書くすべての spec のテスト
 
 ## Architecture
@@ -195,6 +197,7 @@ sequenceDiagram
     P->>N: add tokens in source order
     P->>D: check tokens in tests
     P->>D: enable edit tracking
+    P->>D: take ownership of syntax set if requested
     P->>U: return document
     U->>N: set literal or move node
     N->>N: mark edits and propagate to ancestors
@@ -202,6 +205,7 @@ sequenceDiagram
     R->>N: read edits and tokens
 ```
 - 追跡を有効にする前の変更（パース中の後処理を含む）は記録されない。後処理がノードを作り直すときは、トークンを新しいノードへ移す（`amark_node_transfer_tokens`）。
+- 構文セットを内部で作った便宜の関数は、文書を返す直前に `amark_document_take_syntax_set` で所有権を文書へ渡す。以後、利用者は文書を解放するだけでよい。
 
 ### 編集の記録の判定（`markdown-renderer` から見た規則）
 ```mermaid
@@ -228,6 +232,7 @@ graph TB
 | 1.6, 1.7 | 切り離しと解放 | StructureEdit, NodeCore | `amark_node_unlink`, `amark_node_free`, `amark__node_destroy_subtree` | — |
 | 1.8 | 確保失敗時の強い保証 | 全コンポーネント | 状態コード | — |
 | 1.9 | スレッドと構文セットの共有 | SyntaxSet, Document | 凍結、`const` の静的データ | — |
+| 1.10, 1.11 | 文書による構文セットの所有 | Document, SyntaxSet | `amark_document_take_syntax_set` | 組み立て |
 | 2.1, 2.5 | 組み込みの型と同じ登録の仕組み | BuiltinTypes, SyntaxSet | `AMARK_NODE_*`, `amark.core` | — |
 | 2.2, 2.3, 2.6 | 属性とリテラル | LiteralAttr | `amark_node_set_*` | — |
 | 2.4 | 分類と包含の問い合わせ | NodeCore, BuiltinTypes | `amark_node_is_block`, `amark_node_can_contain` | — |
@@ -238,6 +243,7 @@ graph TB
 | 4.2, 4.3, 4.4, 4.5 | 挿入、移動、置換、拒否 | StructureEdit | `amark_node_insert_*`, `amark_node_replace` | — |
 | 4.6, 4.7, 4.8 | 複製と取り込み | CopyImport | `amark_node_copy`, `amark_node_import` | — |
 | 4.9 | 深い木 | Iterator, CopyImport, NodeCore, Equality, Dump | 再帰しない実装 | — |
+| 4.10, 4.11 | 子をまとめた取り込み（全か無か） | CopyImport, StructureEdit | `amark_node_import_children` | — |
 | 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.8 | 値の規則と正規化、トークンの保持 | LiteralAttr | `amark_node_set_literal` など | — |
 | 5.7 | テキストの一括設定 | LiteralAttr | `amark_node_set_inline_text` | — |
 | 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8 | トークンのモデルと操作 | TokenStore | `amark_token`, `amark_node_add_token` など | 組み立て |
@@ -248,6 +254,7 @@ graph TB
 | 8.1, 8.2, 8.9 | 記述子とスロット | SyntaxSet | `amark_node_type_desc`, `amark_extension`, `amark_slot_header` | — |
 | 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.10, 8.11 | 構文セットの操作、凍結、問い合わせ | SyntaxSet | `amark_syntax_set_*` | — |
 | 8.12 | 関数表の呼び出し | NodeCore, CopyImport, Equality, Dump | 記述子の関数表 | — |
+| 8.13 | spec ごとのスロットの種類の範囲 | SyntaxSet | `AMARK_SLOT_KIND_*_FIRST` / `_LAST` | — |
 | 9.1, 9.2 | 比較 | Equality | `amark_node_equal` | — |
 | 9.3, 9.4, 9.5, 9.6 | ダンプ | Dump | `amark_node_dump`, `amark_dump_attr_*` | — |
 | 9.7 | S 式から木を組み立てる | TreeBuilder | `amark_test_tree_build` | — |
@@ -258,15 +265,15 @@ graph TB
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| SyntaxSet | Registry | 構文拡張の並び、凍結、識別子、スロットの索引 | 1.2, 1.9, 2.5, 8.1–8.12 | BuiltinTypes (P0), allocator (P0) | Service, State |
+| SyntaxSet | Registry | 構文拡張の並び、凍結、識別子、スロットの索引、スロットの種類の範囲の表 | 1.2, 1.9, 1.11, 2.5, 8.1–8.13 | BuiltinTypes (P0), allocator (P0) | Service, State |
 | BuiltinTypes | Registry | 組み込みの 19 の型の記述子と `amark.core` | 2.1–2.5, 4.1 | NodeCore (P1) | Service |
-| Document | Tree | 文書、ソース、行の索引、位置、追跡の切り替え | 1.1–1.5, 1.9, 3.5, 7.8 | NodeCore (P0), SyntaxSet (P0), buffer (P0) | Service, State |
+| Document | Tree | 文書、ソース、行の索引、位置、追跡の切り替え、構文セットの所有 | 1.1–1.5, 1.9–1.11, 3.5, 7.8 | NodeCore (P0), SyntaxSet (P0), buffer (P0) | Service, State |
 | NodeCore | Tree | ノードの生成・部分木の解放・参照・型のデータ | 1.3, 2.4, 3.1, 3.7, 4.1, 8.12 | SyntaxSet (P0), EditTracking (P0) | Service, State |
 | EditTracking | Tree | 記録と伝播 | 7.1–7.10, 10.4 | tree_internal.h の構造体 (P0) | Service |
 | TokenStore | Tree | トークンの保持と検査 | 6.1–6.8, 10.5 | NodeCore (P0), Document (P0) | Service |
 | LiteralAttr | Tree | リテラルと属性の規則 | 2.2, 2.3, 2.6, 5.1–5.8 | EditTracking (P0), StructureEdit (P0), utf8 (P0) | Service |
-| StructureEdit | Tree | 挿入・移動・置換・切り離し・解放 | 1.6, 1.7, 4.2–4.5, 10.3 | NodeCore (P0), EditTracking (P0) | Service |
-| CopyImport | Tree | 複製と取り込み | 4.6–4.9 | StructureEdit (P0), TokenStore (P0) | Service |
+| StructureEdit | Tree | 挿入・移動・置換・切り離し・解放 | 1.6, 1.7, 4.2–4.5, 4.11, 10.3 | NodeCore (P0), EditTracking (P0) | Service |
+| CopyImport | Tree | 複製と取り込み（部分木、子をまとめて） | 4.6–4.11 | StructureEdit (P0), TokenStore (P0) | Service |
 | TokenCheck | Tree | ロスレス性の検証 | 6.9 | TokenStore (P0) | Service |
 | SourceSpan | Tree | ノードの範囲と行・列 | 3.5, 3.6 | TokenStore (P0), Document (P0) | Service |
 | Iterator | Tree | 走査 | 3.2–3.4, 4.9 | NodeCore (P0) | Service, State |
@@ -303,7 +310,7 @@ graph TB
 | Field | Detail |
 |-------|--------|
 | Intent | 構文拡張を順序付きで組み合わせ、凍結後に識別子とスロットの索引を提供する |
-| Requirements | 1.2, 1.9, 2.5, 8.1–8.12 |
+| Requirements | 1.2, 1.9, 1.11, 2.5, 8.1–8.13 |
 
 **Responsibilities & Constraints**
 - 構文セットは作成時に `amark.core`（組み込みの型だけを持つ拡張）を先頭に持つ。`amark.core` の削除・置換・前への挿入は `AMARK_ERROR_INVALID_ARGUMENT`。
@@ -311,7 +318,18 @@ graph TB
 - ノード型の記述子の検査：拡張の型の名前は `.` を含む（`.` のない名前は組み込みに予約）。`flags` は `BLOCK` か `INLINE` のどちらか一方。`literal_mode` が既知の値。`data_size` が `AMARK_NODE_TYPE_MAX_DATA_SIZE`（64 KiB）以下。
 - 凍結：すべての型の名前の重複を検査し（重複は `AMARK_ERROR_INVALID_ARGUMENT`、構文セットは凍結されないまま）、拡張の型に 256 から順に識別子を割り当て、名前の索引とスロットの索引（種類ごとに構文セットの順）を作る。凍結後の変更は `AMARK_ERROR_INVALID_STATE`。
 - 記述子と拡張は構文セットより長く生きること（通常は静的な記憶域）。構文セットはそれを使うすべての文書より長く生きること。凍結した構文セットは読み取りだけなので、複数のスレッドから同時に使える。
-- `amark_syntax_set_core()` は、凍結済みで `amark.core` だけを持つ静的な `const` の構文セットを返す。解放しても何もしない。
+- `amark_syntax_set_core()` は、凍結済みで `amark.core` だけを持つ静的な `const` の構文セットを返す。解放しても何もしない。内部の印（`is_static`）を持ち、`amark_document_take_syntax_set` はこの印で静的な構文セットを拒否する（1.11）。
+- スロットの種類の番号の範囲（8.9、8.13）：0 は不正。`0x0001`–`0xFFFF` は Amark の spec が使い、spec ごとに次の表の範囲を割り当てる。各 spec は自分の範囲の中で、種類の名前と値を `extension.h` に追記する。表にない Amark の範囲（`0x0500`–`0xFFFF`）は将来の spec のために予約し、割り当てるときはこの spec を更新する。`0x10000` 以上は利用者の独自のスロット。レジストリは表を強制しない（`kind` が 0 でなければ受け付ける）。表は番号の衝突を spec の間で防ぐための約束である。
+
+| 範囲 | 割り当て先 | この時点で定義されている種類 |
+|------|------------|------------------------------|
+| `0x0001`–`0x00FF` | `syntax-tree`（`amark.core` とレジストリ） | なし（予約） |
+| `0x0100`–`0x01FF` | `block-parser` | `block-parser` の design が定める |
+| `0x0200`–`0x02FF` | `inline-parser` | `inline-parser` の design が定める |
+| `0x0300`–`0x03FF` | `html-renderer` | `AMARK_SLOT_HTML_NODE`（`0x0301`）、`AMARK_SLOT_HTML_HOOKS`（`0x0302`） |
+| `0x0400`–`0x04FF` | `markdown-renderer` | `markdown-renderer` の design が定める |
+| `0x0500`–`0xFFFF` | 将来の Amark の spec（予約） | — |
+| `0x10000` 以上 | 利用者 | — |
 
 **Contracts**: Service [x] / State [x]
 
@@ -365,7 +383,23 @@ typedef struct amark_slot_header {
 #define AMARK_SLOT_KIND_AMARK_FIRST 0x00001u   /* 1–0xFFFF：Amark の spec が使う */
 #define AMARK_SLOT_KIND_AMARK_LAST  0x0FFFFu
 #define AMARK_SLOT_KIND_USER_FIRST  0x10000u   /* 0x10000 以上：利用者の独自のスロット */
-/* 下流の spec は、ここに自分のスロットの種類の名前と番号を追記する（例：AMARK_SLOT_BLOCK_SYNTAX） */
+
+/* spec ごとの範囲（8.13）。各 spec は自分の範囲の中だけで種類を定義し、範囲の節の下に追記する。
+   0x0500–0xFFFF は将来の Amark の spec のために予約（割り当てるときは syntax-tree の spec を更新する） */
+#define AMARK_SLOT_KIND_CORE_FIRST              0x0001u   /* syntax-tree（amark.core）：予約、現在は定義なし */
+#define AMARK_SLOT_KIND_CORE_LAST               0x00FFu
+#define AMARK_SLOT_KIND_BLOCK_PARSER_FIRST      0x0100u   /* block-parser */
+#define AMARK_SLOT_KIND_BLOCK_PARSER_LAST       0x01FFu
+#define AMARK_SLOT_KIND_INLINE_PARSER_FIRST     0x0200u   /* inline-parser */
+#define AMARK_SLOT_KIND_INLINE_PARSER_LAST      0x02FFu
+#define AMARK_SLOT_KIND_HTML_RENDERER_FIRST     0x0300u   /* html-renderer */
+#define AMARK_SLOT_KIND_HTML_RENDERER_LAST      0x03FFu
+#define AMARK_SLOT_KIND_MARKDOWN_RENDERER_FIRST 0x0400u   /* markdown-renderer */
+#define AMARK_SLOT_KIND_MARKDOWN_RENDERER_LAST  0x04FFu
+/* 0x0100–0x01FF：block-parser（block-parser が追記する） */
+/* 0x0200–0x02FF：inline-parser（inline-parser が追記する） */
+/* 0x0300–0x03FF：html-renderer（html-renderer が追記する） */
+/* 0x0400–0x04FF：markdown-renderer（markdown-renderer が追記する） */
 
 typedef struct amark_extension {
     size_t struct_size;
@@ -409,10 +443,10 @@ AMARK_API const amark_slot_header *amark_syntax_set_slot_at(const amark_syntax_s
 ```
 - Preconditions：`remove` / `replace` / `insert_before` の名前が見つからなければ `AMARK_ERROR_INVALID_ARGUMENT`。`replace` は同じ名前でなくてもよい（新しい名前も重複の検査をする）。
 - Postconditions：凍結に成功した構文セットでは、同じ拡張の並びから作った別の構文セットと同じ識別子が割り当たる（8.6）。`slot_at` は構文セットの順、拡張の中ではスロットの一覧の順に返す。
-- Invariants：組み込みの型の識別子は 1–19 で固定。拡張の型の識別子は 256 以上。
+- Invariants：組み込みの型の識別子は 1–19 で固定。拡張の型の識別子は 256 以上。spec ごとの範囲は重ならず、すべて `AMARK_SLOT_KIND_AMARK_FIRST`–`AMARK_SLOT_KIND_AMARK_LAST` に含まれる（テストで確かめる）。
 
 ##### State Management
-- State model：`{allocator, frozen, extensions[], 凍結後: dynamic_types[], name_index[], slot_index[]}`。状態は「編集可能」→（freeze）→「凍結」の一方向。
+- State model：`{allocator, frozen, is_static, extensions[], 凍結後: dynamic_types[], name_index[], slot_index[]}`。状態は「編集可能」→（freeze）→「凍結」の一方向。
 - Concurrency strategy：凍結後は読み取りだけ。静的な core の構文セットは `const` のデータ。
 
 **Implementation Notes**
@@ -478,11 +512,16 @@ enum {
 | Field | Detail |
 |-------|--------|
 | Intent | ノード・ソース・構文セット・追跡の状態を所有する |
-| Requirements | 1.1–1.5, 1.9, 3.5, 7.8 |
+| Requirements | 1.1–1.5, 1.9–1.11, 3.5, 7.8 |
 
 **Responsibilities & Constraints**
 - 生成：アロケータを `amark__allocator_resolve` で検査して値で保持し、凍結済みの構文セット（NULL なら `amark_syntax_set_core()`）を参照し、document 型の根のノードを作る。凍結していない構文セットは `AMARK_ERROR_INVALID_STATE`。編集の追跡は無効で始まる。
-- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `destroy` を呼ぶ）。次にソースを解放する。
+- 解放：根を含むすべてのノード（切り離したものも）を、内部の全ノードの環から順に解放する（各ノードの型の `destroy` を呼ぶ）。次にソースを解放する。文書が構文セットを所有していれば、その後で `amark_syntax_set_free` で解放し（構文セット自身のアロケータで解放される）、最後に文書の構造体を解放する。ノードの `destroy` は記述子と構文セットを参照してよい（解放の順序で保証する）。
+- 構文セットの所有（`amark_document_take_syntax_set`、1.10、1.11）：
+  - 受け付ける条件：`set` が、文書が使っている構文セットそのもの（`set == amark_document_syntax_set(document)`）で、静的な構文セット（`is_static`）でなく、文書がまだ構文セットを所有していない。どれかに反すれば `AMARK_ERROR_INVALID_ARGUMENT`（NULL の引数も同じ）で、文書は変わらず、所有権は呼び出し側に残る。文書が使うのは凍結済みの構文セットだけなので、受け取る構文セットは常に凍結済み（凍結の規則はそのまま）。
+  - 成功の後：構文セットは文書のものになる。呼び出し側は `amark_syntax_set_free` を呼んではならない。凍結済みなので内容は変わらない。
+  - 共有：同じ構文セットを使う他の文書があってよいが、それらを所有する文書より先に解放する（構文セットは使うすべての文書より長く生きる、という既存の規則の言い換え。破ったときの振る舞いは規定しない）。
+  - 確保をしないので、メモリ不足で失敗しない。編集の記録とは無関係。
 - ソース：識別子は 0 から登録の順。`add_source` は複製して登録する（長さ 0 も可）。`append_source` は末尾に追加し、既存のバイトの位置を変えない（返したポインタは無効になりうる）。各ソースは行の先頭のオフセットの索引を持ち、追加のたびに更新する（チャンクの境目の CRLF を 1 つの改行として扱う）。
 - 位置：`offset`（0 ≤ offset ≤ 長さ）を 1 から数える行と列（バイト単位）に変換する。行の区切りは LF、CR、CRLF。範囲外は `AMARK_ERROR_INVALID_ARGUMENT`。
 
@@ -508,11 +547,15 @@ AMARK_API amark_status amark_document_position(const amark_document *document, a
 
 AMARK_API void amark_document_set_edit_tracking(amark_document *document, bool enabled);
 AMARK_API bool amark_document_edit_tracking(const amark_document *document);
+
+/* 文書が使っている、ヒープに作られた構文セットの所有権を受け取る。成功したら、amark_document_free が
+   ノードとソースの後でこの構文セットを解放する。失敗したら所有権は呼び出し側に残る */
+AMARK_API amark_status amark_document_take_syntax_set(amark_document *document, amark_syntax_set *set);
 ```
 - `data` が NULL で `length` が 0 なら空のソースとして扱う。`data` が NULL で `length` が 0 でなければ `AMARK_ERROR_INVALID_ARGUMENT`。
 
 ##### State Management
-- State model：`{allocator, syntax, root, all_nodes の環, sources[{bytes: 埋め込みの amark_buffer, line_starts[], pending_cr}], tracking, 内部のカウンタ}`。
+- State model：`{allocator, syntax, owned_syntax（所有していれば syntax と同じ、なければ NULL）, root, all_nodes の環, sources[{bytes: 埋め込みの amark_buffer, line_starts[], pending_cr}], tracking, 内部のカウンタ}`。`owned_syntax` は NULL →（take）→ 非 NULL の一方向で、解放まで変わらない。
 - Concurrency strategy：文書は 1 つのスレッドから使う。異なる文書は独立（共有するのは凍結した構文セットと `const` の静的データだけ）。
 
 #### NodeCore
@@ -714,7 +757,7 @@ AMARK_API amark_status amark_node_set_link_label(amark_node *node, const char *t
 | Field | Detail |
 |-------|--------|
 | Intent | 包含の規則を守った挿入・移動・置換・切り離し・解放 |
-| Requirements | 1.6, 1.7, 4.2–4.5, 10.3 |
+| Requirements | 1.6, 1.7, 4.2–4.5, 4.11, 10.3 |
 
 **Responsibilities & Constraints**
 - 検査の順（どれかに反すれば `AMARK_ERROR_INVALID_ARGUMENT`、木は変えない）：
@@ -727,6 +770,7 @@ AMARK_API amark_status amark_node_set_link_label(amark_node *node, const char *t
 - `replace(old, new)`：`new` を `old` の位置に置き、`old` を切り離す。`old` が切り離されていれば `AMARK_ERROR_INVALID_ARGUMENT`。
 - `unlink`：根なら `AMARK_ERROR_INVALID_ARGUMENT`、切り離し済みなら何もせず成功。
 - `free`：木にあれば切り離し（親に `CHILDREN`）、`amark__node_destroy_subtree` で解放する。根を渡したときは何もしない。
+- 包含の判定（検査の順の 3）と、検査を済ませた切り離しのノードを親の指定の位置（兄弟の前、NULL なら末尾）につなぐ処理（記録つき）は、`tree_internal.h` の内部関数（`amark__node_allows_child`、`amark__node_link_child`）として、CopyImport の子をまとめた取り込みからも使う（規則を 1 か所に保つ）。
 
 **Contracts**: Service [x]
 ```c
@@ -744,8 +788,8 @@ AMARK_API amark_status amark_node_replace(amark_node *old_node, amark_node *new_
 
 | Field | Detail |
 |-------|--------|
-| Intent | 部分木の複製と、別の文書からの取り込み |
-| Requirements | 4.6–4.9 |
+| Intent | 部分木の複製と、別の文書からの取り込み（部分木の単位と、子をまとめた単位） |
+| Requirements | 4.6–4.11 |
 
 **Responsibilities & Constraints**
 - 複製：同じ文書に、型、型のデータ（`copy`。なければバイトの複製）、リテラル、トークン、編集の記録、子孫を複製した、切り離されたノードを作る。関連付けたポインタは複製しない。
@@ -756,13 +800,25 @@ AMARK_API amark_status amark_node_replace(amark_node *old_node, amark_node *new_
   4. 取り込み元が取り込み先と同じ文書なら、複製と同じ。
 - 失敗したとき：作りかけのノードを解放し、追加したソースを取り除く（強い保証）。
 - 反復で実装する（親のポインタで戻る）。
+- 子をまとめた取り込み（`amark_node_import_children(parent, before, source_parent)`、4.10、4.11）：`source_parent` の子の部分木をすべて複製し、`parent` の `before` の前（NULL なら末尾）に元の順で挿入する。一時的な文書でパースした断片を既存の文書に差し込む用途（`block-parser` の断片のパース）を想定する。手順は次のとおりで、木を変える前にすべての検査と確保を終える。
+  1. 引数の検査：`parent` と `source_parent` が NULL でない。`before` は NULL か、`parent` の子（`before->parent == parent`）。違反は `AMARK_ERROR_INVALID_ARGUMENT`。
+  2. 型の対応付け：`source_parent` のすべての子の部分木の型の記述子を、取り込み先の構文セットで対応付ける（単一の取り込みの手順 1 と同じ）。見つからなければ `AMARK_ERROR_INVALID_ARGUMENT`。
+  3. 包含の検査：直接の子のそれぞれについて、StructureEdit と同じ規則（`amark__node_allows_child`：`parent` の型の `can_contain`、なければ `accepts & provides`）で `parent` に置けることを確かめる。1 つでも反すれば `AMARK_ERROR_INVALID_ARGUMENT`。複製は新しいノードなので循環の検査は要らない。
+  4. ソースの複製：すべての子の部分木のトークンが参照するソースを、識別子で重複を除いて集め、それぞれを取り込み先に 1 回だけ複製して登録し、識別子の対応表を作る（取り込み元と取り込み先が同じ文書なら複製しない）。
+  5. ノードの複製：子ごとに、切り離された複製を作る（単一の取り込みの手順 3 と同じ）。呼び出しの時点の子の並びを写すので、`source_parent` が `parent` やその祖先でもよい。
+  6. 挿入：作った複製を順に `amark__node_link_child` で `before` の前へつなぐ（確保なし、失敗しない）。`parent` に `CHILDREN` を 1 回、各複製に `RELOCATED`（`CREATED` でなければ）を記録し、複製が編集の記録を持てば祖先へ `DESCENDANTS` を伝播する（EditTracking の不変条件）。
+- 子をまとめた取り込みの失敗（手順 4、5 の確保の失敗）：作った複製をすべて解放し、追加したソースを取り除いて、取り込み先の文書を呼び出し前の状態に戻す（全か無か）。取り込み元は変えない。
+- `source_parent` が子を持たなければ、何もせず成功する（記録もしない）。計算量は、子の部分木のノードとトークンの数と、複製するソースのバイト数に比例する。
 
 **Contracts**: Service [x]
 ```c
 AMARK_API amark_status amark_node_copy(const amark_node *node, amark_node **out_copy);
 AMARK_API amark_status amark_node_import(amark_document *document, const amark_node *node, amark_node **out_copy);
+/* source_parent の子をすべて複製し、parent の before の前（NULL なら末尾）に順に挿入する。全か無か */
+AMARK_API amark_status amark_node_import_children(amark_node *parent, amark_node *before,
+                                                  const amark_node *source_parent);
 ```
-- 根（document）を渡したときは `AMARK_ERROR_INVALID_ARGUMENT`（子を順に取り込む）。
+- `amark_node_import` に根（document）を渡したときは `AMARK_ERROR_INVALID_ARGUMENT`。文書の全体を取り込むには、根を `source_parent` にして `amark_node_import_children` を使う。
 
 #### TokenCheck
 
@@ -1016,6 +1072,7 @@ typedef struct amark__source {
 struct amark_document {
     amark_allocator allocator;
     const amark_syntax_set *syntax;
+    amark_syntax_set *owned_syntax;         /* take_syntax_set で受け取った構文セット。なければ NULL */
     amark_node *root;
     amark_node *ring;
     amark__source *sources;
@@ -1031,14 +1088,15 @@ struct amark_document {
 ### Error Strategy
 - すべての公開の関数は `foundation` の規約に従う。表現できない値の設定、包含の規則の違反、循環、別の文書のノード、型の合わない操作は `AMARK_ERROR_INVALID_ARGUMENT` で、木を変えない。
 - 凍結した構文セットの変更、凍結していない構文セットでの文書の生成は `AMARK_ERROR_INVALID_STATE`。
+- 構文セットの所有の受け渡しで、文書が使っていない構文セット、静的な構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT`（所有権は呼び出し側に残る）。
 - サイズの計算（トークンの配列、ソースの追加、リテラルの複製）は `amark__size_add` / `amark__size_mul` で検査し、桁あふれは `AMARK_ERROR_OVERFLOW`。
-- 確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。複数の確保を伴う操作（一括設定、複製、取り込み、凍結）は、確保をすべて先に行ってから木を変える。
+- 確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。複数の確保を伴う操作（一括設定、複製、取り込み、子をまとめた取り込み、凍結）は、確保をすべて先に行ってから木を変える。
 
 ### Error Categories and Responses
 - **利用者の誤り**：NULL の必須引数、範囲外の値、表現できない文字列、型の不一致、構造の規則の違反 → `INVALID_ARGUMENT`。
 - **状態の誤り**：凍結の前後の取り違え → `INVALID_STATE`。
 - **資源の不足**：→ `OUT_OF_MEMORY` / `OVERFLOW`。
-- **規定しない使い方（文書化する）**：解放したノードの使用、構文セットや記述子の寿命の違反、走査中に現在のノードを動かした後の `next`、追跡を無効にした状態での利用者の編集（元の表記が古いまま出力されうる）。
+- **規定しない使い方（文書化する）**：解放したノードの使用、構文セットや記述子の寿命の違反（所有を渡した構文セットを呼び出し側が解放する、所有する文書を同じ構文セットを使う他の文書より先に解放する、を含む）、走査中に現在のノードを動かした後の `next`、追跡を無効にした状態での利用者の編集（元の表記が古いまま出力されうる）。
 
 ### Monitoring
 - 内部の不変条件の検査（`amark__tree_check`）とロスレス性の検証を、テストとファジングで使う。
@@ -1046,27 +1104,27 @@ struct amark_document {
 ## Testing Strategy
 
 ### Unit Tests（Naos、`tests/tree/`）
-- **document**：既定の構文セットが core であること（1.2）、凍結していない構文セットの拒否（8.7）、ソースの複製と追加でオフセットが保たれること（1.4, 1.5）、チャンクの境目の CRLF を含む行と列（3.5）、追跡が無効で始まること（7.8）、2 つの文書の交互の操作が干渉しないこと（1.9）。
+- **document**：既定の構文セットが core であること（1.2）、凍結していない構文セットの拒否（8.7）、ソースの複製と追加でオフセットが保たれること（1.4, 1.5）、チャンクの境目の CRLF を含む行と列（3.5）、追跡が無効で始まること（7.8）、2 つの文書の交互の操作が干渉しないこと（1.9）、構文セットの所有の受け渡し（テスト用アロケータで作った構文セットが文書の解放で解放されブロック数が 0 になること、`destroy` が構文セットを参照する拡張の型でサニタイザが解放の順序の誤りを検出しないこと。1.10）、静的な構文セット・文書が使っていない構文セット・2 回目の拒否で所有権が呼び出し側に残ること（1.11）。
 - **builtin_types**：19 の型の識別子・名前・ブロック/インライン・葉かどうか・既定の属性（2.1, 2.4, 4.1）、core の構文セットから記述子を引けること（2.5）。
-- **syntax_set**：追加・挿入・削除・置換の順序（8.4）、core の削除の拒否（8.3）、名前の重複と不正な記述子の拒否（8.5）、型の名前の重複の凍結での検出と識別子の決定性（8.6）、凍結後の変更の拒否（8.7）、スロットの種類ごとの順の列挙（8.8）、利用者の範囲の種類（8.9）、名前・記述子・識別子の相互の検索（8.10）、複製が凍結されていないこと（8.11）。
+- **syntax_set**：追加・挿入・削除・置換の順序（8.4）、core の削除の拒否（8.3）、名前の重複と不正な記述子の拒否（8.5）、型の名前の重複の凍結での検出と識別子の決定性（8.6）、凍結後の変更の拒否（8.7）、スロットの種類ごとの順の列挙（8.8）、利用者の範囲の種類（8.9）、名前・記述子・識別子の相互の検索（8.10）、複製が凍結されていないこと（8.11）、spec ごとの範囲が重ならず Amark の範囲に含まれること（8.13）。
 - **extension_type**：表のような検証用の型（データに所有する文字列、`can_contain` の上書き、`validate_literal`、`dump`）で、生成・解放・複製・比較・ダンプで関数表が呼ばれること（8.1, 8.12, 9.6）、`amark_node_mark_edited`（7.9）。
 - **structure_edit**：4 つの挿入の位置（4.2）、移動（4.3）、置換（4.4）、包含・循環・根・別の文書の拒否で木が変わらないこと（4.5）、切り離しと再挿入（1.6）、木にあるノードの解放（1.7）。
 - **literal_attr**：NUL・不正な UTF-8 の拒否（5.2）、改行と空行の規則（5.3, 5.4）、LF への正規化と末尾の LF（5.5）、範囲外の属性とラベルの規則（5.6）、型の不一致（2.6）、一括設定の text と softbreak の並び（5.7）、トークンが残ること（5.8）。
 - **edit_tracking**：記録の種類ごとの場面（7.1–7.4）、祖先への伝播（7.5）、同じ値（7.6）、無効のとき（7.7）、未知のビットの規則を文書の注釈と一致させる（7.10）。
 - **token**：種類ごとの検査と不正なトークンの拒否（6.2, 6.8）、CRLF/CR/LF の区別（6.3）、接頭辞の印（6.4）、長さ 0 の遅延継続（6.5）、部分的なタブ（6.6）、順の保持・削除・移動（6.1, 6.7）。
 - **token_check**：手で組み立てたトークンで、`> a\n> b\r\n`（接頭辞と CRLF）、`> a\nb`（遅延継続）、`>\t\tfoo`（部分的なタブ）、`- a\n\n  b`（リストの続きのインデント）、BOM で始まる入力、NUL を含む入力、エスケープと文字参照がすべて OK になること、意図的な抜け・重なり・タブの列の誤りがそれぞれの位置で検出されること（6.9）。
-- **copy_import**：複製が切り離され、記録とトークンを保つこと（4.6）、取り込みで元の文書を解放してもトークンのソースが読めること（4.7）、型のない構文セットへの取り込みの拒否（4.8）。
+- **copy_import**：複製が切り離され、記録とトークンを保つこと（4.6）、取り込みで元の文書を解放してもトークンのソースが読めること（4.7）、型のない構文セットへの取り込みの拒否（4.8）。子をまとめた取り込みで、子の順と位置（`before` が NULL と非 NULL）、複数の子が同じソースを参照してもソースが 1 回だけ追加されること、取り込み元の文書を解放した後もトークンのソースが読めること、根を `source_parent` にした文書の全体の取り込み、子のない `source_parent`、記録（親に `CHILDREN`、各子に `RELOCATED`）（4.10）、包含に反する子・型のない子・親の子でない `before` の拒否で何も挿入されないこと（4.11）。
 - **iterator_span**：イベントの並び（3.2）、走査中の text の変更と子の置き換え（3.3）、`reset`（3.4）、ソース上の範囲と行・列（3.5）、トークンなし（3.6）、関連付けたポインタ（3.7）、関係の参照（3.1）。
 - **equal_dump**：トークン・位置・記録を無視すること（9.1）、テキストの正規化（9.2）、ダンプの決定性と例（9.3）、エスケープ（9.4）、トークン・記録・位置の出力（9.5）。
 - **tree_builder**：組み立てた木のダンプが入力と一致する往復（9.7）。
 
 ### Integration / Robustness Tests
-- **oom_test**：`AMARK_CHECK_OOM_SWEEP` で、文書の生成、ソースの追加、ノードの生成、リテラルと属性の設定、一括設定、トークンの追加と移動、複製、取り込み、構文セットの凍結と複製、ダンプ、ロスレス性の検証のそれぞれについて、メモリ不足が返りリークがなく、対象が変わらないこと（1.8）。
-- **scale_test**：深さ 10 万の鎖の走査・複製・取り込み・解放・比較（4.9）と、深さ 1 万のダンプ。INTERNAL のカウンタで、深い葉への 10 万回の編集で伝播の段数が編集の回数の定数倍以下（10.4）、10 万のトークンを順に追加して移動の回数が 0（10.5）、子を持たないノードの挿入が祖先をたどらないこと（10.3）。
+- **oom_test**：`AMARK_CHECK_OOM_SWEEP` で、文書の生成、ソースの追加、ノードの生成、リテラルと属性の設定、一括設定、トークンの追加と移動、複製、取り込み、子をまとめた取り込み、構文セットの凍結と複製、ダンプ、ロスレス性の検証のそれぞれについて、メモリ不足が返りリークがなく、対象が変わらないこと（1.8）。
+- **scale_test**：深さ 10 万の鎖の走査・複製・取り込み（子をまとめた取り込みを含む）・解放・比較（4.9）と、深さ 1 万のダンプ。INTERNAL のカウンタで、深い葉への 10 万回の編集で伝播の段数が編集の回数の定数倍以下（10.4）、10 万のトークンを順に追加して移動の回数が 0（10.5）、子を持たないノードの挿入が祖先をたどらないこと（10.3）。
 - 公開ヘッダの単独コンパイルと C++ からの利用、エクスポートの検査（`foundation` の仕組み。10.1, 10.2）。
 
 ### Fuzzing
-- `tree_edit_fuzz`：入力のバイトを操作列（生成、挿入、移動、置換、切り離し、解放、リテラルの設定、一括設定、トークンの追加と移動、複製、取り込み、追跡の切り替え）として解釈し、確保の失敗を注入するアロケータで実行する。各操作の後に `amark__tree_check` が成功し、最後にダンプと複製の比較が一致することを確かめる。
+- `tree_edit_fuzz`：入力のバイトを操作列（生成、挿入、移動、置換、切り離し、解放、リテラルの設定、一括設定、トークンの追加と移動、複製、取り込み、子をまとめた取り込み、追跡の切り替え）として解釈し、確保の失敗を注入するアロケータで実行する。各操作の後に `amark__tree_check` が成功し、最後にダンプと複製の比較が一致することを確かめる。
 
 ## Performance & Scalability
 - 挿入・切り離し・兄弟と親への移動は定数時間（子を持つノードの挿入だけ、循環の検査で挿入先の深さに比例）。
