@@ -686,7 +686,6 @@ amark_add_fuzzer(<name>
 **Contracts**: Service [x]
 ```c
 typedef struct amark_test_allocator {
-    amark_allocator_t base;        /* amark_test_allocator_get() が返すもの */
     size_t fail_at;                /* この回数目の確保（malloc_fn と calloc_fn と realloc_fn）を失敗させる。0 なら失敗させない */
     size_t calls;                  /* 確保の呼び出しの回数 */
     size_t failures;               /* 注入した失敗の回数 */
@@ -696,7 +695,8 @@ typedef struct amark_test_allocator {
 } amark_test_allocator_t;
 
 void amark_test_allocator_init(amark_test_allocator_t *t);
-const amark_allocator_t *amark_test_allocator_get(amark_test_allocator_t *t);
+/* t を、コールバックが使う現在のテスト用アロケータにし、amark_allocator_set に渡すアロケータを返す */
+const amark_allocator_t *amark_test_allocator_activate(amark_test_allocator_t *t);
 void amark_test_allocator_reset_counters(amark_test_allocator_t *t);
 
 /* 対象の処理：成功でも失敗でも、作ったものをすべて解放してから戻る。
@@ -722,7 +722,8 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 #define AMARK_CHECK_BYTES_EQ(data, size, expected_literal) /* NAOS_CHECK_MEM_EQ を使う */
 #define AMARK_CHECK_BUFFER_EQ(buffer, expected_literal)    /* amark_buffer_data/length と比較 */
 ```
-- テスト用アロケータは、テストが `amark_allocator_set(amark_test_allocator_get(&t))` で設定し、終わりに `amark_allocator_set(NULL)` で既定に戻す。設定したまま中断しても無効なポインタが残らないよう `t` は静的な記憶域に置き、使うテストは始めに必ず設定し直す。設定が前のテストから残らないよう、設定中は中断するアサートを使わず、戻した後で結果を検査する。テスト用アロケータを設定している間は、同じプロセスで複数のスレッドから Amark を使わない。
+- テスト用アロケータは、テストが `amark_allocator_set(amark_test_allocator_activate(&t))` で設定し、終わりに `amark_allocator_set(NULL)` で既定に戻す。設定したまま中断しても無効なポインタが残らないよう `t` は静的な記憶域に置き、使うテストは始めに必ず設定し直す。設定が前のテストから残らないよう、設定中は中断するアサートを使わず、戻した後で結果を検査する。テスト用アロケータを設定している間は、同じプロセスで複数のスレッドから Amark を使わない。
+- コールバックは利用者のデータを受け取らないため、現在の `t` へのポインタを `amark_test_support` の静的な変数に持つ（「グローバルな可変状態を持たない」規約はライブラリ本体のもので、テスト用の補助には及ばない）。返すアロケータはどの `t` でも同じ静的な定数。同時に使える `t` は 1 つで、別の `t` に切り替えるのは、前の `t` の `live_blocks` が 0 のときだけ。
 - `amark_test_oom_sweep`：各回の前に `set_allocator` でテスト用アロケータを設定し、戻る前に `set_allocator(NULL)` で既定に戻す（入れ子では使わない）。`fail_at = 1, 2, ...` と増やしながら実行し、失敗が注入されなかった回で終える。各回で、戻り値が `AMARK_ERROR_OUT_OF_MEMORY` であることと `live_blocks == 0` を確かめる。`max_iterations` を超えたら打ち切って結果に示す。
 - `AMARK_CHECK_BUFFER_EQ` は `buffer.h` の関数を呼ぶため、ヘッダ `test_check.h` のマクロとして呼び出し側で展開される。`AMARK_CHECK_OOM_SWEEP` も同じく `amark_allocator_set` の参照を呼び出し側に置く（`amark_test_support` 自体は Amark の関数に依存しない）。
 
@@ -830,11 +831,10 @@ AMARK_API const char *amark_error_string(amark_error_t error);
 ```c
 typedef struct amark_allocator {
     size_t struct_size;   /* sizeof(amark_allocator_t) を入れる */
-    void *user_data;      /* コールバックにそのまま渡す */
-    void *(*malloc_fn)(void *user_data, size_t size);
-    void *(*calloc_fn)(void *user_data, size_t count, size_t size);
-    void *(*realloc_fn)(void *user_data, void *ptr, size_t new_size);
-    void (*free_fn)(void *user_data, void *ptr);
+    void *(*malloc_fn)(size_t size);
+    void *(*calloc_fn)(size_t count, size_t size);
+    void *(*realloc_fn)(void *ptr, size_t new_size);
+    void (*free_fn)(void *ptr);
 } amark_allocator_t;
 
 /* グローバルのアロケータを設定する（値でコピー）。NULL なら既定（malloc/calloc/realloc/free）に戻す */
@@ -851,7 +851,7 @@ AMARK_API void amark_free(void *ptr);
 - 設定は Amark の実体ごとに 1 つ。静的版を複数のモジュールにリンクしたときは、それぞれが独立した設定を持ち、あるモジュールで確保したメモリを別のモジュールの Amark で解放しない。
 - コールバックへの保証：`size`、`count`、`new_size` は 0 にならない（`amark_malloc` と `amark_realloc` は 0 を 1 として扱う。`amark_calloc` は `count` か `size` が 0 なら両方を 1 にして `calloc_fn` を呼ぶ）。`calloc_fn` に渡す `count * size` は桁あふれしない。`realloc_fn` と `free_fn` に NULL は渡らない（`amark_realloc(NULL, n)` は `malloc_fn` を、`amark_free(NULL)` は何もしない）。返すメモリは任意のオブジェクトの型に合う境界に揃っていること（`malloc` と同じ）。`calloc_fn` は `count * size` バイトをすべて 0 にしたメモリを返すこと（利用者の責任。Amark は 0 埋めを補わない）。`malloc_fn` と `realloc_fn` が返すメモリの内容は、`realloc_fn` が引き継ぐ部分を除いて不定。
 - `amark_calloc`：全バイトが 0 の領域を返す。`count * size` が桁あふれするとき、コールバックを呼ばずに NULL を返す。それ以外は必ず `calloc_fn` を使い、`malloc_fn` で代用しない。
-- 構造体の値はコピーするが、`user_data` の指すものは、設定を変えるまで有効でなければならない（利用者の責任）。複数のスレッドで Amark を使うとき、コールバックはスレッド安全であること。コールバックから Amark の関数を呼ばない。オブジェクトはアロケータを保持しない。`realloc_fn` が失敗したとき、元のブロックは有効なまま。
+- コールバックは標準ライブラリの `malloc` / `calloc` / `realloc` / `free` と同じ形で、利用者のデータを渡さない。状態が要るアロケータは自分の静的な変数などに持つ。複数のスレッドで Amark を使うとき、コールバックはスレッド安全であること。コールバックから Amark の関数を呼ばない。オブジェクトはアロケータを保持しない。`realloc_fn` が失敗したとき、元のブロックは有効なまま。
 
 **内部の契約**（`src/runtime/alloc_internal.h`）
 ```c

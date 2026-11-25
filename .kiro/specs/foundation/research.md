@@ -97,6 +97,15 @@
 - **Trade-offs**：共有版を共用する複数の利用者は設定を共有する。文書ごとのメモリの制限はできない。設定は未解放のメモリがなく他のスレッドが使っていないときだけ変えられる（検査しない）。後からオブジェクトごとの指定が必要になると、作成関数の追加が要る。
 - **検査と既定の取得の関数を置かない**：検査は `amark_allocator_set` が行い、既定へは NULL で戻せるため、`amark_allocator_check` と `amark_allocator_default` は廃止した。
 
+### Decision: アロケータのコールバックに `user_data` を渡さない
+- **Context**：要件 11.1。グローバルの方式に変えた後も、オブジェクトごとの方式のときの `user_data` が残っていた。
+- **Alternatives Considered**：
+  1. `user_data` をコールバックの第 1 引数で渡す
+  2. `user_data` を持たず、標準ライブラリと同じ形にする
+- **Selected Approach**：2（2026-11-25 に 1 から変更）。
+- **Rationale**：設定はグローバルに 1 つなので、状態が要るアロケータもその状態を静的な変数に持てる。`malloc` や、同じ形の関数を持つ別の malloc の実装を、包む関数なしでそのまま設定できる。`user_data` の寿命の規則も要らない。
+- **Trade-offs**：同じ関数で設定ごとに別の状態を使うには、利用者が静的な変数を切り替える。テスト用アロケータは現在の対象を静的な変数に持つ（`amark_test_allocator_activate`）。関数の形は公開後に変えられない。必要になれば別のフィールドの追加で対応する。
+
 ### Decision: バッファは公開の不透明型、内部向けには構造体を公開する内部ヘッダを持つ
 - **Context**：要件 12。レンダラの出力スロットを拡張が使うため、公開が必要。内部では構造体に埋め込みたい。
 - **Selected Approach**：`amark_buffer_t` は公開では不透明型（作成・解放の関数経由）。`src/runtime/buffer_internal.h` が構造体の定義と、埋め込み用の初期化・破棄の関数（`amark__buffer_init` / `amark__buffer_destroy`）を持つ。
@@ -142,6 +151,10 @@
 ### 2026-11-25：グローバルのアロケータへの変更
 - 利用者の決定により、オブジェクトごとのアロケータをグローバルのアロケータに変えた。要件 10.8、11、12.8、design の Allocator・Buffer・TestSupport、タスク 2.1–2.3、2.7、3.6 を変え、要件 11.9 を追加した。
 - 後続の spec の影響：作成関数などのアロケータの引数、`amark_document_allocator`、オブジェクト内のアロケータの保持を廃止した（`syntax-tree`、`block-parser`、`inline-parser`、`html-renderer`、`markdown-renderer`）。
+
+### 2026-11-25：アロケータの `user_data` の廃止
+- 利用者の決定により、`amark_allocator_t` とコールバックから `user_data` を除いた。要件 11.1、design の Allocator・TestSupport、タスク 2.2、2.3 を変えた。`amark_test_allocator_t` の `base` を除き、`amark_test_allocator_get` を `amark_test_allocator_activate` に変えた。
+- 後続の spec の影響：なし（どの spec もアロケータのコールバックを定義しない）。ノード、スロット、書き出しの関数の `user_data` は別のもので、変えない。
 
 ## References
 - [Naos v0.4.0](https://github.com/vabelorg/naos/tree/v0.4.0) — テストフレームワーク、CMake 関数、DLL の扱い
