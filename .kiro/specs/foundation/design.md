@@ -153,7 +153,7 @@ graph TB
 ├── .gitattributes                 # 改行を LF に統一、テストデータとコーパスをバイナリ扱い、export-ignore
 ├── .gitignore                     # build*/ など
 ├── cmake/
-│   ├── AmarkVersion.cmake         # version.h から版を読み、矛盾を検出する
+│   ├── AmarkVersion.cmake         # version.h から版を読み、書式の誤りを検出する
 │   ├── AmarkCompilerOptions.cmake # amark_target_defaults()：C99、警告、可視性。サニタイザの適用
 │   ├── AmarkInstall.cmake         # install と export、パッケージ設定と pc の生成
 │   ├── AmarkConfig.cmake.in       # find_package(Amark) の入口。種類（静的/動的）の選択
@@ -464,7 +464,7 @@ amark_target_defaults(<target>)
 | Requirements | 2.6, 9.6 |
 
 **Responsibilities & Constraints**
-- `amark_read_version(<header>)`：`#define AMARK_VERSION_MAJOR <n>` などの行を読み、`AMARK_VERSION`（`X.Y.Z`）、`AMARK_VERSION_MAJOR/MINOR/PATCH`、`AMARK_SOVERSION` を設定する。`AMARK_VERSION_STRING` が 3 つの数から作った文字列と一致しなければ `FATAL_ERROR`。
+- `amark_read_version(<header>)`：`#define AMARK_VERSION_MAJOR <n>` など 3 つの数の行を読み、`AMARK_VERSION`（`X.Y.Z`）、`AMARK_VERSION_MAJOR/MINOR/PATCH`、`AMARK_SOVERSION` を設定する。数は `(0|[1-9][0-9]*)` の形だけを受け付け、行がない、または書式に合わなければ `FATAL_ERROR`。文字列版（`AMARK_VERSION_STRING`）はヘッダの中で 3 つの数から作るので読まない。
 - `AMARK_SOVERSION`：メジャー版が 0 のとき `0.<minor>`、それ以外は `<major>`。
 - パッケージの互換性：メジャー版が 0 なら `SameMinorVersion`、それ以外は `SameMajorVersion`。
 - スクリプトモード（`check_version_tag.cmake`）からも include できる。
@@ -785,11 +785,17 @@ amark_test_oom_result_t amark_test_oom_sweep(amark_test_set_allocator_t set_allo
 
 **Contracts**: Service [x]
 ```c
-/* include/amark/version.h — 版の唯一の定義。CMake がこの書式の行を読む */
+/* include/amark/version.h — 版の唯一の定義。CMake が MAJOR/MINOR/PATCH の行を読む */
 #define AMARK_VERSION_MAJOR 0
 #define AMARK_VERSION_MINOR 1
 #define AMARK_VERSION_PATCH 0
-#define AMARK_VERSION_STRING "0.1.0"
+/* 内部用：2 段にして、引数のマクロを展開してから文字列にする */
+#define AMARK_VERSION_STRINGIFY_(x) #x
+#define AMARK_VERSION_STRINGIFY(x) AMARK_VERSION_STRINGIFY_(x)
+#define AMARK_VERSION_STRING                         \
+    AMARK_VERSION_STRINGIFY(AMARK_VERSION_MAJOR)     \
+    "." AMARK_VERSION_STRINGIFY(AMARK_VERSION_MINOR) \
+    "." AMARK_VERSION_STRINGIFY(AMARK_VERSION_PATCH) /* "0.1.0" */
 #define AMARK_VERSION_ENCODE(major, minor, patch) \
     ((long)(major) * 1000000L + (long)(minor) * 1000L + (long)(patch))
 #define AMARK_VERSION_NUMBER \
@@ -799,6 +805,8 @@ AMARK_API long amark_version_number(void);        /* リンクされたライブ
 AMARK_API const char *amark_version_string(void); /* 静的な文字列。解放しない */
 ```
 - マイナー版とパッチ版は 0–999。
+- 3 つの数は、先頭に 0 を付けない 10 進数だけで書く（括弧や接尾辞を付けない）。そのまま `AMARK_VERSION_STRING` に入るため。
+- `AMARK_VERSION_STRING` は 3 つの数から作る文字列リテラルで、別に書かない。`AMARK_VERSION_STRINGIFY` と `AMARK_VERSION_STRINGIFY_` は内部用で、利用者は使わない（使われる場所で展開されるので `#undef` できない）。
 
 #### Error
 
@@ -978,7 +986,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 
 ### Error Strategy
 - 公開 API は Error conventions（上記）に従う。異常終了しない、リークしない、失敗時は状態を変えない。
-- ビルドとテストのインフラは、構成の段階で検出できる誤り（古い CMake、未知のサニタイザ、版の矛盾、`amark_add_test` の引数の誤り）を `FATAL_ERROR` で、理由と直し方を示して止める。
+- ビルドとテストのインフラは、構成の段階で検出できる誤り（古い CMake、未知のサニタイザ、版の書式の誤り、`amark_add_test` の引数の誤り）を `FATAL_ERROR` で、理由と直し方を示して止める。
 - 実行の段階のツールの不足（pkg-config、nm）はスキップ（`AMARK_SKIP:`）として報告し、失敗と区別する。
 
 ### Error Categories and Responses

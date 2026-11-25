@@ -71,7 +71,7 @@
 - **Alternatives Considered**：
   1. `project(VERSION)` を正として `configure_file` でヘッダを生成する
   2. 手書きのヘッダを正として、CMake がヘッダを読む
-- **Selected Approach**：2。`cmake/AmarkVersion.cmake` が `AMARK_VERSION_MAJOR/MINOR/PATCH/STRING` を読み、矛盾があれば構成を失敗させる。
+- **Selected Approach**：2。`cmake/AmarkVersion.cmake` が `AMARK_VERSION_MAJOR/MINOR/PATCH` を読み、書式に合わなければ構成を失敗させる。`AMARK_VERSION_STRING` はヘッダの中で 3 つの数を文字列化して作る（数と文字列の不一致が起こらない）。
 - **Rationale**：ヘッダが生成物でなくなり、ソースツリーだけで完結する。Naos と同じ方式。
 - **Trade-offs**：ヘッダの書式を固定する必要がある（正規表現で読むため）。
 
