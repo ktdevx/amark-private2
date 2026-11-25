@@ -33,3 +33,4 @@ if(AMARK_BUILD_TESTS)
 endif()
 
 add_subdirectory(base)
+add_subdirectory(testgen)

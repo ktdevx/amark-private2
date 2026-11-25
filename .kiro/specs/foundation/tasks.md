@@ -119,7 +119,7 @@
   - _Requirements: 10.4, 10.8, 11.4, 12.4, 12.5, 12.7_
 
 - [ ] 3. テスト生成、パッケージ、ファジング、リポジトリの検査
-- [ ] 3.1 テストデータからテストを生成する仕組みを作る
+- [x] 3.1 テストデータからテストを生成する仕組みを作る
   - スクリプトモードの補助として、ファイルを行ごとの 16 進に分ける関数、ASCII の 16 進化、行の連結、C の配列の初期化子の生成（長さ 0 を含む）、C の識別子への変換、短い文字列のリテラル化、内容が同じなら書き換えない書き込みを作る
   - データファイルごとに生成スクリプトをビルド時に実行して C のソースを作り、生成したスイートと手書きのスイートを並べた main を構成時に作ってテストとして登録する関数を作る。データ、生成スクリプト、補助が変われば生成し直す
   - NUL、CR、不正な UTF-8、`;`、`[`、LF で終わらない最後の行を含むデータを、生成したテストの中でバイト単位で比較する自己テストを用意する
@@ -231,3 +231,4 @@
 - 1.5: テストは `amark_add_test(<target> SOURCES … [INTERNAL] [LIBRARIES …] [LABELS …])` で登録し、各テストは CTest に `<target>.<suite>.<test>` として載る。`amark_test_support` は今は INTERFACE ライブラリ（tests/support と Naos::naos）。2.3 で test_allocator.c を加えるときに STATIC に変える
 - 2.3: 確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP(scenario, ctx)`（tests/support/test_allocator.h）。結果の構造体に設計にない `truncated` を加えた。総当たりの中で `NAOS_FAIL` が起きると既定のアロケータに戻らないので、テストの teardown で `amark_allocator_set(NULL)` を呼ぶ
 - 2.5: `src/base/unicode_tables.inc` は `amark_unicode_range_t` を定義しない。2.6 の unicode.c は `<stdint.h>` と `typedef struct { uint32_t first; uint32_t last; } amark_unicode_range_t;` を include より前に置く。生成スクリプトは `include/amark/unicode.h` がないと版の照合を警告で飛ばすので、2.6 でヘッダを加えたらエラーに変える（この目的に限り 2.6 は tools/gen_unicode_tables.py を編集してよい）
+- 3.1: データ駆動のテストは `amark_add_generated_tests(<target> GENERATOR <script> DATA <files…> …)`。生成スクリプトは先頭で `cmake_minimum_required(VERSION 3.21)` を呼び、`include(AmarkTestGen)` の補助を使う。Makefiles では生成物（`.c`）を手で消したら `.stamp` も消す。スイート名の識別子への変換は AmarkTesting.cmake と AmarkTestGen.cmake の 2 か所にあるので、変えるときは両方を直す
