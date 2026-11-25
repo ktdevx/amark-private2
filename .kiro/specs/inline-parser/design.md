@@ -228,7 +228,7 @@ bench/
 - `src/parse/inline_plain.c` — `amark_inline_delegate_default()` が `amark__inline_engine_delegate` を返すようにする（`block-parser` の design が予定する変更）。
 - `src/syntax/commonmark.c` — 構築関数の「構文の拡張の一覧」の末尾にインラインの拡張を加える（順は CommonMarkSet）。
 - `src/CMakeLists.txt` — `amark_objects` に `src/parse/inline_*.c` と `src/syntax/` のインラインのファイルを追加する。
-- `tests/CMakeLists.txt` — INTERFACE ライブラリ `amark_test_inline`（`support/inline_check.c`。Naos を使う）を定義し、`add_subdirectory(inline)`、`add_subdirectory(spec)`、`add_subdirectory(extensions)` を追加する。`extensions` は、`foundation` が定める Naos を使わないテスト支援ライブラリの構成（`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON のとき）でも `amark_test_gfm` が定義されるように、その仕組みに従って加える。
+- `tests/CMakeLists.txt` — INTERFACE ライブラリ `amark_test_inline`（`support/inline_check.c`。Naos を使う）を定義し、`add_subdirectory(inline)`、`add_subdirectory(spec)`、`add_subdirectory(extensions)` を追加する。`foundation` の規則どおり `tests/` とその下は `AMARK_FUZZ` だけが ON の構成でも入るので、Naos を使う `amark_test_inline` と `inline`・`spec` のテストは `if(AMARK_BUILD_TESTS)` の中に置き、`extensions` は常に加える（`tests/extensions/CMakeLists.txt` の中で、Naos を使わない `amark_test_gfm` は常に定義し、Naos を使う生成テストと組み合わせのテストは `if(AMARK_BUILD_TESTS)` の中に置く）。
 - `tests/support/gen_examples.cmake` — `block-parser` が作ったスクリプトに `EXPECT=`・`FACTORY=`・`CHECK=` の引数を足す（InlineCheck）。引数がないときの既定の動作と、区切りの読み取り・テストの名前は変えない（`block-parser` の生成テストの結果を変えない）。
 - `fuzz/CMakeLists.txt` — `amark_add_fuzzer(inline_parse SOURCES inline_parse_fuzz.c CORPUS corpus/inline_parse LIBRARIES amark_test_gfm)`。`amark_test_gfm` は Naos に依存しない（`-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF` でも構成できる。`LIBRARIES` のターゲットがなければ `amark_add_fuzzer` が構成を失敗させる）。
 - `bench/CMakeLists.txt` — `inline_pathological` を追加する（ファイルは `block-parser` が所有し、この spec は追記する側）。
