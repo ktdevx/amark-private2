@@ -35,27 +35,31 @@ typedef enum amark_event
     AMARK_EVENT_EXIT = 3
 } amark_event_t;
 
-/* Creates in *out_iter an iterator over the subtree of root, before its first
- * event. */
+/* Creates in *out_iter an iterator over the subtree of root (any node, attached
+ * or not), before its first event: its node is NULL and its event
+ * AMARK_EVENT_NONE. On a failure, *out_iter is set to NULL. */
 AMARK_API amark_error_t amark_iter_create(amark_node_t *root, amark_iter_t **out_iter);
 
 /* Destroys iter. Does nothing for NULL. */
 AMARK_API void amark_iter_destroy(amark_iter_t *iter);
 
 /* Moves to the next event and returns it: (root, ENTER) first, AMARK_EVENT_DONE at
- * the end. */
+ * the end (with a NULL node), and AMARK_EVENT_DONE again on every later call.
+ * Returns AMARK_EVENT_DONE for NULL. */
 AMARK_API amark_event_t amark_iter_next(amark_iter_t *iter);
 
-/* The current node and event of iter. */
+/* The current node and event of iter (NULL and AMARK_EVENT_NONE for NULL). */
 AMARK_API amark_node_t *amark_iter_node(const amark_iter_t *iter);
 AMARK_API amark_event_t amark_iter_event(const amark_iter_t *iter);
 
 /* The root of iter. */
 AMARK_API amark_node_t *amark_iter_root(const amark_iter_t *iter);
 
-/* Sets the current node and event of iter. node must be in the subtree of the
- * root, and a leaf cannot get AMARK_EVENT_EXIT; otherwise returns
- * AMARK_ERROR_INVALID_ARGUMENT. */
+/* Sets the current node and event of iter; the next amark_iter_next continues
+ * from there. node must be in the subtree of the root, event must be
+ * AMARK_EVENT_ENTER or AMARK_EVENT_EXIT, and a leaf (a node whose type cannot have
+ * children) cannot get AMARK_EVENT_EXIT; otherwise returns
+ * AMARK_ERROR_INVALID_ARGUMENT and iter is unchanged. */
 AMARK_API amark_error_t amark_iter_reset(amark_iter_t *iter, amark_node_t *node,
                                          amark_event_t event);
 

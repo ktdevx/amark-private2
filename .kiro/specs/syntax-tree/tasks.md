@@ -116,7 +116,7 @@
   - _Depends: 5.2_
   - _Requirements: 4.9, 4.10, 4.11, 7.2, 7.3, 7.5_
 
-- [ ] 5.3 (P) 走査を実装する
+- [x] 5.3 (P) 走査を実装する
   - 現在のノードとイベントだけを状態に持ち、呼ばれた時点のリンクから次を決める走査を、子を持てる型には入ると出る、葉には入るだけのイベントで、根の外へ出ない形で作る
   - 位置の再設定で、根の部分木に含まれることと葉に出るイベントを指定しないことを確かめる
   - テストで、イベントの並び、走査中の text の変更と子の一括置き換えの後も未訪問の部分を訪問すること、現在のノードの切り離しの後に再設定して続けられること、葉だけの根を確かめられる
@@ -204,3 +204,4 @@
 - 5.2: 内部関数 `amark_node_create_copy`（node.c。0 で埋めて `init` を呼ばず、`copy` かバイトの複製でデータを作る。`copy` の失敗では `deinit` を呼ばない）と `amark_document_truncate_sources`（document.c）を tree.h に加えた。複製は記録をそのまま写し、複製自体には `CREATED` を付けない。取り込みは使われるソースだけを識別子の増える順に複製する（トークンの順が保たれる）。copy_import.c の context_init / check_types / mark_sources / copy_sources / copy_subtree / context_rollback は 5.5 で再利用する
 - 5.2: 公開の extension.h に、`init` と `copy` は失敗時に自分で確保したものを解放すること、所有するデータを持つ型は `copy` を用意すること（ないとバイトの複製になる）を 7.1 か 7.5 で書き足す。`amark_node_create_copy` は `data_size` が 0 のとき `copy` を呼ばない（init/deinit とは非対称。必要なら直す）
 - 5.5: copy_import.c の context_init は確保しない初期化と `context_alloc_source_map` に分けた。型の検査が確保より先になったので、`amark_node_copy` / `amark_node_import` でも型の拒否は OOM より INVALID_ARGUMENT が優先される。子をまとめた取り込みは、複製をすべて作ってから（スナップショット）`amark_node_link_child` でつなぐ
+- 5.3: 走査は最初の `next` の前はノード NULL・イベント NONE、DONE のときノード NULL。`amark_iter_next(NULL)` は DONE。`reset` は ENTER と EXIT だけを受け付け、開始前と DONE の後でも使える。葉は `amark_node_can_have_children` が偽のノード。オブジェクトのポインタを返す出力引数は、失敗時に NULL にする（foundation の規約。`amark_iter_create` も同じ）

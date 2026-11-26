@@ -52,3 +52,8 @@ amark_add_test(token_check_test SOURCES token_check_test.c)
 # the rejections, deep chains and the out-of-memory sweeps (reads the ring and
 # checks the invariants).
 amark_add_test(copy_import_test SOURCES copy_import_test.c INTERNAL)
+
+# The traversal: the events of a sample tree, a leaf as the root, the subtree never
+# left, the edits during the traversal, the resets and their rejections, a deep
+# chain and the out-of-memory sweep of the creation (public API only).
+amark_add_test(iterator_span_test SOURCES iterator_span_test.c)
