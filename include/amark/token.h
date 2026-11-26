@@ -69,7 +69,7 @@ typedef struct amark_token
     size_t offset;
     size_t length;
     /* With AMARK_TOKEN_FLAG_PARTIAL_TAB: the columns of the same tab used by the
-     * tokens before this one. */
+     * tokens before this one. Without it, this field and tab_columns must be 0. */
     unsigned tab_column_offset;
     /* With AMARK_TOKEN_FLAG_PARTIAL_TAB: the columns this token covers. */
     unsigned tab_columns;
@@ -78,8 +78,9 @@ typedef struct amark_token
 /* Returns the number of tokens of node. */
 AMARK_API size_t amark_node_token_count(const amark_node_t *node);
 
-/* Writes the token at index of node in *out_token (up to its struct_size). An
- * index out of range is AMARK_ERROR_INVALID_ARGUMENT. */
+/* Writes the token at index of node in *out_token (up to its struct_size, which
+ * is kept). An index out of range and a struct_size below that of version 1 are
+ * AMARK_ERROR_INVALID_ARGUMENT, and *out_token is then not written. */
 AMARK_API amark_error_t amark_node_token_at(const amark_node_t *node, size_t index,
                                             amark_token_t *out_token);
 
@@ -87,8 +88,9 @@ AMARK_API amark_error_t amark_node_token_at(const amark_node_t *node, size_t ind
  * Adds token to node, at its sorted place (adding in source order takes amortized
  * constant time). Checks the kind and the flags, the bytes the kind requires,
  * that the source is registered in the document of node and that offset + length
- * is within the source (an overflow included); a violation is
- * AMARK_ERROR_INVALID_ARGUMENT. Zero-length tokens are kept.
+ * is within the source (an overflow included), and that struct_size is at least
+ * that of version 1; a violation is AMARK_ERROR_INVALID_ARGUMENT. Zero-length
+ * tokens are kept.
  */
 AMARK_API amark_error_t amark_node_add_token(amark_node_t *node, const amark_token_t *token);
 

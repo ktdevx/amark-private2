@@ -32,3 +32,7 @@ amark_add_test(tree_check_test SOURCES tree_check_test.c INTERNAL)
 # destruction and their records (checks the invariants and reads the internal
 # counters).
 amark_add_test(structure_edit_test SOURCES structure_edit_test.c INTERNAL)
+
+# Syntax tokens: the checks of each kind, the order, removal, transfer and access
+# (checks the invariants and reads the internal counter and token arrays).
+amark_add_test(token_test SOURCES token_test.c INTERNAL)

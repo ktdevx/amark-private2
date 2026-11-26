@@ -680,7 +680,7 @@ AMARK_API void amark_node_mark_edited(amark_node_t *node);   /* 拡張の設定�
 | `BOM` | 8 | 先頭の UTF-8 の BOM | オフセット 0、バイトが `EF BB BF` |
 | `LAZY_CONTINUATION` | 9 | 遅延継続行でこのコンテナの接頭辞が省かれた印 | 長さ 0 |
 
-- 印：`AMARK_TOKEN_FLAG_CONTAINER_PREFIX`（コンテナが行の先頭、子の内容の前に置く表記。引用の `>` と任意の空白、リスト項目の最初の行のマーカーと空白、続く行のインデント、`LAZY_CONTINUATION`）。`AMARK_TOKEN_FLAG_PARTIAL_TAB`（1 つのタブの一部の列だけを表す。長さ 1 でバイトがタブ、`tab_columns` が 1–4、`tab_column_offset + tab_columns` ≤ 4）。未知の印は `AMARK_ERROR_INVALID_ARGUMENT`。
+- 印：`AMARK_TOKEN_FLAG_CONTAINER_PREFIX`（コンテナが行の先頭、子の内容の前に置く表記。引用の `>` と任意の空白、リスト項目の最初の行のマーカーと空白、続く行のインデント、`LAZY_CONTINUATION`）。`AMARK_TOKEN_FLAG_PARTIAL_TAB`（1 つのタブの一部の列だけを表す。長さ 1 でバイトがタブ、`tab_columns` が 1–4、`tab_column_offset + tab_columns` ≤ 4）。`PARTIAL_TAB` を持たないトークンの `tab_column_offset` と `tab_columns` は 0（違反は `AMARK_ERROR_INVALID_ARGUMENT`）。未知の印は `AMARK_ERROR_INVALID_ARGUMENT`。
 - 役割（`role`）は所有するノードの型を扱う構文拡張が決める 16 ビットの番号。0 は「指定なし」。
 - 共通の検査：種類が既知、ソースが登録済み、`offset + length` がソースの長さ以下（桁あふれも拒否）。
 - 移動（`transfer`）：同じ文書のノード間で、`from` の `[first, first + count)` を `to` に整列して移す。確保の失敗時はどちらも変えない。
