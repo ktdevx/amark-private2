@@ -245,6 +245,12 @@
 - **検討した代替**：(1) いまの 2 段の形を残す：検査の実行の失敗と文書の不整合を戻り値で区別できるが、`markdown-renderer` と形がそろわず、呼び出し側が不整合を自分でコードに直す必要がある。(2) `GAP` などをそれぞれ `amark_error_t` に加える：1 つの関数のためにコードが 3 つ増える。種類は報告の構造体に残す。
 - **Implications**：TokenCheck の Contracts と Responsibilities、共通の規約の構造体名、Error Handling、Testing Strategy、Revalidation Triggers、タスク 5.1 を合わせた。`block-parser` の design のテストの補助の説明（`OK` を `AMARK_ERROR_NONE` に）を直した。`block-parser` の research と `inline-parser` の記述は関数名と種類名（GAP など）だけで、変更は要らない。要件 6.9 の文言は変えない。承認は維持する。
 
+### 2026-11-26：ノード型の記述子の `node_class` を `level` に改名する
+- **Context**：`node_class` は `class` が C++ の予約語のため `node_` を付けた名前で、ノード型の記述子のメンバーとしては冗長だった。
+- **変更**：型を `amark_node_level_t`、定数を `AMARK_NODE_LEVEL_BLOCK`（1）と `AMARK_NODE_LEVEL_INLINE`（2）、記述子のメンバーを `level` にした。値、0 を不正にする規則、記述子の検査は変えない。
+- **名前**：HTML と CSS で定着した「block-level／inline-level」の言い方に合わせた。見出しの属性のレベル（1–6）と単語は同じだが、あちらはノードの属性（`amark_node_heading_level`）で、記述子のメンバーとは層が違うので取り違えにくい。文書では「ブロックレベルかインラインレベルか」と「見出しのレベル」と書き分ける。検討した代替：`layer`（steering のコードのレイヤーの規則と言葉が重なる）、`context`（`amark_block_context_t` などの処理の文脈と紛れる）、`category`（`provides` / `accepts` の「分類」と重なる）、`kind`（スロットとトークンの `kind` と重なる）。
+- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。C の実装はまだない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則
