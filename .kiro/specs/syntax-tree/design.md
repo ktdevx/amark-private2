@@ -900,7 +900,7 @@ AMARK_API amark_error_t amark_node_import(amark_document_t *target, const amark_
 AMARK_API amark_error_t amark_node_import_children(amark_node_t *target_parent, amark_node_t *before,
                                                    const amark_node_t *source_parent);   /* before が NULL なら末尾 */
 ```
-- **複製**（5.6）：型、項目の値、style、行の範囲、配置の記録、トークン、拡張のデータ（`copy`）、子孫を写す。content オブジェクトは共有する（参照カウントを増やす）。複製したノードは切り離された状態になる。
+- **複製**（5.6）：型、項目の値、style、行の範囲、配置の記録、トークン、拡張のデータ（`copy`）、子孫を写す。content オブジェクトは共有する（持ち主の数と土台の数を増やす）。複製したノードは切り離された状態になる。
 - **取り込み**（5.7–5.9）：
   1. 部分木が参照する行（行の範囲、帯、空行、レイアウトのトークン、中身の部分の行）を集める。
   2. その行のバイト列を、元の行の順と改行の種類のまま、取り込み先の文書の新しいソース（取り込み 1 回につき 1 つ。入力の終わりを通知した状態）に写す。行は、LineTable の内部関数で、各行の範囲と改行の種類を明示して行の表に足す。バイト列を分け直さないので、改行のない行の次の行や、CR の行の次の空の LF の行が 1 行につながることはない。確保に失敗したら、足した行とソースを取り除く。
