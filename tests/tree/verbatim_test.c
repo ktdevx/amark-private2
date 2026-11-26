@@ -6,7 +6,9 @@
  * new nodes (11.6), whether the content of a leaf can be output in its original
  * lines (11.3), the coverage of a content by its tokens, the internal check
  * that the lossless check (13.2) reuses, and whether a subtree can be output in
- * its original spelling (11.4, 11.5, 7.8) with its cache (14.9).
+ * its original spelling (11.4, 11.5, 7.8) with its cache (14.9), and the
+ * tightness of a list derived from its blank lines, its cache and its override
+ * (3.7, 6.11).
  */
 #include "tree/tree.h"
 
@@ -1299,6 +1301,329 @@ NAOS_TEST(out_of_memory_in_the_judgment_leaves_the_cache_consistent)
     AMARK_CHECK_OOM_SWEEP(judge_oom_scenario, NULL);
 }
 
+/* ---- Tightness (3.7, 6.11) -------------------------------------------------------- */
+
+/* The tight value of list (amark_node_get), which must succeed and be PRESENT. */
+static int64_t tight(const amark_node_t *list)
+{
+    amark_value_t value;
+
+    memset(&value, 0xA5, sizeof(value));
+    value.struct_size = sizeof(value);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_get(list, AMARK_LIST_TIGHT, &value));
+    NAOS_CHECK_INT_EQ(AMARK_VALUE_PRESENT, value.state);
+    return value.number;
+}
+
+/* A document of source built from tree (without :tight, so that the tight value
+ * of each list is derived), checked by the internal checker. */
+static amark_document_t *built(const char *source, const char *tree)
+{
+    amark_document_t *document = new_document(source);
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, tree);
+    CHECK_TREE_OK(document);
+    return document;
+}
+
+static const int list_path[] = {0, -1};
+static const int first_item_path[] = {0, 0, -1};
+static const int second_item_path[] = {0, 1, -1};
+
+/* L0 "- a", L1 "- b": no blank line. */
+static const char tight_list_source[] = "- a\n- b\n";
+static const char tight_list_tree[] =
+    "(document :lines (0 2)\n"
+    "  (list :type bullet :lines (0 2)\n"
+    "    (item :lines (0 1) :margins ((0 0 2 present first))\n"
+    "      (paragraph :lines (0 1) :content laid ((0 2 3))\n"
+    "        (text :spelling ((text 0 1 :facet literal)) \"a\")))\n"
+    "    (item :lines (1 1) :margins ((1 0 2 present first))\n"
+    "      (paragraph :lines (1 1) :content laid ((1 2 3))\n"
+    "        (text :spelling ((text 0 1 :facet literal)) \"b\")))))";
+
+/* L0 "- a", L1 "" (owned by the list), L2 "- b". */
+static const char items_blank_source[] = "- a\n\n- b\n";
+static const char items_blank_tree[] =
+    "(document :lines (0 3)\n"
+    "  (list :type bullet :lines (0 3) :blanks ((1 0 0))\n"
+    "    (item :lines (0 1) :margins ((0 0 2 present first))\n"
+    "      (paragraph :lines (0 1) :content laid ((0 2 3))\n"
+    "        (text :spelling ((text 0 1 :facet literal)) \"a\")))\n"
+    "    (item :lines (2 1) :margins ((2 0 2 present first))\n"
+    "      (paragraph :lines (2 1) :content laid ((2 2 3))\n"
+    "        (text :spelling ((text 0 1 :facet literal)) \"b\")))))";
+
+/* L0 "- a", L1 "" (owned by the item), L2 "  b": two paragraphs of one item. */
+static const char children_blank_source[] = "- a\n\n  b\n";
+static const char children_blank_tree[] =
+    "(document :lines (0 3)\n"
+    "  (list :type bullet :lines (0 3)\n"
+    "    (item :lines (0 3) :blanks ((1 0 0))\n"
+    "      :margins ((0 0 2 present first) (1 0 0 present) (2 0 2 present))\n"
+    "      (paragraph :lines (0 1) :content laid ((0 2 3))\n"
+    "        (text :spelling ((text 0 1 :facet literal)) \"a\"))\n"
+    "      (paragraph :lines (2 1) :content laid ((2 2 3))\n"
+    "        (text :spelling ((text 0 1 :facet literal)) \"b\")))))";
+
+NAOS_TEST(a_list_without_blank_lines_between_its_blocks_is_tight)
+{
+    amark_document_t *document = built(tight_list_source, tight_list_tree);
+
+    NAOS_CHECK_INT_EQ(1, tight(node_at(document, list_path)));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_blank_line_between_items_makes_the_list_loose)
+{
+    amark_document_t *document = built(items_blank_source, items_blank_tree);
+    amark_node_t *list = node_at(document, list_path);
+
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    /* Again from the cache. */
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    CHECK_TREE_OK(document);
+    /* Without the second item, the blank line ends the list: tight. */
+    amark_node_destroy(node_at(document, second_item_path));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_blank_line_between_the_children_of_an_item_makes_the_list_loose)
+{
+    amark_document_t *document = built(children_blank_source, children_blank_tree);
+    amark_node_t *list = node_at(document, list_path);
+    amark_node_t *item = node_at(document, first_item_path);
+
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    CHECK_TREE_OK(document);
+    /* Without the second paragraph, the blank line ends the item: tight. */
+    amark_node_destroy(child_at(item, 1));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(blank_lines_that_are_not_between_two_blocks_keep_the_list_tight)
+{
+    /* L0 "- a", L1 "", L2 "- b", L3 "": records where the first item holds the
+     * blank line after its only child and the list the one after its last
+     * item. "Between" is after the last line of a block and before the first
+     * line of the next one: blank lines at the end do not count. */
+    amark_document_t *document = built(
+        "- a\n\n- b\n\n",
+        "(document :lines (0 4)\n"
+        "  (list :type bullet :lines (0 4) :blanks ((3 0 0))\n"
+        "    (item :lines (0 2) :blanks ((1 0 0))\n"
+        "      :margins ((0 0 2 present first) (1 0 0 present))\n"
+        "      (paragraph :lines (0 1) :content laid ((0 2 3))\n"
+        "        (text :spelling ((text 0 1 :facet literal)) \"a\")))\n"
+        "    (item :lines (2 1) :margins ((2 0 2 present first))\n"
+        "      (paragraph :lines (2 1) :content laid ((2 2 3))\n"
+        "        (text :spelling ((text 0 1 :facet literal)) \"b\")))))");
+
+    NAOS_CHECK_INT_EQ(1, tight(node_at(document, list_path)));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(blank_lines_in_a_nested_list_or_a_block_quote_do_not_count)
+{
+    /* L0 "- a", L1 "  - b", L2 "" (owned by the nested list), L3 "  - c". */
+    amark_document_t *document = built(
+        "- a\n  - b\n\n  - c\n",
+        "(document :lines (0 4)\n"
+        "  (list :type bullet :lines (0 4)\n"
+        "    (item :lines (0 4)\n"
+        "      :margins ((0 0 2 present first) (1 0 2 present) (2 0 0 present)\n"
+        "                (3 0 2 present))\n"
+        "      (paragraph :lines (0 1) :content laid ((0 2 3))\n"
+        "        (text :spelling ((text 0 1 :facet literal)) \"a\"))\n"
+        "      (list :type bullet :lines (1 3) :blanks ((2 0 0))\n"
+        "        (item :lines (1 1) :margins ((1 2 4 present first))\n"
+        "          (paragraph :lines (1 1) :content laid ((1 4 5))\n"
+        "            (text :spelling ((text 0 1 :facet literal)) \"b\")))\n"
+        "        (item :lines (3 1) :margins ((3 2 4 present first))\n"
+        "          (paragraph :lines (3 1) :content laid ((3 4 5))\n"
+        "            (text :spelling ((text 0 1 :facet literal)) \"c\")))))))");
+    amark_node_t *outer = node_at(document, list_path);
+    amark_node_t *inner = child_at(node_at(document, first_item_path), 1);
+
+    NAOS_CHECK_INT_EQ(1, tight(outer));
+    NAOS_CHECK_INT_EQ(0, tight(inner));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+
+    /* L0 "- > a", L1 "  >" (owned by the block quote), L2 "  > b". */
+    document = built(
+        "- > a\n  >\n  > b\n",
+        "(document :lines (0 3)\n"
+        "  (list :type bullet :lines (0 3)\n"
+        "    (item :lines (0 3)\n"
+        "      :margins ((0 0 2 present first) (1 0 2 present) (2 0 2 present))\n"
+        "      (block_quote :lines (0 3) :blanks ((1 3 3))\n"
+        "        :margins ((0 2 4 present) (1 2 3 present) (2 2 4 present))\n"
+        "        (paragraph :lines (0 1) :content laid ((0 4 5))\n"
+        "          (text :spelling ((text 0 1 :facet literal)) \"a\"))\n"
+        "        (paragraph :lines (2 1) :content laid ((2 4 5))\n"
+        "          (text :spelling ((text 0 1 :facet literal)) \"b\"))))))");
+    NAOS_CHECK_INT_EQ(1, tight(node_at(document, list_path)));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_tight_override_wins_until_it_is_unset)
+{
+    amark_document_t *document = built(items_blank_source, items_blank_tree);
+    amark_node_t *list = node_at(document, list_path);
+
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_TIGHT, 1));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    CHECK_TREE_OK(document);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    /* Overriding with the derived value still holds an override (6.11): it
+     * stays when the blank line goes. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_TIGHT, 0));
+    amark_node_destroy(node_at(document, second_item_path));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+
+    /* A tight list overridden as loose. */
+    document = built(tight_list_source, tight_list_tree);
+    list = node_at(document, list_path);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_TIGHT, 0));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(changes_of_the_items_and_their_children_invalidate_the_tightness)
+{
+    amark_document_t *document = built(children_blank_source, children_blank_tree);
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *list = node_at(document, list_path);
+    amark_node_t *item = node_at(document, first_item_path);
+    amark_node_t *text = amark_node_first_child(amark_node_first_child(item));
+    amark_node_t *paragraph = NULL;
+
+    /* Cached as loose, with the verbatim results of the whole tree. */
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    /* A change under a child of an item leaves the tightness as it is, but
+     * invalidates the verbatim results of the item and of the list. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(text, AMARK_TEXT_LITERAL, "A", 1));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    CHECK_TREE_OK(document);
+    /* Removing the second paragraph changes the children of the item, whose
+     * verbatim result is already invalid: the tightness is derived again. */
+    amark_node_destroy(child_at(item, 1));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    CHECK_TREE_OK(document);
+    /* A new paragraph without a line range is not after the blank line. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(item, paragraph));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    /* Its line range, a record of the grandchild of the list, puts it there. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(paragraph, 2, 1));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    CHECK_TREE_OK(document);
+    /* Removing the blank line record (dropping the spelling of the item, which
+     * gives the list its current value as an override), then unsetting the
+     * override: the list is tight again. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(item));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_tightness_of_a_list_in_a_block_quote_is_cached_and_checked)
+{
+    amark_document_t *document = quoted_list();
+    amark_node_t *quote = node_at(document, quote_path);
+    amark_node_t *list = node_at(document, list_in_quote_path);
+    amark_tree_check_report_t report;
+    uint32_t saved_flags;
+
+    /* The recorded value (loose) is an override; the derived value agrees:
+     * the list holds the blank line ">" between its items. */
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    NAOS_CHECK_UINT_EQ(0, list->cache_flags & AMARK_TREE_CACHE_TIGHT);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(0, tight(list));
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_CACHE_TIGHT | AMARK_TREE_CACHE_LOOSE,
+                       list->cache_flags & (AMARK_TREE_CACHE_TIGHT | AMARK_TREE_CACHE_LOOSE));
+    /* The verbatim judgment keeps the cached tightness. */
+    NAOS_CHECK_TRUE(subtree_verbatim(amark_document_root(document)));
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_CACHE_TIGHT | AMARK_TREE_CACHE_LOOSE,
+                       list->cache_flags & (AMARK_TREE_CACHE_TIGHT | AMARK_TREE_CACHE_LOOSE));
+    CHECK_TREE_OK(document);
+
+    /* A cached tightness that differs from the blank lines. */
+    saved_flags = list->cache_flags;
+    list->cache_flags &= ~AMARK_TREE_CACHE_LOOSE;
+    memset(&report, 0, sizeof(report));
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_PTR_EQ(list, report.node);
+    /* A loose mark without the cache. */
+    list->cache_flags = saved_flags & ~AMARK_TREE_CACHE_TIGHT;
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_PTR_EQ(list, report.node);
+    list->cache_flags = saved_flags;
+    /* A cached tightness on a block quote. */
+    saved_flags = quote->cache_flags;
+    quote->cache_flags |= AMARK_TREE_CACHE_TIGHT;
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_PTR_EQ(quote, report.node);
+    quote->cache_flags = saved_flags;
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* The steps of deriving the tightness of the list of long_quoted_list(n). */
+static size_t derive_tightness(amark_document_t *document)
+{
+    amark_node_t *list = node_at(document, list_in_quote_path);
+    size_t before = document->stats.tight_steps;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    return document->stats.tight_steps - before;
+}
+
+NAOS_TEST(deriving_the_tightness_is_linear)
+{
+    amark_document_t *small = long_quoted_list(200);
+    amark_document_t *large = long_quoted_list(1600);
+    amark_node_t *list = node_at(large, list_in_quote_path);
+    size_t small_steps = derive_tightness(small);
+    size_t large_steps = derive_tightness(large);
+    size_t before;
+
+    NAOS_CHECK_UINT_GT(small_steps, 0);
+    NAOS_CHECK_UINT_LE(large_steps, 8 * small_steps + 16);
+    /* Bounded by the children of the list and of its items. */
+    NAOS_CHECK_UINT_LE(large_steps, 4 * (2 * 1600) + 16);
+    /* Cached: no step. */
+    before = large->stats.tight_steps;
+    NAOS_CHECK_INT_EQ(1, tight(list));
+    NAOS_CHECK_UINT_EQ(before, large->stats.tight_steps);
+    CHECK_TREE_OK(large);
+    amark_document_destroy(small);
+    amark_document_destroy(large);
+}
+
 NAOS_SUITE(verbatim,
     NAOS_ADD_TEST(spelling_state_of_parsed_nodes_is_complete),
     NAOS_ADD_TEST(spelling_state_tells_the_dropped_facets_and_styles),
@@ -1329,7 +1654,16 @@ NAOS_SUITE(verbatim,
     NAOS_ADD_TEST(only_children_of_a_share_lines_type_share_a_line),
     NAOS_ADD_TEST(judging_every_node_is_linear),
     NAOS_ADD_TEST(judging_every_node_of_deep_emphasis_is_linear),
-    NAOS_ADD_TEST(out_of_memory_in_the_judgment_leaves_the_cache_consistent)
+    NAOS_ADD_TEST(out_of_memory_in_the_judgment_leaves_the_cache_consistent),
+    NAOS_ADD_TEST(a_list_without_blank_lines_between_its_blocks_is_tight),
+    NAOS_ADD_TEST(a_blank_line_between_items_makes_the_list_loose),
+    NAOS_ADD_TEST(a_blank_line_between_the_children_of_an_item_makes_the_list_loose),
+    NAOS_ADD_TEST(blank_lines_that_are_not_between_two_blocks_keep_the_list_tight),
+    NAOS_ADD_TEST(blank_lines_in_a_nested_list_or_a_block_quote_do_not_count),
+    NAOS_ADD_TEST(the_tight_override_wins_until_it_is_unset),
+    NAOS_ADD_TEST(changes_of_the_items_and_their_children_invalidate_the_tightness),
+    NAOS_ADD_TEST(the_tightness_of_a_list_in_a_block_quote_is_cached_and_checked),
+    NAOS_ADD_TEST(deriving_the_tightness_is_linear)
 )
 
 NAOS_MAIN(

@@ -836,7 +836,9 @@ static amark_error_t judge_node(amark_node_t *node, size_t *steps)
     }
     amark_free(node->verbatim_columns);
     node->verbatim_columns = columns;
-    node->cache_flags = flags;
+    /* The cached tightness is kept: it has its own validity. */
+    node->cache_flags =
+        flags | (node->cache_flags & (AMARK_TREE_CACHE_TIGHT | AMARK_TREE_CACHE_LOOSE));
     return AMARK_ERROR_NONE;
 }
 
@@ -968,4 +970,122 @@ amark_error_t amark_node_verbatim(const amark_node_t *node, bool *out)
         *out = on_own_leaf_content(node);
     }
     return AMARK_ERROR_NONE;
+}
+
+/* ---- Tightness (3.7) ------------------------------------------------------------- */
+
+/* The index of the first blank line of records at or after line (count when
+ * there is none). */
+static size_t first_blank_from(const amark_tree_records_t *records, amark_line_id_t line,
+                               size_t *steps)
+{
+    size_t low = 0;
+    size_t high = records->blank_line_count;
+
+    while (low < high)
+    {
+        size_t middle = low + (high - low) / 2;
+
+        (*steps)++;
+        if (records->blank_lines[middle].line < line)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    return low;
+}
+
+/*
+ * Whether a blank line held by parent lies between two sibling children of
+ * parent with a line range: after the last line of the earlier one and before
+ * the first line of the next one. The blank lines are in the order of their
+ * lines: a cursor goes forward over them while the children follow each other
+ * in the order of the lines (each blank line and child is examined once); a
+ * child placed before the cursor (a moved block) searches the blank lines
+ * again from its own line.
+ */
+static bool blank_between_children(const amark_node_t *parent, size_t *steps)
+{
+    const amark_tree_records_t *records = parent->records;
+    const amark_node_t *prev = NULL;
+    const amark_node_t *child;
+    size_t next = 0;
+
+    if ((records == NULL) || (records->blank_line_count == 0))
+    {
+        return false;
+    }
+    for (child = parent->first_child; child != NULL; child = child->next)
+    {
+        (*steps)++;
+        if (child->line_count == 0)
+        {
+            continue;
+        }
+        if (prev != NULL)
+        {
+            amark_line_id_t after = prev->line_first + prev->line_count;
+
+            if ((next > 0) && (records->blank_lines[next - 1].line >= after))
+            {
+                next = first_blank_from(records, after, steps);
+            }
+            while ((next < records->blank_line_count) && (records->blank_lines[next].line < after))
+            {
+                (*steps)++;
+                next++;
+            }
+            if ((next < records->blank_line_count) &&
+                (records->blank_lines[next].line < child->line_first))
+            {
+                return true;
+            }
+        }
+        prev = child;
+    }
+    return false;
+}
+
+bool amark_tree_list_loose(const amark_node_t *list, size_t *steps)
+{
+    const amark_node_t *child;
+
+    (*steps)++;
+    if (blank_between_children(list, steps))
+    {
+        return true;
+    }
+    for (child = list->first_child; child != NULL; child = child->next)
+    {
+        (*steps)++;
+        if (blank_between_children(child, steps))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool amark_tree_derive_overridable(const amark_node_t *node, amark_facet_t facet,
+                                   int64_t *number)
+{
+    /* The cache is internal state: the derivation is a query (14.4). */
+    amark_node_t *list = (amark_node_t *)node;
+
+    if ((node->type != AMARK_NODE_LIST) || (facet != AMARK_LIST_TIGHT))
+    {
+        return false;
+    }
+    if ((list->cache_flags & AMARK_TREE_CACHE_TIGHT) == 0)
+    {
+        bool loose = amark_tree_list_loose(list, &list->document->stats.tight_steps);
+
+        list->cache_flags |= AMARK_TREE_CACHE_TIGHT | (loose ? AMARK_TREE_CACHE_LOOSE : 0u);
+    }
+    *number = ((list->cache_flags & AMARK_TREE_CACHE_LOOSE) != 0) ? 0 : 1;
+    return true;
 }

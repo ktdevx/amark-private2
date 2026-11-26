@@ -907,8 +907,9 @@ NAOS_TEST(an_override_is_kept_even_when_it_equals_the_current_value)
     amark_document_t *document = new_box_document();
     amark_node_t *box = new_node(document, BOX_TYPE);
 
-    /* Without an override the value is derived (the default for now); setting
-     * the same value still holds it as an override (6.11). */
+    /* Without an override the value is derived (here the default, as the facet
+     * has no derivation); setting the same value still holds it as an override
+     * (6.11). */
     validate_node(box);
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(box, BOX_FLAG, 1));
     NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, box->facets[BOX_FLAG - 1].state);

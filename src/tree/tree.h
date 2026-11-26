@@ -364,6 +364,29 @@ amark_error_t amark_tree_content_cover(const amark_node_t *leaf,
                                        amark_tree_cover_scratch_t *scratch,
                                        amark_tree_cover_t *out);
 
+/*
+ * The value derived from the layout for an OVERRIDABLE facet of node without an
+ * override, the step 2 of the getter (design, Tree: Facets): for the tight of
+ * a list (3.7), true with *number 1 for tight and 0 for loose, the result
+ * cached in the cache flags of the list (AMARK_TREE_CACHE_TIGHT); false for a
+ * facet without such a derivation (*number is then not written). The arguments
+ * are not NULL. Allocates nothing.
+ */
+bool amark_tree_derive_overridable(const amark_node_t *node, amark_facet_t facet,
+                                   int64_t *number);
+
+/*
+ * Whether list is loose (3.7), without the cache: a blank line held by list
+ * lies between two of its sibling children, or a blank line held by a child of
+ * list lies between two sibling children of that child. "Between" is after the
+ * last line of the earlier block and before the first line of the next one;
+ * children without a line range are left out. Blank lines held by deeper
+ * blocks (a nested list, a block quote) do not count. Each child and blank
+ * line examined counts one step of *steps: the time is proportional to the
+ * children of list, their children and the blank lines of them all.
+ */
+bool amark_tree_list_loose(const amark_node_t *list, size_t *steps);
+
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
 /* The states of the storage of a facet (amark_tree_facet_t.state). */
@@ -488,8 +511,8 @@ void amark_tree_node_release(amark_node_t *node);
  * no parent. */
 void amark_tree_node_detach(amark_node_t *node);
 
-/* The cached results of a node (Verbatim) are valid. The other flags are
- * meaningful only while this one is set. */
+/* The cached verbatim results of a node (Verbatim) are valid. The flags up to
+ * AMARK_TREE_CACHE_ENDS are meaningful only while this one is set. */
 #define AMARK_TREE_CACHE_VALID 0x01u
 /* The verbatim judgment of the node holds (verbatim.c): for a block, every
  * condition of 11.4 except that each line is covered up to its end; for an
@@ -505,6 +528,14 @@ void amark_tree_node_detach(amark_node_t *node);
  * block: the end column of the coverage of each line is in verbatim_columns
  * (after the start columns, if any). */
 #define AMARK_TREE_CACHE_ENDS 0x10u
+/* A list: the tightness derived from its blank lines (Verbatim,
+ * amark_tree_derive_overridable) is cached, loose with AMARK_TREE_CACHE_LOOSE.
+ * Independent of AMARK_TREE_CACHE_VALID: the derivation reads the list, its
+ * children and their children only, so the change notification clears it on
+ * the changed node, its parent and its grandparent whatever their verbatim
+ * results. */
+#define AMARK_TREE_CACHE_TIGHT 0x20u
+#define AMARK_TREE_CACHE_LOOSE 0x40u
 
 /* The kinds of the changes notified with amark_tree_changed. */
 typedef enum amark_tree_change
@@ -525,7 +556,10 @@ typedef enum amark_tree_change
  *     document (DefinitionIndex uses it to drop its document-order results);
  *   - for a change of the records or the values, puts a link_definition on the
  *     dirty list of the definition index (its label may have changed).
- * Each node visited counts one step of stats.invalidation_steps.
+ * Each node visited counts one step of stats.invalidation_steps. The cached
+ * tightness (AMARK_TREE_CACHE_TIGHT) of node, its parent and its grandparent
+ * is cleared as well, as the tightness of a list depends on its children and
+ * on their children.
  */
 void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind);
 
@@ -821,6 +855,9 @@ typedef struct amark_tree_stats
      * the walk, per line of a block judged, per record, child or token
      * examined, and per ancestor visited to find the leaf of an inline node. */
     size_t verbatim_steps;
+    /* The steps of the derivation of the tightness of the lists (Verbatim):
+     * one per derivation, plus one per child and per blank line examined. */
+    size_t tight_steps;
 } amark_tree_stats_t;
 
 struct amark_document

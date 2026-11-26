@@ -13,7 +13,8 @@
  *      (node_checks[]) on it: the relations, the containment rules, the link in
  *      link rule, the cache invariant, the storage of the facets, the
  *      layout (the line range and the layout records), the verbatim results
- *      of the cache, the content of a leaf and the content tokens.
+ *      of the cache, the cached tightness of a list, the content of a leaf and
+ *      the content tokens.
  * A component that adds records or caches adds its invariant as a node check
  * (records of one node: facets, margins, tokens, content tokens) or as a
  * document check after the walk (whole-document counts: the owners of the
@@ -514,7 +515,8 @@ static bool check_verbatim_cache(check_context_t *context, const amark_node_t *n
 {
     const uint32_t known = AMARK_TREE_CACHE_VALID | AMARK_TREE_CACHE_VERBATIM |
                            AMARK_TREE_CACHE_FULL_LINES | AMARK_TREE_CACHE_STARTS |
-                           AMARK_TREE_CACHE_ENDS;
+                           AMARK_TREE_CACHE_ENDS | AMARK_TREE_CACHE_TIGHT |
+                           AMARK_TREE_CACHE_LOOSE;
     uint32_t flags = node->cache_flags;
     bool verbatim = (flags & AMARK_TREE_CACHE_VERBATIM) != 0;
     bool full = (flags & AMARK_TREE_CACHE_FULL_LINES) != 0;
@@ -604,6 +606,35 @@ static bool check_verbatim_cache(check_context_t *context, const amark_node_t *n
     return true;
 }
 
+/* The cached tightness (Verbatim): only on a list, loose only with the cache,
+ * and the same as derived again from the blank lines. */
+static bool check_tight_cache(check_context_t *context, const amark_node_t *node)
+{
+    uint32_t flags = node->cache_flags;
+    size_t steps = 0;
+
+    if ((flags & AMARK_TREE_CACHE_TIGHT) == 0)
+    {
+        if ((flags & AMARK_TREE_CACHE_LOOSE) != 0)
+        {
+            return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                        "a loose mark without a cached tightness");
+        }
+        return true;
+    }
+    if (node->type != AMARK_NODE_LIST)
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                    "a cached tightness on a node that is not a list");
+    }
+    if (((flags & AMARK_TREE_CACHE_LOOSE) != 0) != amark_tree_list_loose(node, &steps))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                    "the cached tightness of a list differs from its blank lines");
+    }
+    return true;
+}
+
 /* The checks of one node, in order. Add the invariants of the records and the
  * caches of a node here. */
 static const node_check_t node_checks[] = {
@@ -614,6 +645,7 @@ static const node_check_t node_checks[] = {
     check_facets,
     check_layout,
     check_verbatim_cache,
+    check_tight_cache,
     check_content,
     check_content_tokens,
     check_derived,

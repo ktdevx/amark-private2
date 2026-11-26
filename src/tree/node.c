@@ -154,6 +154,7 @@ void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind)
 {
     amark_document_t *document = node->document;
     amark_node_t *current;
+    int depth;
 
     if (kind == AMARK_TREE_CHANGE_STRUCTURE)
     {
@@ -164,6 +165,12 @@ void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind)
         /* The label of a definition may have changed: the next lookup of the
          * definition index reads it again. */
         amark_tree_def_index_mark(node);
+    }
+    /* The cached tightness of a list depends on its children and theirs. */
+    for (current = node, depth = 0; (current != NULL) && (depth < 3);
+         current = current->parent, depth++)
+    {
+        current->cache_flags &= ~(uint32_t)(AMARK_TREE_CACHE_TIGHT | AMARK_TREE_CACHE_LOOSE);
     }
     /* A node whose cache is invalid has only invalid ancestors: stop there. */
     for (current = node; current != NULL; current = current->parent)

@@ -1282,46 +1282,61 @@ NAOS_TEST(discarding_all_spelling_of_containers_and_code_blocks)
 
 NAOS_TEST(discarding_all_spelling_of_a_list_or_its_item_keeps_tight)
 {
-    /* - a
-     *
-     * - b
-     * The tight value of a list is derived from the blank lines that dropping
-     * the spelling removes: it becomes an override with the value it had.
-     * Until Verbatim derives tight (12.3) the derived value is the default
-     * (tight); 12.3 must make this test check a loose list. */
-    amark_document_t *document = NEW_DOCUMENT("- a\n\n- b\n");
-    amark_node_t *list = new_block(document, AMARK_NODE_LIST, 0, 3);
-    amark_node_t *item = new_block(document, AMARK_NODE_ITEM, 0, 2);
-    amark_node_t *other = new_block(document, AMARK_NODE_LIST, 2, 1);
+    /* L0 "- a", L1 "" (owned by the item), L2 "  b", L3 "" (owned by the
+     * list), L4 "- c": a loose list, by the blank line between the children
+     * of its first item and by the one between its items (3.7). The tight
+     * value of a list is derived from the blank lines that dropping the
+     * spelling removes: it becomes an override with the value it had. */
+    amark_document_t *document = NEW_DOCUMENT("- a\n\n  b\n\n- c\n");
+    amark_node_t *list = new_block(document, AMARK_NODE_LIST, 0, 5);
+    amark_node_t *item = new_block(document, AMARK_NODE_ITEM, 0, 3);
+    amark_node_t *last = new_block(document, AMARK_NODE_ITEM, 4, 1);
     amark_node_t *paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    amark_node_t *second = new_block(document, AMARK_NODE_PARAGRAPH, 2, 1);
     amark_blank_line_t blank;
-    int64_t tight = get(list, AMARK_LIST_TIGHT).number;
 
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(list, item));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(list, last));
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(item, paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(item, second));
     memset(&blank, 0, sizeof(blank));
     blank.struct_size = sizeof(blank);
     blank.line = 1;
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_blank_line(item, &blank));
+    blank.line = 3;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_blank_line(list, &blank));
+    NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
 
     /* A paragraph in the item leaves the list alone. */
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(paragraph));
     NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_NONE, list->facets[AMARK_LIST_TIGHT - 1].state);
-    /* An item of the list: the parent list takes the override. */
+    NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
+    /* An item of the list: the parent list takes the override, which keeps
+     * the list loose without the blank line of the item. */
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(item));
     NAOS_CHECK_UINT_EQ(0, amark_block_blank_line_count(item));
     NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, list->facets[AMARK_LIST_TIGHT - 1].state);
-    NAOS_CHECK_INT_EQ(tight, get(list, AMARK_LIST_TIGHT).number);
+    NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
     NAOS_CHECK_UINT_EQ(0, list->dropped);
-    /* A list itself. */
-    tight = get(other, AMARK_LIST_TIGHT).number;
-    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(other));
-    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, other->facets[AMARK_LIST_TIGHT - 1].state);
-    NAOS_CHECK_INT_EQ(tight, get(other, AMARK_LIST_TIGHT).number);
-    NAOS_CHECK_UINT_EQ(AMARK_TREE_DROPPED_STRUCTURE, other->dropped);
+    /* Without the override, the blank line between the items still derives
+     * loose. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
+    /* A list itself: its blank line goes, its value stays as the override. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(list));
+    NAOS_CHECK_UINT_EQ(0, amark_block_blank_line_count(list));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, list->facets[AMARK_LIST_TIGHT - 1].state);
+    NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_DROPPED_STRUCTURE, list->dropped);
+    CHECK_TREE_OK(document);
+    /* Without any blank line left, the derived value is tight. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(list, AMARK_LIST_TIGHT));
+    NAOS_CHECK_INT_EQ(1, get(list, AMARK_LIST_TIGHT).number);
     /* An existing override is kept as it is. */
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_TIGHT, 0));
     NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(list));
+    NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(last));
     NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
     CHECK_TREE_OK(document);
     amark_document_destroy(document);

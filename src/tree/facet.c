@@ -60,7 +60,7 @@ static const amark_facet_desc_t *facet_desc(const amark_node_t *node, amark_face
  *      collapsed or shortcut): those of the definition of its label, found by
  *      the definition index, or UNRESOLVED without one;
  *   2. an OVERRIDABLE facet without an override: the value derived from the
- *      layout (tight) (Verbatim adds it here);
+ *      layout (the tight of a list, Verbatim), when the facet has one;
  *   3. a STRING facet with tokens: the value derived from its tokens;
  *   4. a CONTENT facet: the value derived from the content of the leaf;
  *   5. the value set or recorded;
@@ -146,6 +146,12 @@ static amark_error_t facet_value(const amark_node_t *node, amark_facet_t facet,
     out->number = 0;
     out->text = NULL;
     out->length = 0;
+    /* 2. */
+    if (((desc->flags & AMARK_FACET_OVERRIDABLE) != 0) && (slot->state == AMARK_TREE_FACET_NONE) &&
+        amark_tree_derive_overridable(node, facet, &out->number))
+    {
+        return AMARK_ERROR_NONE;
+    }
     /* 3 and 4. */
     error = amark_tree_derive(node, facet, desc, &derived, &out->text, &out->length);
     if ((error != AMARK_ERROR_NONE) || derived)
