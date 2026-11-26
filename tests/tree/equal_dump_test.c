@@ -2,7 +2,8 @@
  * Copyright (c) The Amark Authors */
 
 /*
- * The semantic comparison (src/tree/equal.c), through the public API.
+ * The semantic comparison (src/tree/equal.c) and the dump (src/tree/dump.c), through
+ * the public API (the internal struct only to set unknown edit record bits).
  *
  * Suite equal (8.12, 9.1, 4.9): two copies of a sample tree built in two documents
  * are equal, also when one has tokens, edit records or associated pointers the
@@ -18,17 +19,33 @@
  * AMARK_EQUAL_NORMALIZE_TEXT, which compares each run of adjacent text siblings as
  * one string (not across other nodes, with the nodes after the runs compared in
  * order) and ignores empty text nodes.
+ * Suite dump (9.3, 9.4, 9.5, 7.10, 4.9): the example of the design, every built-in
+ * attribute in order with the extension attributes, the same text for the same
+ * tree (appended after the content of the buffer), each string escape (valid UTF-8
+ * kept), the tokens with their flags, role, source and tab columns, the spans, the
+ * edit records with unknown bits as bitN, unknown flag bits ignored, NULL arguments
+ * and a chain of 10000 nodes.
+ * Suite dump_writer (9.6, 8.12): the failure of a dump function is returned and the
+ * buffer gets back its length; invalid attribute names, symbols and strings fail the
+ * writer, which keeps the failure for every later write and for the dump; each
+ * value kind at its limits; the out-of-memory sweep of the dump.
  */
+#include "tree/tree.h"
+
 #include <amark/allocator.h>
+#include <amark/buffer.h>
 #include <amark/document.h>
+#include <amark/dump.h>
 #include <amark/error.h>
 #include <amark/extension.h>
 #include <amark/node.h>
 #include <amark/token.h>
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <naos/naos.h>
@@ -80,15 +97,97 @@ typedef struct raw_data
     unsigned char bytes[12];
 } raw_data_t;
 
+/* What box_dump does (the dump suites change it; DUMP_NAME by default). */
+enum
+{
+    /* Writes :name with the name. */
+    DUMP_NAME,
+    /* Writes :name, then fails with AMARK_ERROR_INVALID_STATE. */
+    DUMP_FAIL_AFTER_NAME,
+    /* Writes an attribute with the name dump_bad_name, ignores the failure and
+     * returns AMARK_ERROR_NONE. */
+    DUMP_BAD_NAME_IGNORED,
+    /* Writes a symbol dump_bad_name, ignores the failure and returns
+     * AMARK_ERROR_NONE. */
+    DUMP_BAD_SYMBOL_IGNORED,
+    /* Writes :bytes with the dump_bytes. */
+    DUMP_BYTES
+};
+
+static int dump_mode = DUMP_NAME;
+static const char *dump_bad_name;
+static const char *dump_bytes;
+static size_t dump_bytes_length;
+/* The results of the writer calls of box_dump in the last dump. */
+static amark_error_t dump_results[3];
+
+static amark_error_t box_dump(const amark_node_t *node, const void *data,
+                              amark_dump_writer_t *writer)
+{
+    const char *name = ((const box_data_t *)data)->name;
+
+    (void)node;
+    switch (dump_mode)
+    {
+    case DUMP_FAIL_AFTER_NAME:
+        dump_results[0] = amark_dump_attr_string(writer, "name", name, strlen(name));
+        return AMARK_ERROR_INVALID_STATE;
+
+    case DUMP_BAD_NAME_IGNORED:
+        dump_results[0] = amark_dump_attr_int(writer, dump_bad_name, 1);
+        /* The writer has failed: every later write returns the failure. */
+        dump_results[1] = amark_dump_attr_int(writer, "after", 2);
+        return AMARK_ERROR_NONE;
+
+    case DUMP_BAD_SYMBOL_IGNORED:
+        dump_results[0] = amark_dump_attr_symbol(writer, "align", dump_bad_name);
+        dump_results[1] = amark_dump_attr_bool(writer, "after", true);
+        return AMARK_ERROR_NONE;
+
+    case DUMP_BYTES:
+        return amark_dump_attr_string(writer, "bytes", dump_bytes, dump_bytes_length);
+
+    default:
+        return amark_dump_attr_string(writer, "name", name, (name != NULL) ? strlen(name) : 0);
+    }
+}
+
+/* Writes the number of a raw node and the other value kinds of the writer. */
+static amark_error_t raw_dump(const amark_node_t *node, const void *data,
+                              amark_dump_writer_t *writer)
+{
+    const raw_data_t *raw = data;
+    amark_error_t err;
+
+    (void)node;
+    err = amark_dump_attr_int(writer, "number", (long long)raw->number);
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_dump_attr_bool(writer, "odd", ((raw->number % 2u) == 1u));
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_dump_attr_symbol(writer, "align", "left_2");
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_dump_attr_string(writer, "empty", NULL, 0);
+    }
+
+    return err;
+}
+
 static const amark_node_type_desc_t box_type = {
     sizeof(amark_node_type_desc_t), "x.box", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK,
     AMARK_CONTENT_BLOCK, AMARK_LITERAL_NONE, sizeof(box_data_t), NULL, NULL, NULL, box_deinit,
-    NULL, box_equal, NULL, NULL
+    NULL, box_equal, box_dump, NULL
 };
 
 static const amark_node_type_desc_t raw_type = {
     sizeof(amark_node_type_desc_t), "x.raw", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK, 0,
-    AMARK_LITERAL_NONE, sizeof(raw_data_t), NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+    AMARK_LITERAL_NONE, sizeof(raw_data_t), NULL, NULL, NULL, NULL, NULL, NULL, raw_dump, NULL
 };
 
 static const amark_node_type_desc_t pad_type = {
@@ -805,7 +904,587 @@ NAOS_SUITE(equal_text,
     NAOS_ADD_TEST(runs_do_not_join_across_other_nodes),
     NAOS_ADD_TEST(empty_text_is_ignored_when_normalized))
 
+/* --- Suites dump and dump_writer ----------------------------------------------- */
+
+NAOS_TEARDOWN(restore_dump)
+{
+    amark_allocator_set(NULL);
+    dump_mode = DUMP_NAME;
+    dump_bad_name = NULL;
+    dump_bytes = NULL;
+    dump_bytes_length = 0;
+}
+
+/* Dumps node with flags into a new buffer and checks that it succeeds. */
+static amark_buffer_t *dump_of(const amark_node_t *node, uint32_t flags)
+{
+    amark_buffer_t *out = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&out));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_dump(node, flags, out));
+
+    return out;
+}
+
+/* Checks that the dump of node with flags is expected (a NUL-terminated string). */
+#define CHECK_DUMP(node, flags, expected) \
+    do { \
+        amark_buffer_t *check_out_ = dump_of((node), (flags)); \
+        NAOS_CHECK_STR_EQ((expected), amark_buffer_data(check_out_)); \
+        NAOS_CHECK_UINT_EQ(strlen(expected), amark_buffer_length(check_out_)); \
+        amark_buffer_destroy(check_out_); \
+    } while (0)
+
+/* The dump of the sample of build_sample. */
+static const char sample_dump[] =
+    "(document\n"
+    "  (heading :level 2\n"
+    "    (text \"Title\")\n"
+    "    (emph\n"
+    "      (text \"em\")))\n"
+    "  (list :type ordered :start 3 :tight true\n"
+    "    (item\n"
+    "      (paragraph\n"
+    "        (text \"x\")\n"
+    "        (link :destination \"d\" :title \"t\"\n"
+    "          (text \"l\"))\n"
+    "        (image :destination \"i\" :title \"it\"\n"
+    "          (text \"alt\")))))\n"
+    "  (code_block :info \"c\" \"code\\n\")\n"
+    "  (link_definition :label \"L\" :destination \"u\" :title \"t2\")\n"
+    "  (x.box :name \"outer\"\n"
+    "    (x.raw :number 7 :odd true :align left_2 :empty \"\"))\n"
+    "  (thematic_break))\n";
+
+NAOS_TEST(the_example_of_the_design_is_reproduced)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *root;
+    amark_node_t *heading;
+    amark_node_t *list;
+    amark_node_t *paragraph;
+    amark_node_t *code;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    root = amark_document_root(document);
+    heading = add(document, root, AMARK_NODE_HEADING);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_heading_level(heading, 2));
+    (void)add_text(document, heading, "Hello");
+    list = add(document, root, AMARK_NODE_LIST);
+    /* The start of a bullet list is not written. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_list_start(list, 5));
+    paragraph = add(document, add(document, list, AMARK_NODE_ITEM), AMARK_NODE_PARAGRAPH);
+    (void)add_text(document, paragraph, "a");
+    (void)add(document, paragraph, AMARK_NODE_SOFTBREAK);
+    code = add(document, paragraph, AMARK_NODE_CODE);
+    SET_STRING(amark_node_set_literal, code, "x");
+    CHECK_DUMP(root, 0,
+               "(document\n"
+               "  (heading :level 2\n"
+               "    (text \"Hello\"))\n"
+               "  (list :type bullet :tight true\n"
+               "    (item\n"
+               "      (paragraph\n"
+               "        (text \"a\")\n"
+               "        (softbreak)\n"
+               "        (code \"x\")))))\n");
+    /* A subtree is dumped from its own depth, and a leaf alone. */
+    CHECK_DUMP(heading, 0, "(heading :level 2\n  (text \"Hello\"))\n");
+    CHECK_DUMP(code, 0, "(code \"x\")\n");
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(every_builtin_attribute_and_the_extension_attributes_are_written)
+{
+    sample_t s;
+    amark_node_t *empty;
+
+    build_sample(&s, NULL, false);
+    CHECK_DUMP(s.root, 0, sample_dump);
+    /* The defaults: an empty literal and empty strings, a loose list. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_list_tight(s.list, false));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_list_start(s.list, 0));
+    CHECK_DUMP(s.list, 0,
+               "(list :type ordered :start 0 :tight false\n"
+               "  (item\n"
+               "    (paragraph\n"
+               "      (text \"x\")\n"
+               "      (link :destination \"d\" :title \"t\"\n"
+               "        (text \"l\"))\n"
+               "      (image :destination \"i\" :title \"it\"\n"
+               "        (text \"alt\")))))\n");
+    empty = add(s.document, NULL, AMARK_NODE_LINK_DEFINITION);
+    CHECK_DUMP(empty, 0, "(link_definition :label \"\" :destination \"\" :title \"\")\n");
+    empty = add(s.document, NULL, AMARK_NODE_CODE_BLOCK);
+    CHECK_DUMP(empty, 0, "(code_block :info \"\" \"\")\n");
+    empty = add(s.document, NULL, AMARK_NODE_TEXT);
+    CHECK_DUMP(empty, 0, "(text \"\")\n");
+    empty = add(s.document, NULL, AMARK_NODE_HTML_INLINE);
+    SET_STRING(amark_node_set_literal, empty, "<a\r\nb>");
+    CHECK_DUMP(empty, 0, "(html_inline \"<a\\nb>\")\n");
+    amark_document_destroy(s.document);
+}
+
+NAOS_TEST(the_same_tree_always_gives_the_same_dump)
+{
+    sample_t a;
+    sample_t b;
+    amark_buffer_t *out = NULL;
+    size_t length;
+
+    build_sample(&a, NULL, true);
+    build_sample(&b, NULL, true);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&out));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(out, "prefix"));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_dump(a.root, 0, out));
+    length = amark_buffer_length(out);
+    /* The dump is appended after the content already there, then again the same
+     * text, and a tree built the same way in another document gives it too. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_dump(a.root, 0, out));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_dump(b.root, 0, out));
+    NAOS_CHECK_UINT_EQ(6 + (3 * (sizeof(sample_dump) - 1)), amark_buffer_length(out));
+    NAOS_CHECK_MEM_EQ(amark_buffer_data(out), 6, "prefix", 6);
+    NAOS_CHECK_MEM_EQ(amark_buffer_data(out) + 6, length - 6, sample_dump, sizeof(sample_dump) - 1);
+    NAOS_CHECK_MEM_EQ(amark_buffer_data(out) + length, length - 6, sample_dump,
+                      sizeof(sample_dump) - 1);
+    NAOS_CHECK_MEM_EQ(amark_buffer_data(out) + (2 * length) - 6, length - 6, sample_dump,
+                      sizeof(sample_dump) - 1);
+    amark_buffer_destroy(out);
+    /* With every flag too (the records, the same in both documents). */
+    out = dump_of(a.root, AMARK_DUMP_TOKENS | AMARK_DUMP_EDITS | AMARK_DUMP_SPANS);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_dump(b.root,
+                                        AMARK_DUMP_TOKENS | AMARK_DUMP_EDITS | AMARK_DUMP_SPANS,
+                                        out));
+    length = amark_buffer_length(out) / 2;
+    NAOS_CHECK_MEM_EQ(amark_buffer_data(out), length, amark_buffer_data(out) + length, length);
+    amark_buffer_destroy(out);
+    amark_document_destroy(a.document);
+    amark_document_destroy(b.document);
+}
+
+NAOS_TEST(strings_are_escaped)
+{
+    static const char bytes[] =
+        "q\"b\\n\nr\rt\tz\0"
+        "\x01\x1f\x7f"
+        " ~\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\xef\xbf\xbd"
+        "|\xff|\x80|\xc3|\xe2\x82|\xed\xa0\x80|\xc0\xaf|\xf4\x90\x80\x80|\xf0\x9f\x98";
+    sample_t s;
+    amark_node_t *code_block;
+
+    build_sample(&s, NULL, false);
+    dump_mode = DUMP_BYTES;
+    dump_bytes = bytes;
+    dump_bytes_length = sizeof(bytes) - 1;
+    amark_node_destroy(s.raw);
+    CHECK_DUMP(s.box, 0,
+               "(x.box :bytes \"q\\\"b\\\\n\\nr\\rt\\tz\\x00\\x01\\x1f\\x7f"
+               " ~\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\xef\xbf\xbd"
+               "|\\xff|\\x80|\\xc3|\\xe2\\x82|\\xed\\xa0\\x80|\\xc0\\xaf|\\xf4\\x90\\x80\\x80"
+               "|\\xf0\\x9f\\x98\")\n");
+    /* The literals and the built-in string attributes are escaped the same way. */
+    code_block = add(s.document, NULL, AMARK_NODE_CODE_BLOCK);
+    SET_STRING(amark_node_set_code_info, code_block, "a\"\\\t");
+    SET_STRING(amark_node_set_literal, code_block, "\t\"x\"\\\x01\r\n\x7f");
+    CHECK_DUMP(code_block, 0,
+               "(code_block :info \"a\\\"\\\\\\t\" \"\\t\\\"x\\\"\\\\\\x01\\n\\x7f\\n\")\n");
+    amark_document_destroy(s.document);
+}
+
+/* Adds a token with every field to node. */
+static void add_full_token(amark_node_t *node, amark_token_kind_t kind, amark_source_id_t source,
+                           size_t offset, size_t length, uint32_t flags, uint16_t role,
+                           unsigned tab_offset, unsigned tab_columns)
+{
+    amark_token_t token;
+
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.kind = kind;
+    token.role = role;
+    token.flags = flags;
+    token.source = source;
+    token.offset = offset;
+    token.length = length;
+    token.tab_column_offset = tab_offset;
+    token.tab_columns = tab_columns;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_add_token(node, &token));
+}
+
+NAOS_TEST(tokens_and_spans_are_written_when_asked)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t first = 9;
+    amark_source_id_t second = 9;
+    amark_node_t *root;
+    amark_node_t *heading;
+    amark_node_t *text;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "# Hi\n", 5, &first));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "\tx", 2, &second));
+    NAOS_REQUIRE_UINT_EQ(0, first);
+    NAOS_REQUIRE_UINT_EQ(1, second);
+    root = amark_document_root(document);
+    heading = add(document, root, AMARK_NODE_HEADING);
+    text = add_text(document, heading, "Hi");
+    (void)add(document, root, AMARK_NODE_THEMATIC_BREAK);
+    add_full_token(heading, AMARK_TOKEN_SPACE, second, 0, 1,
+                   AMARK_TOKEN_FLAG_CONTAINER_PREFIX | AMARK_TOKEN_FLAG_PARTIAL_TAB, 0, 1, 2);
+    add_full_token(heading, AMARK_TOKEN_MARKER, first, 0, 1, 0, 0, 0, 0);
+    add_full_token(heading, AMARK_TOKEN_SPACE, first, 1, 1, 0, 3, 0, 0);
+    add_full_token(heading, AMARK_TOKEN_LINE_ENDING, first, 4, 1, AMARK_TOKEN_FLAG_CONTAINER_PREFIX,
+                   0, 0, 0);
+    add_full_token(heading, AMARK_TOKEN_SPACE, second, 0, 1, AMARK_TOKEN_FLAG_PARTIAL_TAB, 65535,
+                   3, 1);
+    add_token(text, AMARK_TOKEN_TEXT, first, 2, 2);
+
+    CHECK_DUMP(root, AMARK_DUMP_TOKENS,
+               "(document\n"
+               "  (heading :level 1 :tokens ((marker 0 1) (space 1 1 :role 3)"
+               " (line_ending 4 1 prefix) (space 0 1 prefix partial_tab :source 1 :tab 1 2)"
+               " (space 0 1 partial_tab :role 65535 :source 1 :tab 3 1))\n"
+               "    (text :tokens ((text 2 2)) \"Hi\"))\n"
+               "  (thematic_break))\n");
+    /* The span of a node covers the tokens of its subtree in the source of its
+     * first token; a subtree without tokens has none. */
+    CHECK_DUMP(root, AMARK_DUMP_SPANS,
+               "(document :span (1 1 2 1)\n"
+               "  (heading :level 1 :span (1 1 2 1)\n"
+               "    (text :span (1 3 1 5) \"Hi\"))\n"
+               "  (thematic_break))\n");
+    CHECK_DUMP(text, AMARK_DUMP_TOKENS | AMARK_DUMP_SPANS | AMARK_DUMP_EDITS,
+               "(text :span (1 3 1 5) :tokens ((text 2 2)) \"Hi\")\n");
+    /* Unknown flag bits are ignored. */
+    CHECK_DUMP(text, 0xfffffff8u, "(text \"Hi\")\n");
+    CHECK_DUMP(text, 0xffffffffu, "(text :span (1 3 1 5) :tokens ((text 2 2)) \"Hi\")\n");
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(edit_records_are_written_when_asked)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *root;
+    amark_node_t *heading;
+    amark_node_t *text;
+    amark_node_t *rule;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    root = amark_document_root(document);
+    rule = add(document, root, AMARK_NODE_THEMATIC_BREAK);
+    amark_document_set_edit_tracking(document, true);
+    heading = add(document, root, AMARK_NODE_HEADING);
+    text = add_text(document, heading, "Hi");
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_after(heading, rule));
+    CHECK_DUMP(root, AMARK_DUMP_EDITS,
+               "(document :edits (children descendants)\n"
+               "  (heading :level 1 :edits (children descendants created)\n"
+               "    (text :edits (content created) \"Hi\"))\n"
+               "  (thematic_break :edits (relocated)))\n");
+    /* Without the flag, and for a node without records, nothing is written. */
+    CHECK_DUMP(root, 0,
+               "(document\n"
+               "  (heading :level 1\n"
+               "    (text \"Hi\"))\n"
+               "  (thematic_break))\n");
+    /* Every known bit in order, then the unknown bits by number. */
+    text->edits = 0x8000003fu;
+    rule->edits = 0;
+    CHECK_DUMP(text, AMARK_DUMP_EDITS,
+               "(text :edits (content children descendants relocated created bit5 bit31)"
+               " \"Hi\")\n");
+    text->edits = 0x00000100u;
+    CHECK_DUMP(text, AMARK_DUMP_EDITS, "(text :edits (bit8) \"Hi\")\n");
+    CHECK_DUMP(rule, AMARK_DUMP_EDITS, "(thematic_break)\n");
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(null_arguments_are_rejected)
+{
+    amark_document_t *document = NULL;
+    amark_buffer_t *out = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&out));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_dump(NULL, 0, out));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_dump(amark_document_root(document), 0, NULL));
+    NAOS_CHECK_UINT_EQ(0, amark_buffer_length(out));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_dump_attr_string(NULL, "a", "b", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_dump_attr_int(NULL, "a", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_dump_attr_bool(NULL, "a", true));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_dump_attr_symbol(NULL, "a", "b"));
+    amark_buffer_destroy(out);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_deep_chain_is_dumped_without_recursion)
+{
+    enum { DEPTH = 10000 };
+    amark_document_t *document = NULL;
+    amark_buffer_t *out;
+    const char *data;
+    size_t expected = 0;
+    size_t length;
+    size_t depth;
+    size_t closing;
+    size_t i;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    build_chain(document, DEPTH, false);
+    out = dump_of(amark_document_root(document), 0);
+    /* "(document" ")" LF, each block quote "\n" indent "(block_quote" ")", then the
+     * paragraph and the text one and two levels deeper. */
+    expected = 9 + 1 + 1;
+    for (depth = 1; depth <= DEPTH; depth++)
+    {
+        expected += 1 + (2 * depth) + 12 + 1;
+    }
+
+    expected += 1 + (2 * (DEPTH + 1)) + 10 + 1;
+    expected += 1 + (2 * (DEPTH + 2)) + 9 + 1;
+    data = amark_buffer_data(out);
+    length = amark_buffer_length(out);
+    NAOS_CHECK_UINT_EQ(expected, length);
+    NAOS_REQUIRE_UINT_GE(length, DEPTH + 40);
+    NAOS_CHECK_MEM_EQ(data, 29, "(document\n  (block_quote\n    (", 29);
+    /* The text, then the DEPTH + 3 closing parentheses and the final LF. */
+    NAOS_CHECK_MEM_EQ(data + length - (DEPTH + 13), 9, "(text \"x\"", 9);
+    closing = 0;
+    for (i = length - (DEPTH + 4); i < (length - 1); i++)
+    {
+        closing += (data[i] == ')') ? 1u : 0u;
+    }
+
+    NAOS_CHECK_UINT_EQ(DEPTH + 3, closing);
+    NAOS_CHECK_INT_EQ('\n', data[length - 1]);
+    amark_buffer_destroy(out);
+    amark_document_destroy(document);
+}
+
+NAOS_SUITE(dump,
+    NAOS_SET_TEARDOWN(restore_dump),
+    NAOS_ADD_TEST(the_example_of_the_design_is_reproduced),
+    NAOS_ADD_TEST(every_builtin_attribute_and_the_extension_attributes_are_written),
+    NAOS_ADD_TEST(the_same_tree_always_gives_the_same_dump),
+    NAOS_ADD_TEST(strings_are_escaped),
+    NAOS_ADD_TEST(tokens_and_spans_are_written_when_asked),
+    NAOS_ADD_TEST(edit_records_are_written_when_asked),
+    NAOS_ADD_TEST(null_arguments_are_rejected),
+    NAOS_ADD_TEST(a_deep_chain_is_dumped_without_recursion))
+
+/* Dumps the root of s after "prefix" and checks that the dump fails with expected
+ * and leaves only "prefix" in the buffer. */
+static void check_failed_dump(const sample_t *s, amark_error_t expected)
+{
+    amark_buffer_t *out = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&out));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_append_cstr(out, "prefix"));
+    NAOS_CHECK_INT_EQ(expected,
+                      amark_node_dump(s->root, AMARK_DUMP_TOKENS | AMARK_DUMP_EDITS, out));
+    NAOS_CHECK_STR_EQ("prefix", amark_buffer_data(out));
+    NAOS_CHECK_UINT_EQ(6, amark_buffer_length(out));
+    amark_buffer_destroy(out);
+}
+
+NAOS_TEST(the_failure_of_an_extension_is_returned_and_the_buffer_restored)
+{
+    sample_t s;
+
+    build_sample(&s, NULL, false);
+    dump_mode = DUMP_FAIL_AFTER_NAME;
+    memset(dump_results, 0xff, sizeof(dump_results));
+    check_failed_dump(&s, AMARK_ERROR_INVALID_STATE);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, dump_results[0]);
+    amark_document_destroy(s.document);
+}
+
+NAOS_TEST(invalid_attribute_names_fail_the_dump)
+{
+    static const char *const bad_names[] = { "", "A", "1a", "_a", "a-b", "a.b", "a b", "aB", NULL };
+    static const char *const good_names[] = { "a", "z9", "a_b_", "x0_y" };
+    sample_t s;
+    size_t i;
+
+    build_sample(&s, NULL, false);
+    dump_mode = DUMP_BAD_NAME_IGNORED;
+    amark_node_destroy(s.raw);
+    for (i = 0; i < (sizeof(bad_names) / sizeof(bad_names[0])); i++)
+    {
+        dump_bad_name = bad_names[i];
+        memset(dump_results, 0xff, sizeof(dump_results));
+        /* The extension ignores the failure; the writer keeps it and the dump
+         * returns it. */
+        check_failed_dump(&s, AMARK_ERROR_INVALID_ARGUMENT);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, dump_results[0]);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, dump_results[1]);
+    }
+
+    for (i = 0; i < (sizeof(good_names) / sizeof(good_names[0])); i++)
+    {
+        amark_buffer_t *out;
+        char expected[64];
+
+        dump_bad_name = good_names[i];
+        memset(dump_results, 0xff, sizeof(dump_results));
+        out = dump_of(s.box, 0);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, dump_results[0]);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, dump_results[1]);
+        strcpy(expected, "(x.box :");
+        strcat(expected, good_names[i]);
+        strcat(expected, " 1 :after 2)\n");
+        NAOS_CHECK_STR_EQ(expected, amark_buffer_data(out));
+        amark_buffer_destroy(out);
+    }
+
+    amark_document_destroy(s.document);
+}
+
+NAOS_TEST(invalid_symbols_and_strings_fail_the_dump)
+{
+    static const char *const bad_symbols[] = { "", "Left", "1", "-a", "a-b", "a.b", "\"a\"", NULL };
+    sample_t s;
+    size_t i;
+
+    build_sample(&s, NULL, false);
+    dump_mode = DUMP_BAD_SYMBOL_IGNORED;
+    for (i = 0; i < (sizeof(bad_symbols) / sizeof(bad_symbols[0])); i++)
+    {
+        dump_bad_name = bad_symbols[i];
+        memset(dump_results, 0xff, sizeof(dump_results));
+        check_failed_dump(&s, AMARK_ERROR_INVALID_ARGUMENT);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, dump_results[0]);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, dump_results[1]);
+    }
+
+    /* A NULL string with a length other than 0. */
+    dump_mode = DUMP_BYTES;
+    dump_bytes = NULL;
+    dump_bytes_length = 1;
+    check_failed_dump(&s, AMARK_ERROR_INVALID_ARGUMENT);
+    amark_document_destroy(s.document);
+}
+
+/* Writes integers at the limits through the writer. */
+static amark_error_t limits_dump(const amark_node_t *node, const void *data,
+                                 amark_dump_writer_t *writer)
+{
+    amark_error_t err;
+
+    (void)node;
+    (void)data;
+    err = amark_dump_attr_int(writer, "min", LLONG_MIN);
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_dump_attr_int(writer, "max", LLONG_MAX);
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_dump_attr_int(writer, "zero", 0);
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_dump_attr_bool(writer, "no", false);
+    }
+
+    return err;
+}
+
+static const amark_node_type_desc_t limits_type = {
+    sizeof(amark_node_type_desc_t), "y.limits", AMARK_NODE_LEVEL_INLINE, AMARK_CONTENT_INLINE, 0,
+    AMARK_LITERAL_LINE, 0, NULL, NULL, NULL, NULL, NULL, NULL, limits_dump, NULL
+};
+
+static const amark_node_type_desc_t *const y_types[] = { &limits_type };
+
+static const amark_extension_t y_extension = {
+    sizeof(amark_extension_t), "y", y_types, 1, NULL, 0, NULL
+};
+
+NAOS_TEST(the_writer_formats_each_value_kind)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_node_t *node;
+    char expected[160];
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_create(&set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_append(set, &y_extension));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_freeze(set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &document));
+    node = add(document, NULL, type_of(document, &limits_type));
+    SET_STRING(amark_node_set_literal, node, "v");
+    /* The extension attributes come before the records, the tokens and the
+     * literal. */
+    amark_document_set_edit_tracking(document, true);
+    amark_node_mark_edited(node);
+    sprintf(expected, "(y.limits :min %lld :max %lld :zero 0 :no false :edits (content) \"v\")\n",
+            LLONG_MIN, LLONG_MAX);
+    CHECK_DUMP(node, AMARK_DUMP_EDITS, expected);
+    amark_document_destroy(document);
+    amark_syntax_set_destroy(set);
+}
+
+/* Dumps the sample in context after "prefix" with every flag; on a failure, checks
+ * that only "prefix" is left. */
+static size_t oom_mismatches;
+
+static amark_error_t dump_scenario(void *context)
+{
+    const sample_t *s = context;
+    amark_buffer_t *out = NULL;
+    amark_error_t err = amark_buffer_create(&out);
+
+    if (err != AMARK_ERROR_NONE)
+    {
+        return err;
+    }
+
+    err = amark_buffer_append_cstr(out, "prefix");
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_node_dump(s->root, AMARK_DUMP_TOKENS | AMARK_DUMP_EDITS | AMARK_DUMP_SPANS,
+                              out);
+        if ((err != AMARK_ERROR_NONE)
+            && ((amark_buffer_length(out) != 6) || (strcmp(amark_buffer_data(out), "prefix") != 0)))
+        {
+            oom_mismatches++;
+        }
+    }
+
+    amark_buffer_destroy(out);
+    return err;
+}
+
+NAOS_TEST(the_dump_survives_every_allocation_failure)
+{
+    sample_t s;
+    amark_source_id_t source = 0;
+
+    build_sample(&s, NULL, true);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(s.document, "abc", 3, &source));
+    add_token(s.title, AMARK_TOKEN_TEXT, source, 0, 3);
+    oom_mismatches = 0;
+    AMARK_CHECK_OOM_SWEEP(dump_scenario, &s);
+    NAOS_CHECK_UINT_EQ(0, oom_mismatches);
+    amark_document_destroy(s.document);
+}
+
+NAOS_SUITE(dump_writer,
+    NAOS_SET_TEARDOWN(restore_dump),
+    NAOS_ADD_TEST(the_failure_of_an_extension_is_returned_and_the_buffer_restored),
+    NAOS_ADD_TEST(invalid_attribute_names_fail_the_dump),
+    NAOS_ADD_TEST(invalid_symbols_and_strings_fail_the_dump),
+    NAOS_ADD_TEST(the_writer_formats_each_value_kind),
+    NAOS_ADD_TEST(the_dump_survives_every_allocation_failure))
+
 NAOS_MAIN(
     NAOS_ADD_SUITE(equal),
-    NAOS_ADD_SUITE(equal_text)
+    NAOS_ADD_SUITE(equal_text),
+    NAOS_ADD_SUITE(dump),
+    NAOS_ADD_SUITE(dump_writer)
 )
