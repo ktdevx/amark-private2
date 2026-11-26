@@ -89,12 +89,24 @@ NAOS_TEST(utf8_and_unicode_functions_link)
     NAOS_CHECK_UINT_EQ(0x73u, folded[1]);
 }
 
+NAOS_TEST(entity_functions_link)
+{
+    uint32_t codepoints[2] = {0, 0};
+    std::size_t count = 0;
+
+    NAOS_CHECK_TRUE(amark_char_ref_decode("&NotEqualTilde;", 15, codepoints, &count));
+    NAOS_CHECK_UINT_EQ(2, count);
+    NAOS_CHECK_UINT_EQ(0x2242u, codepoints[0]);
+    NAOS_CHECK_UINT_EQ(0x0338u, codepoints[1]);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
     NAOS_ADD_TEST(buffer_appends_and_detaches),
     NAOS_ADD_TEST(allocator_functions_link),
-    NAOS_ADD_TEST(utf8_and_unicode_functions_link)
+    NAOS_ADD_TEST(utf8_and_unicode_functions_link),
+    NAOS_ADD_TEST(entity_functions_link)
 )
 
 NAOS_MAIN(
