@@ -150,6 +150,23 @@ NAOS_TEST(registry_functions_link)
     amark_syntax_set_destroy(set);
 }
 
+NAOS_TEST(builtin_types_link)
+{
+    const amark_syntax_set_t *core = amark_syntax_set_core();
+    const amark_node_type_desc_t *heading;
+    amark_node_type_t type = AMARK_NODE_NONE;
+
+    NAOS_REQUIRE_NOT_NULL(core);
+    NAOS_CHECK_TRUE(amark_syntax_set_is_frozen(core));
+    NAOS_CHECK_TRUE(amark_syntax_set_find_node_type(core, "heading", &type));
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_HEADING, type);
+    heading = amark_syntax_set_node_type_desc(core, AMARK_NODE_HEADING);
+    NAOS_REQUIRE_NOT_NULL(heading);
+    NAOS_CHECK_UINT_EQ(AMARK_HEADING_FORM, amark_node_type_find_facet(heading, "form"));
+    NAOS_CHECK_STR_EQ("setext", amark_node_type_facet(heading, AMARK_HEADING_FORM)
+                                    ->enum_names[AMARK_HEADING_FORM_SETEXT - 1]);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -157,7 +174,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(allocator_functions_link),
     NAOS_ADD_TEST(utf8_and_unicode_functions_link),
     NAOS_ADD_TEST(entity_functions_link),
-    NAOS_ADD_TEST(registry_functions_link)
+    NAOS_ADD_TEST(registry_functions_link),
+    NAOS_ADD_TEST(builtin_types_link)
 )
 
 NAOS_MAIN(

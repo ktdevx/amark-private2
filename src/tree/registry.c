@@ -18,16 +18,6 @@
 
 #include <amark/allocator.h>
 
-/* The built-in extension. Its node types are defined by BuiltinTypes; for now it
- * has none. */
-static const amark_extension_t core_extension = {
-    sizeof(amark_extension_t), AMARK_TREE_CORE_EXTENSION_NAME, NULL, 0, NULL, 0, NULL};
-
-const amark_extension_t *amark_tree_core_extension(void)
-{
-    return &core_extension;
-}
-
 /* ---- Checks of the descriptors --------------------------------------------- */
 
 #define FACET_STRING_FLAGS                                                                   \
@@ -322,7 +312,7 @@ amark_error_t amark_syntax_set_create(amark_syntax_set_t **out_set)
     error = new_set(4, out_set);
     if (error == AMARK_ERROR_NONE)
     {
-        (*out_set)->extensions[0] = &core_extension;
+        (*out_set)->extensions[0] = amark_tree_core_extension();
         (*out_set)->extension_count = 1;
     }
     return error;
@@ -353,7 +343,7 @@ amark_error_t amark_syntax_set_clone(const amark_syntax_set_t *set, amark_syntax
 
 void amark_syntax_set_destroy(amark_syntax_set_t *set)
 {
-    if (set == NULL)
+    if (set == NULL || set->is_static)
     {
         return;
     }
@@ -929,4 +919,26 @@ const amark_slot_t *amark_syntax_set_slot_at(const amark_syntax_set_t *set, uint
         *out_extension = set->slots[first + index].extension;
     }
     return set->slots[first + index].slot;
+}
+
+/* ---- Containment ------------------------------------------------------------ */
+
+bool amark_registry_can_contain(const amark_syntax_set_t *set, const amark_node_t *self,
+                                amark_node_type_t parent, amark_node_type_t child)
+{
+    const amark_node_type_desc_t *parent_desc;
+    const amark_node_type_desc_t *child_desc;
+
+    if (child == AMARK_NODE_DOCUMENT)
+    {
+        return false;
+    }
+    parent_desc = amark_syntax_set_node_type_desc(set, parent);
+    child_desc = amark_syntax_set_node_type_desc(set, child);
+    if (parent_desc == NULL || child_desc == NULL ||
+        (parent_desc->accepts & child_desc->provides) == 0)
+    {
+        return false;
+    }
+    return parent_desc->can_contain == NULL || parent_desc->can_contain(self, child);
 }

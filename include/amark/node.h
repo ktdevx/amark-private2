@@ -52,6 +52,28 @@ typedef uint32_t amark_node_type_t;
 #define AMARK_NODE_BUILTIN_LAST 255u
 #define AMARK_NODE_DYNAMIC_FIRST 256u
 
+/* The identifiers of the built-in node types (the extension "amark.core"; their
+ * names are the macro names in lower case without the prefix). */
+#define AMARK_NODE_DOCUMENT 1u
+#define AMARK_NODE_BLOCK_QUOTE 2u
+#define AMARK_NODE_LIST 3u
+#define AMARK_NODE_ITEM 4u
+#define AMARK_NODE_CODE_BLOCK 5u
+#define AMARK_NODE_HTML_BLOCK 6u
+#define AMARK_NODE_PARAGRAPH 7u
+#define AMARK_NODE_HEADING 8u
+#define AMARK_NODE_THEMATIC_BREAK 9u
+#define AMARK_NODE_LINK_DEFINITION 10u
+#define AMARK_NODE_TEXT 11u
+#define AMARK_NODE_SOFTBREAK 12u
+#define AMARK_NODE_LINEBREAK 13u
+#define AMARK_NODE_CODE 14u
+#define AMARK_NODE_HTML_INLINE 15u
+#define AMARK_NODE_EMPH 16u
+#define AMARK_NODE_STRONG 17u
+#define AMARK_NODE_LINK 18u
+#define AMARK_NODE_IMAGE 19u
+
 /* The level of a node type. 0 is invalid, so that a descriptor that forgets it is
  * rejected when it is added to a syntax set. */
 typedef enum amark_node_level

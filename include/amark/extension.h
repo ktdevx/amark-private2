@@ -161,7 +161,10 @@ struct amark_node_type_desc
      * AMARK_NODE_TYPE_MAX_DATA_SIZE. */
     size_t data_size;
     /* The rest is optional (NULL allowed). */
-    /* Overrides the containment rule for the children of this type. */
+    /* Narrows the containment rule for the children of this type: called only
+     * for a child type whose content class this type accepts, it returns false
+     * to refuse it. self is the would-be parent (NULL when only the types are
+     * compared). */
     bool (*can_contain)(const amark_node_t *self, amark_node_type_t child);
     /* Initializes the zero-filled extension data of a new node. */
     amark_error_t (*init)(amark_node_t *node, void *data);
@@ -264,12 +267,17 @@ typedef struct amark_extension
  * "amark.core", not frozen. */
 AMARK_API amark_error_t amark_syntax_set_create(amark_syntax_set_t **out_set);
 
+/* The static built-in syntax set: frozen, with only the built-in extension
+ * "amark.core". It is shared and immutable; amark_syntax_set_destroy does nothing
+ * on it, and a document cannot take its ownership. */
+AMARK_API const amark_syntax_set_t *amark_syntax_set_core(void);
+
 /* Creates in *out_set a syntax set with the same extensions as set, in the same
  * order, not frozen (12.12). */
 AMARK_API amark_error_t amark_syntax_set_clone(const amark_syntax_set_t *set,
                                                amark_syntax_set_t **out_set);
 
-/* Destroys set. Does nothing for NULL. */
+/* Destroys set. Does nothing for NULL and for the static built-in set. */
 AMARK_API void amark_syntax_set_destroy(amark_syntax_set_t *set);
 
 /*
