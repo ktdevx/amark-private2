@@ -12,8 +12,8 @@
  * the change notification, the internal check of the facet storage and the
  * allocation failures (3.2, 3.4, 3.6, 3.10, 5.1, 6.1-6.6, 6.9, 6.14).
  *
- * The built-in types have no on_change hook yet (task 11): the hooks are tested
- * with a test-local extension type.
+ * The hooks are tested with a test-local extension type; the change rules of
+ * the built-in types are tested in builtin_types_test.c.
  */
 #include "tree/tree.h"
 

@@ -515,6 +515,39 @@ void amark_tree_def_index_deinit(amark_document_t *document);
 amark_error_t amark_tree_find_definition(amark_document_t *document, const char *label,
                                          size_t length, amark_node_t **out);
 
+/* ---- Facets (facet.c) -------------------------------------------------------- */
+
+/*
+ * The parts of a facet edit for the on_change hooks of the built-in types
+ * (BuiltinTypes), which change several facets all or nothing: they prepare
+ * every allocation first, then commit with the functions below, which allocate
+ * nothing and cannot fail.
+ */
+
+/* Prepares in *text and *length an owned copy, terminated by NUL, of the
+ * current value of the STRING facet of node as amark_node_get reads it (an
+ * UNRESOLVED value is the empty string). AMARK_ERROR_OUT_OF_MEMORY leaves
+ * nothing allocated. */
+amark_error_t amark_tree_facet_copy_value(const amark_node_t *node, amark_facet_t facet,
+                                          char **text, size_t *length);
+
+/* Prepares in *text and *length an owned copy of the value of the STRING facet
+ * (not CONTENT) of node derived from its tokens, or NULL and 0 when no token
+ * spells it: the value that dropping its spelling keeps as the set value.
+ * AMARK_ERROR_OUT_OF_MEMORY leaves nothing allocated. */
+amark_error_t amark_tree_facet_copy_spelled(const amark_node_t *node, amark_facet_t facet,
+                                            char **text, size_t *length);
+
+/* Removes the tokens of node that spell facet and marks the spelling of facet
+ * as dropped. Allocates nothing and does not notify. */
+void amark_tree_drop_facet_spelling(amark_node_t *node, amark_facet_t facet);
+
+/* Stores number, or text (owned by the node from now on, from the copies
+ * above) and length, as the set value of facet of node, releasing the previous
+ * one, and notifies the change. Allocates nothing. */
+void amark_tree_facet_commit_set(amark_node_t *node, amark_facet_t facet, int64_t number,
+                                 char *text, size_t length);
+
 /* ---- Derive (derive.c) ------------------------------------------------------- */
 
 /*

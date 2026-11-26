@@ -5,7 +5,8 @@
  * The tests of BuiltinTypes (syntax-tree): the identifiers and the names of the
  * 19 built-in node types, their levels, flags and containment rules, the facets
  * they declare, the label check, the built-in extension "amark.core" and the
- * static built-in syntax set (3.1, 3.5, 3.8, 3.9, 6.6, 12.4).
+ * static built-in syntax set (3.1, 3.5, 3.8, 3.9, 6.6, 12.4), and the change
+ * rules of the built-in types (their on_change hooks; 3.5, 6.10).
  */
 #include "tree/tree.h"
 
@@ -14,6 +15,9 @@
 #include <string.h>
 
 #include <naos/naos.h>
+
+#include "test_allocator.h"
+#include "tree_builder.h"
 
 /* ---- The expected types ---------------------------------------------------- */
 
@@ -440,6 +444,26 @@ static const expected_facet_t expected_facets[] = {
 
 #define FACET_COUNT (sizeof(expected_facets) / sizeof(expected_facets[0]))
 
+/* Whether the design gives facet of type a change rule (on_change). */
+static bool has_change_rule(amark_node_type_t type, amark_facet_t facet)
+{
+    switch (type)
+    {
+    case AMARK_NODE_LIST:
+        return facet == AMARK_LIST_TYPE || facet == AMARK_LIST_START ||
+               facet == AMARK_LIST_BULLET || facet == AMARK_LIST_DELIMITER;
+    case AMARK_NODE_CODE_BLOCK:
+        return facet == AMARK_CODE_BLOCK_INFO;
+    case AMARK_NODE_HEADING:
+        return facet == AMARK_HEADING_LEVEL;
+    case AMARK_NODE_LINK:
+    case AMARK_NODE_IMAGE:
+        return facet == AMARK_LINK_DESTINATION || facet == AMARK_LINK_TITLE;
+    default:
+        return false;
+    }
+}
+
 /* Checks the enumeration names of facet against names joined by '|'. */
 static void check_enum_names(const amark_facet_desc_t *facet, const char *names)
 {
@@ -507,8 +531,9 @@ NAOS_TEST(facets_follow_the_design_table)
         }
         NAOS_CHECK_NULL(facet->default_text);
         NAOS_CHECK_TRUE(expected->has_validate == (facet->validate != NULL));
-        /* The on_change hooks come with the facet editing. */
-        NAOS_CHECK_TRUE(facet->on_change == NULL);
+        /* The facets with a change rule (task 11) have an on_change hook. */
+        NAOS_CHECK_TRUE(has_change_rule(expected->type, expected->number) ==
+                        (facet->on_change != NULL));
         declared++;
     }
 
@@ -684,6 +709,605 @@ NAOS_TEST(label_check_follows_commonmark)
 #undef LABEL_OK
 #undef LABEL_BAD
 
+/* ---- The change rules (3.5, 6.10) -------------------------------------------- */
+
+/* A document of the built-in syntax set with one finished source holding text
+ * (none when text is NULL), and the nodes of sexpr built in it; NULL when an
+ * allocation fails. With report, a failing build is checked (and reported). */
+static amark_document_t *build_document(const char *text, const char *sexpr, int report)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    char *reason = NULL;
+    amark_error_t error;
+
+    if (amark_document_create(NULL, &document) != AMARK_ERROR_NONE)
+    {
+        return NULL;
+    }
+    if ((text != NULL) && (amark_document_add_source(document, text, strlen(text),
+                                                     AMARK_SOURCE_FINISHED, &source) !=
+                           AMARK_ERROR_NONE))
+    {
+        amark_document_destroy(document);
+        return NULL;
+    }
+    error = amark_test_tree_build(document, NULL, sexpr, &reason);
+    if (report)
+    {
+        NAOS_CHECK_STR_EQ("", reason != NULL ? reason : "");
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, error);
+    }
+    amark_test_tree_free_reason(reason);
+    if (error != AMARK_ERROR_NONE)
+    {
+        amark_document_destroy(document);
+        return NULL;
+    }
+    return document;
+}
+
+/* The node at path below the document node: each entry is a child index, and
+ * the path ends with -1. NULL when there is no such node. */
+static amark_node_t *node_at(amark_document_t *document, const int *path)
+{
+    amark_node_t *node = amark_document_root(document);
+
+    for (; (node != NULL) && (*path >= 0); path++)
+    {
+        int index = *path;
+
+        node = amark_node_first_child(node);
+        while ((node != NULL) && (index > 0))
+        {
+            node = amark_node_next(node);
+            index--;
+        }
+    }
+    return node;
+}
+
+static amark_value_t value_of(const amark_node_t *node, amark_facet_t facet)
+{
+    amark_value_t value;
+
+    memset(&value, 0, sizeof(value));
+    value.struct_size = sizeof(value);
+    if (amark_node_get(node, facet, &value) != AMARK_ERROR_NONE)
+    {
+        value.state = (amark_value_state_t)0;
+    }
+    return value;
+}
+
+/* The number of facet of node, or -1 when it is not PRESENT. */
+static int64_t number_of(const amark_node_t *node, amark_facet_t facet)
+{
+    amark_value_t value = value_of(node, facet);
+
+    return value.state == AMARK_VALUE_PRESENT ? value.number : -1;
+}
+
+/* Whether facet of node reads as the PRESENT string expected. */
+static bool reads(const amark_node_t *node, amark_facet_t facet, const char *expected)
+{
+    amark_value_t value = value_of(node, facet);
+
+    return (value.state == AMARK_VALUE_PRESENT) && (value.text != NULL) &&
+           (value.length == strlen(expected)) && (memcmp(value.text, expected, value.length) == 0);
+}
+
+static bool is_dropped(const amark_node_t *node, amark_facet_t facet)
+{
+    return (node->dropped & (1u << facet)) != 0;
+}
+
+#define CHECK_TREE_OK(document) \
+    NAOS_CHECK_STR_EQ("none", amark_tree_violation_name(amark_tree_check((document), NULL)))
+
+/* The snapshot of the records of a tree that a change rule may change. */
+#define SNAPSHOT_NODES 16u
+
+typedef struct node_snapshot
+{
+    const amark_node_t *node;
+    uint32_t dropped;
+    size_t margin_count;
+    uint32_t spelled;
+    amark_tree_facet_t facets[8];
+} node_snapshot_t;
+
+typedef struct tree_snapshot
+{
+    size_t count;
+    node_snapshot_t nodes[SNAPSHOT_NODES];
+} tree_snapshot_t;
+
+/* The next node in document order below root (NULL after the last one). */
+static amark_node_t *next_in_order(amark_node_t *root, amark_node_t *node)
+{
+    if (amark_node_first_child(node) != NULL)
+    {
+        return amark_node_first_child(node);
+    }
+    while ((node != root) && (amark_node_next(node) == NULL))
+    {
+        node = amark_node_parent(node);
+    }
+    return node == root ? NULL : amark_node_next(node);
+}
+
+static void take_snapshot(amark_document_t *document, tree_snapshot_t *out)
+{
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *node;
+
+    memset(out, 0, sizeof(*out));
+    for (node = root; (node != NULL) && (out->count < SNAPSHOT_NODES);
+         node = next_in_order(root, node))
+    {
+        node_snapshot_t *entry = &out->nodes[out->count++];
+        amark_facet_t facet;
+
+        entry->node = node;
+        entry->dropped = node->dropped;
+        entry->margin_count = amark_block_margin_count(node);
+        for (facet = 1; (facet <= node->desc->facet_count) && (facet <= 8); facet++)
+        {
+            entry->facets[facet - 1] = node->facets[facet - 1];
+            if (amark_tree_content_spells(node, facet) || amark_tree_layout_spells(node, facet))
+            {
+                entry->spelled |= 1u << facet;
+            }
+        }
+    }
+}
+
+static bool same_snapshot(const tree_snapshot_t *a, const tree_snapshot_t *b)
+{
+    size_t i;
+
+    if (a->count != b->count)
+    {
+        return false;
+    }
+    for (i = 0; i < a->count; i++)
+    {
+        const node_snapshot_t *x = &a->nodes[i];
+        const node_snapshot_t *y = &b->nodes[i];
+        size_t f;
+
+        if ((x->node != y->node) || (x->dropped != y->dropped) ||
+            (x->margin_count != y->margin_count) || (x->spelled != y->spelled))
+        {
+            return false;
+        }
+        for (f = 0; f < 8; f++)
+        {
+            if ((x->facets[f].state != y->facets[f].state) ||
+                (x->facets[f].number != y->facets[f].number) ||
+                (x->facets[f].text != y->facets[f].text) ||
+                (x->facets[f].length != y->facets[f].length))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* -- list ----------------------------------------------------------------------- */
+
+/* "9. a" with a continuation line, then "10. c". */
+static const char ordered_list_source[] = "9. a\n   b\n10. c\n";
+
+static const char ordered_list_tree[] =
+    "(document :lines (0 3)\n"
+    "  (list :type ordered :start 9 :tight true :style (:delimiter \".\")\n"
+    "    :lines (0 3)\n"
+    "    (item :lines (0 2) :margins ((0 0 3 present first) (1 0 3 present))\n"
+    "      (paragraph :lines (0 2) :content laid ((0 3 4) (1 3 4))))\n"
+    "    (item :lines (2 1) :margins ((2 0 4 present first))\n"
+    "      (paragraph :lines (2 1) :content laid ((2 4 5))))))\n";
+
+static const int list_path[] = {0, -1};
+static const int first_item_path[] = {0, 0, -1};
+static const int second_item_path[] = {0, 1, -1};
+
+NAOS_TEST(changing_the_start_discards_every_margin_of_the_first_item)
+{
+    amark_document_t *document = build_document(ordered_list_source, ordered_list_tree, 1);
+    amark_node_t *list;
+    amark_node_t *first;
+    amark_node_t *second;
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    list = node_at(document, list_path);
+    first = node_at(document, first_item_path);
+    second = node_at(document, second_item_path);
+    NAOS_REQUIRE_NOT_NULL(second);
+    NAOS_REQUIRE_UINT_EQ(2, amark_block_margin_count(first));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_START, 10));
+    NAOS_CHECK_TRUE(number_of(list, AMARK_LIST_START) == 10);
+    /* The margins of "9. " and of the continuation line "   " are gone: the
+     * marker is one column wider, so the indentation no longer fits. */
+    NAOS_CHECK_UINT_EQ(0, amark_block_margin_count(first));
+    NAOS_CHECK_TRUE((first->dropped & AMARK_TREE_DROPPED_STRUCTURE) != 0);
+    /* The other items keep theirs. */
+    NAOS_CHECK_UINT_EQ(1, amark_block_margin_count(second));
+    NAOS_CHECK_UINT_EQ(0, second->dropped);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(changing_the_type_bullet_or_delimiter_discards_the_margins_of_all_items)
+{
+    static const amark_facet_t facets[] = {AMARK_LIST_DELIMITER, AMARK_LIST_BULLET,
+                                           AMARK_LIST_TYPE};
+    static const int64_t numbers[] = {AMARK_LIST_DELIMITER_PAREN, AMARK_LIST_BULLET_PLUS,
+                                      AMARK_LIST_TYPE_BULLET};
+    size_t i;
+
+    for (i = 0; i < sizeof(facets) / sizeof(facets[0]); i++)
+    {
+        amark_document_t *document = build_document(ordered_list_source, ordered_list_tree, 1);
+        amark_node_t *list;
+        amark_node_t *first;
+        amark_node_t *second;
+
+        NAOS_REQUIRE_NOT_NULL(document);
+        list = node_at(document, list_path);
+        first = node_at(document, first_item_path);
+        second = node_at(document, second_item_path);
+        NAOS_REQUIRE_NOT_NULL(second);
+
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, facets[i], numbers[i]));
+        NAOS_CHECK_TRUE(number_of(list, facets[i]) == numbers[i]);
+        NAOS_CHECK_UINT_EQ(0, amark_block_margin_count(first));
+        NAOS_CHECK_UINT_EQ(0, amark_block_margin_count(second));
+        NAOS_CHECK_TRUE((first->dropped & AMARK_TREE_DROPPED_STRUCTURE) != 0);
+        NAOS_CHECK_TRUE((second->dropped & AMARK_TREE_DROPPED_STRUCTURE) != 0);
+        CHECK_TREE_OK(document);
+        amark_document_destroy(document);
+    }
+}
+
+NAOS_TEST(the_other_list_facets_and_the_same_value_keep_the_margins)
+{
+    amark_document_t *document = build_document(ordered_list_source, ordered_list_tree, 1);
+    amark_node_t *list;
+    amark_node_t *first;
+    amark_node_t *second;
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    list = node_at(document, list_path);
+    first = node_at(document, first_item_path);
+    second = node_at(document, second_item_path);
+    NAOS_REQUIRE_NOT_NULL(second);
+
+    /* The same value changes nothing (6.9). */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_START, 9));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_int(list, AMARK_LIST_DELIMITER, AMARK_LIST_DELIMITER_PERIOD));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_int(list, AMARK_LIST_TYPE, AMARK_LIST_TYPE_ORDERED));
+    /* tight has no rule. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_TIGHT, 0));
+    NAOS_CHECK_UINT_EQ(2, amark_block_margin_count(first));
+    NAOS_CHECK_UINT_EQ(1, amark_block_margin_count(second));
+    NAOS_CHECK_UINT_EQ(0, first->dropped);
+    NAOS_CHECK_UINT_EQ(0, second->dropped);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* -- heading and code_block ----------------------------------------------------- */
+
+static const int first_path[] = {0, -1};
+
+NAOS_TEST(a_setext_heading_of_level_3_or_more_becomes_atx)
+{
+    amark_document_t *document =
+        build_document(NULL, "(heading :level 1 :style (:form setext))", 1);
+    amark_node_t *heading;
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    heading = node_at(document, first_path);
+    NAOS_REQUIRE_NOT_NULL(heading);
+    /* Levels 1 and 2 can be written as setext. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(heading, AMARK_HEADING_LEVEL, 2));
+    NAOS_CHECK_TRUE(number_of(heading, AMARK_HEADING_FORM) == AMARK_HEADING_FORM_SETEXT);
+    NAOS_CHECK_FALSE(is_dropped(heading, AMARK_HEADING_FORM));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(heading, AMARK_HEADING_LEVEL, 3));
+    NAOS_CHECK_TRUE(number_of(heading, AMARK_HEADING_LEVEL) == 3);
+    NAOS_CHECK_TRUE(number_of(heading, AMARK_HEADING_FORM) == AMARK_HEADING_FORM_ATX);
+    NAOS_CHECK_TRUE(is_dropped(heading, AMARK_HEADING_FORM));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+
+    /* An ATX heading, and a heading without a form, stay as they are. */
+    document = build_document(NULL, "(heading :level 1 :style (:form atx)) (heading :level 1)", 1);
+    NAOS_REQUIRE_NOT_NULL(document);
+    heading = node_at(document, first_path);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(heading, AMARK_HEADING_LEVEL, 6));
+    NAOS_CHECK_TRUE(number_of(heading, AMARK_HEADING_FORM) == AMARK_HEADING_FORM_ATX);
+    NAOS_CHECK_FALSE(is_dropped(heading, AMARK_HEADING_FORM));
+    heading = amark_node_next(heading);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(heading, AMARK_HEADING_LEVEL, 4));
+    NAOS_CHECK_INT_EQ(AMARK_VALUE_UNSET, value_of(heading, AMARK_HEADING_FORM).state);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(an_indented_code_block_with_an_info_string_becomes_fenced)
+{
+    amark_document_t *document = build_document(
+        NULL,
+        "(code_block :style (:form indented)) (code_block :style (:form fenced))"
+        " (code_block)",
+        1);
+    amark_node_t *indented;
+    amark_node_t *fenced;
+    amark_node_t *bare;
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    indented = node_at(document, first_path);
+    NAOS_REQUIRE_NOT_NULL(indented);
+    fenced = amark_node_next(indented);
+    bare = amark_node_next(fenced);
+    NAOS_REQUIRE_NOT_NULL(bare);
+
+    /* An empty info string can be written as indented. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(indented, AMARK_CODE_BLOCK_INFO, "", 0));
+    NAOS_CHECK_TRUE(number_of(indented, AMARK_CODE_BLOCK_FORM) == AMARK_CODE_BLOCK_FORM_INDENTED);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(indented, AMARK_CODE_BLOCK_INFO, "c", 1));
+    NAOS_CHECK_TRUE(reads(indented, AMARK_CODE_BLOCK_INFO, "c"));
+    NAOS_CHECK_TRUE(number_of(indented, AMARK_CODE_BLOCK_FORM) == AMARK_CODE_BLOCK_FORM_FENCED);
+    NAOS_CHECK_TRUE(is_dropped(indented, AMARK_CODE_BLOCK_FORM));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(fenced, AMARK_CODE_BLOCK_INFO, "c", 1));
+    NAOS_CHECK_TRUE(number_of(fenced, AMARK_CODE_BLOCK_FORM) == AMARK_CODE_BLOCK_FORM_FENCED);
+    NAOS_CHECK_FALSE(is_dropped(fenced, AMARK_CODE_BLOCK_FORM));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(bare, AMARK_CODE_BLOCK_INFO, "c", 1));
+    NAOS_CHECK_INT_EQ(AMARK_VALUE_UNSET, value_of(bare, AMARK_CODE_BLOCK_FORM).state);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* -- link and image ------------------------------------------------------------- */
+
+/* A full reference whose label "Foo" is spelled by a token, a shortcut
+ * reference with the same label, and its definition. */
+static const char reference_source[] = "[t][Foo] [foo]\n\n[foo]: /u \"T\"\n";
+
+static const char reference_tree[] =
+    "(document :lines (0 3)\n"
+    "  (paragraph :lines (0 1) :content laid ((0 0 14))\n"
+    "    (link :style (:form full) :spelling ((text 4 7 :facet label))\n"
+    "      (text :spelling ((text 1 2 :facet literal)) \"t\"))\n"
+    "    (text :spelling ((text 8 9 :facet literal)) \" \")\n"
+    "    (link :label \"foo\" :style (:form shortcut)\n"
+    "      (text :spelling ((text 10 13 :facet literal)) \"foo\")))\n"
+    "  (link_definition :label \"foo\" :destination \"/u\" :title \"T\"))\n";
+
+static const int full_path[] = {0, 0, -1};
+static const int shortcut_path[] = {0, 2, -1};
+static const int definition_path[] = {1, -1};
+
+/* Checks that the shortcut reference and the definition are as built. */
+static void check_others_unchanged(amark_document_t *document)
+{
+    amark_node_t *shortcut = node_at(document, shortcut_path);
+    amark_node_t *definition = node_at(document, definition_path);
+
+    NAOS_REQUIRE_NOT_NULL(definition);
+    NAOS_CHECK_TRUE(number_of(shortcut, AMARK_LINK_FORM) == AMARK_LINK_FORM_SHORTCUT);
+    NAOS_CHECK_TRUE(reads(shortcut, AMARK_LINK_DESTINATION, "/u"));
+    NAOS_CHECK_TRUE(reads(shortcut, AMARK_LINK_TITLE, "T"));
+    NAOS_CHECK_UINT_EQ(0, shortcut->dropped);
+    NAOS_CHECK_TRUE(reads(definition, AMARK_LINK_DEFINITION_DESTINATION, "/u"));
+    NAOS_CHECK_TRUE(reads(definition, AMARK_LINK_DEFINITION_TITLE, "T"));
+    NAOS_CHECK_UINT_EQ(0, definition->dropped);
+}
+
+NAOS_TEST(setting_the_destination_of_a_reference_makes_it_inline)
+{
+    amark_document_t *document = build_document(reference_source, reference_tree, 1);
+    amark_node_t *link;
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    link = node_at(document, full_path);
+    NAOS_REQUIRE_NOT_NULL(link);
+    NAOS_REQUIRE_TRUE(reads(link, AMARK_LINK_LABEL, "Foo"));
+    NAOS_REQUIRE_TRUE(reads(link, AMARK_LINK_TITLE, "T"));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_string(link, AMARK_LINK_DESTINATION, "/new", 4));
+    NAOS_CHECK_TRUE(number_of(link, AMARK_LINK_FORM) == AMARK_LINK_FORM_INLINE);
+    NAOS_CHECK_TRUE(reads(link, AMARK_LINK_DESTINATION, "/new"));
+    /* The title keeps the value resolved before the change, as a set value. */
+    NAOS_CHECK_TRUE(reads(link, AMARK_LINK_TITLE, "T"));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, link->facets[AMARK_LINK_TITLE - 1].state);
+    /* The spelling of the label and of the form is dropped; the label keeps
+     * its value. */
+    NAOS_CHECK_TRUE(is_dropped(link, AMARK_LINK_LABEL));
+    NAOS_CHECK_TRUE(is_dropped(link, AMARK_LINK_FORM));
+    NAOS_CHECK_FALSE(amark_tree_content_spells(link, AMARK_LINK_LABEL));
+    NAOS_CHECK_TRUE(reads(link, AMARK_LINK_LABEL, "Foo"));
+    /* The other link with the same label and the definition do not change. */
+    check_others_unchanged(document);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(setting_the_title_of_a_reference_keeps_the_resolved_destination)
+{
+    amark_document_t *document = build_document(reference_source, reference_tree, 1);
+    amark_node_t *link;
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    link = node_at(document, full_path);
+    NAOS_REQUIRE_NOT_NULL(link);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(link, AMARK_LINK_TITLE, "X", 1));
+    NAOS_CHECK_TRUE(number_of(link, AMARK_LINK_FORM) == AMARK_LINK_FORM_INLINE);
+    NAOS_CHECK_TRUE(reads(link, AMARK_LINK_TITLE, "X"));
+    NAOS_CHECK_TRUE(reads(link, AMARK_LINK_DESTINATION, "/u"));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, link->facets[AMARK_LINK_DESTINATION - 1].state);
+    NAOS_CHECK_TRUE(is_dropped(link, AMARK_LINK_LABEL));
+    NAOS_CHECK_TRUE(is_dropped(link, AMARK_LINK_FORM));
+    check_others_unchanged(document);
+    /* Changing the definition afterwards no longer changes the link. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_string(node_at(document, definition_path),
+                                            AMARK_LINK_DEFINITION_DESTINATION, "/v", 2));
+    NAOS_CHECK_TRUE(reads(link, AMARK_LINK_DESTINATION, "/u"));
+    NAOS_CHECK_TRUE(reads(node_at(document, shortcut_path), AMARK_LINK_DESTINATION, "/v"));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(an_unresolved_reference_becomes_inline_with_an_empty_value)
+{
+    amark_document_t *document = build_document(
+        NULL,
+        "(paragraph (image :label \"none\" :style (:form collapsed)))", 1);
+    amark_node_t *image;
+    static const int image_path[] = {0, 0, -1};
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    image = node_at(document, image_path);
+    NAOS_REQUIRE_NOT_NULL(image);
+    NAOS_REQUIRE_INT_EQ(AMARK_VALUE_UNRESOLVED, value_of(image, AMARK_LINK_TITLE).state);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(image, AMARK_LINK_DESTINATION, "/i", 2));
+    NAOS_CHECK_TRUE(number_of(image, AMARK_LINK_FORM) == AMARK_LINK_FORM_INLINE);
+    NAOS_CHECK_TRUE(reads(image, AMARK_LINK_DESTINATION, "/i"));
+    NAOS_CHECK_TRUE(reads(image, AMARK_LINK_TITLE, ""));
+    NAOS_CHECK_TRUE(is_dropped(image, AMARK_LINK_LABEL));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(setting_the_title_of_an_autolink_makes_it_inline)
+{
+    amark_document_t *document = build_document(
+        NULL,
+        "(paragraph (link :destination \"http://a\" :style (:form autolink))"
+        " (link :destination \"/x\" :style (:form inline)) (link))",
+        1);
+    static const int autolink_path[] = {0, 0, -1};
+    amark_node_t *autolink;
+    amark_node_t *inline_link;
+    amark_node_t *bare;
+
+    NAOS_REQUIRE_NOT_NULL(document);
+    autolink = node_at(document, autolink_path);
+    NAOS_REQUIRE_NOT_NULL(autolink);
+    inline_link = amark_node_next(autolink);
+    bare = amark_node_next(inline_link);
+    NAOS_REQUIRE_NOT_NULL(bare);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(autolink, AMARK_LINK_TITLE, "t", 1));
+    NAOS_CHECK_TRUE(number_of(autolink, AMARK_LINK_FORM) == AMARK_LINK_FORM_INLINE);
+    NAOS_CHECK_TRUE(reads(autolink, AMARK_LINK_DESTINATION, "http://a"));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, autolink->facets[AMARK_LINK_DESTINATION - 1].state);
+    NAOS_CHECK_TRUE(reads(autolink, AMARK_LINK_TITLE, "t"));
+    NAOS_CHECK_TRUE(is_dropped(autolink, AMARK_LINK_FORM));
+
+    /* An inline link, and a link without a form, keep their form. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(inline_link, AMARK_LINK_TITLE, "t", 1));
+    NAOS_CHECK_TRUE(number_of(inline_link, AMARK_LINK_FORM) == AMARK_LINK_FORM_INLINE);
+    NAOS_CHECK_FALSE(is_dropped(inline_link, AMARK_LINK_FORM));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_RECORDED,
+                      inline_link->facets[AMARK_LINK_DESTINATION - 1].state);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(bare, AMARK_LINK_DESTINATION, "/b", 2));
+    NAOS_CHECK_INT_EQ(AMARK_VALUE_UNSET, value_of(bare, AMARK_LINK_FORM).state);
+    NAOS_CHECK_UINT_EQ(1u << AMARK_LINK_DESTINATION, bare->dropped);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* -- Allocation failures ---------------------------------------------------------- */
+
+/* A change rule under allocation failures: the document of source and sexpr,
+ * and the edit made on the node at path. */
+typedef struct rule_case
+{
+    const char *source;
+    const char *sexpr;
+    const int *path;
+    amark_facet_t facet;
+    bool is_string;
+    int64_t number;
+    const char *text;
+} rule_case_t;
+
+/* Every allocation of the case fails in turn: a failing edit returns
+ * AMARK_ERROR_OUT_OF_MEMORY and leaves the whole tree as it was (the rule is
+ * all or nothing); a successful one leaves a consistent tree. */
+static amark_error_t rule_oom_scenario(void *context)
+{
+    const rule_case_t *rule = (const rule_case_t *)context;
+    amark_document_t *document = build_document(rule->source, rule->sexpr, 0);
+    tree_snapshot_t before;
+    tree_snapshot_t after;
+    amark_node_t *node;
+    amark_error_t error;
+
+    if (document == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    node = node_at(document, rule->path);
+    if (node == NULL)
+    {
+        amark_document_destroy(document);
+        return AMARK_ERROR_INVALID_STATE;
+    }
+    take_snapshot(document, &before);
+    error = rule->is_string
+                ? amark_node_set_string(node, rule->facet, rule->text, strlen(rule->text))
+                : amark_node_set_int(node, rule->facet, rule->number);
+    take_snapshot(document, &after);
+    if ((error != AMARK_ERROR_NONE) && !same_snapshot(&before, &after))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    if ((error == AMARK_ERROR_NONE) &&
+        (same_snapshot(&before, &after) ||
+         (amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE)))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    amark_document_destroy(document);
+    return error;
+}
+
+NAOS_TEST(each_rule_is_all_or_nothing_under_allocation_failures)
+{
+    static const rule_case_t cases[] = {
+        {ordered_list_source, ordered_list_tree, list_path, AMARK_LIST_START, false, 10, NULL},
+        {ordered_list_source, ordered_list_tree, list_path, AMARK_LIST_BULLET, false,
+         AMARK_LIST_BULLET_ASTERISK, NULL},
+        {NULL, "(heading :level 2 :style (:form setext))", first_path, AMARK_HEADING_LEVEL,
+         false, 3, NULL},
+        {NULL, "(code_block :style (:form indented))", first_path, AMARK_CODE_BLOCK_INFO, true,
+         0, "c"},
+        {reference_source, reference_tree, full_path, AMARK_LINK_DESTINATION, true, 0, "/new"},
+        {reference_source, reference_tree, full_path, AMARK_LINK_TITLE, true, 0, "X"},
+        {reference_source, reference_tree, shortcut_path, AMARK_LINK_DESTINATION, true, 0,
+         "/s"},
+        {NULL, "(paragraph (link :destination \"http://a\" :style (:form autolink)))",
+         full_path, AMARK_LINK_TITLE, true, 0, "t"},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        AMARK_CHECK_OOM_SWEEP(rule_oom_scenario, (void *)&cases[i]);
+    }
+}
+
 NAOS_SUITE(builtin_types,
     NAOS_ADD_TEST(identifiers_are_fixed),
     NAOS_ADD_TEST(core_set_has_the_builtin_types),
@@ -695,7 +1319,17 @@ NAOS_SUITE(builtin_types,
     NAOS_ADD_TEST(only_link_refines_containment),
     NAOS_ADD_TEST(facets_follow_the_design_table),
     NAOS_ADD_TEST(enumeration_values_match_the_names),
-    NAOS_ADD_TEST(label_check_follows_commonmark)
+    NAOS_ADD_TEST(label_check_follows_commonmark),
+    NAOS_ADD_TEST(changing_the_start_discards_every_margin_of_the_first_item),
+    NAOS_ADD_TEST(changing_the_type_bullet_or_delimiter_discards_the_margins_of_all_items),
+    NAOS_ADD_TEST(the_other_list_facets_and_the_same_value_keep_the_margins),
+    NAOS_ADD_TEST(a_setext_heading_of_level_3_or_more_becomes_atx),
+    NAOS_ADD_TEST(an_indented_code_block_with_an_info_string_becomes_fenced),
+    NAOS_ADD_TEST(setting_the_destination_of_a_reference_makes_it_inline),
+    NAOS_ADD_TEST(setting_the_title_of_a_reference_keeps_the_resolved_destination),
+    NAOS_ADD_TEST(an_unresolved_reference_becomes_inline_with_an_empty_value),
+    NAOS_ADD_TEST(setting_the_title_of_an_autolink_makes_it_inline),
+    NAOS_ADD_TEST(each_rule_is_all_or_nothing_under_allocation_failures)
 )
 
 NAOS_MAIN(

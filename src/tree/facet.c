@@ -662,6 +662,53 @@ static amark_error_t store(amark_node_t *node, amark_facet_t facet, bool is_stri
     return AMARK_ERROR_NONE;
 }
 
+/* ---- The parts of an edit for the hooks of the built-in types --------------------- */
+
+amark_error_t amark_tree_facet_copy_value(const amark_node_t *node, amark_facet_t facet,
+                                          char **text, size_t *length)
+{
+    amark_value_t value;
+    amark_error_t error;
+
+    *text = NULL;
+    *length = 0;
+    value.struct_size = sizeof(value);
+    error = facet_value(node, facet, facet_desc(node, facet), &value);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    if ((value.state != AMARK_VALUE_PRESENT) || (value.text == NULL))
+    {
+        value.text = "";
+        value.length = 0;
+    }
+    *text = copy_text(value.text, value.length);
+    if (*text == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    *length = value.length;
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_tree_facet_copy_spelled(const amark_node_t *node, amark_facet_t facet,
+                                            char **text, size_t *length)
+{
+    return prepare_derived_copy(node, facet, facet_desc(node, facet), text, length);
+}
+
+void amark_tree_drop_facet_spelling(amark_node_t *node, amark_facet_t facet)
+{
+    drop_facet_spelling(node, facet);
+}
+
+void amark_tree_facet_commit_set(amark_node_t *node, amark_facet_t facet, int64_t number,
+                                 char *text, size_t length)
+{
+    commit(node, facet, AMARK_TREE_FACET_SET, number, text, length);
+}
+
 /* The value of a number for store. */
 static amark_value_t number_value(int64_t number)
 {

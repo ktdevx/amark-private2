@@ -18,7 +18,8 @@ amark_add_test(tree_builder_test SOURCES tree_builder_test.c INTERNAL
 amark_add_test(registry_test SOURCES registry_test.c INTERNAL)
 
 # BuiltinTypes: the 19 built-in node types and the built-in syntax set.
-amark_add_test(builtin_types_test SOURCES builtin_types_test.c INTERNAL)
+amark_add_test(builtin_types_test SOURCES builtin_types_test.c INTERNAL
+  LIBRARIES amark_test_tree)
 
 # Document: the life of documents and of the nodes they own.
 amark_add_test(document_test SOURCES document_test.c INTERNAL)
