@@ -166,11 +166,16 @@ struct amark_node_type_desc
      * to refuse it. self is the would-be parent (NULL when only the types are
      * compared). */
     bool (*can_contain)(const amark_node_t *self, amark_node_type_t child);
-    /* Initializes the zero-filled extension data of a new node. */
+    /* Initializes the zero-filled extension data of a new node. On failure the
+     * data must own nothing (deinit is not called). */
     amark_error_t (*init)(amark_node_t *node, void *data);
     /* Frees what the extension data owns. */
     void (*deinit)(amark_node_t *node, void *data);
-    /* Copies the extension data of src into the zero-filled dst_data. */
+    /* Copies the extension data of src into the zero-filled dst_data; init is
+     * not called on a copy. When copy is NULL the data is copied byte for
+     * byte, so a type whose data owns resources (one with a deinit) must
+     * provide copy. On failure dst_data must own nothing (deinit is not
+     * called). */
     amark_error_t (*copy)(amark_node_t *dst, void *dst_data, const amark_node_t *src,
                           const void *src_data);
     /* Compares the extension data. */

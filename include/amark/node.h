@@ -201,6 +201,27 @@ AMARK_API amark_error_t amark_node_append_child(amark_node_t *parent, amark_node
  * from the subtree of old_node. Nothing changes when new_node is old_node. */
 AMARK_API amark_error_t amark_node_replace(amark_node_t *old_node, amark_node_t *new_node);
 
+/* ---- Copying (5.6) ----------------------------------------------------------------- */
+
+/*
+ * Copies node and its subtree into *out, a new detached node of the same
+ * document (5.6). Each copied node has the type, the values and the styles
+ * (set or recorded), the line range, the layout records, the content tokens,
+ * the dropped-spelling marks and the extension data of its original (copied
+ * by the copy function of the type, or byte for byte when the type has none);
+ * the user pointer is not copied (NULL). A leaf shares the content object of
+ * its original and the content tokens stay on the same base: later edits
+ * copy shared content before changing it, so an edit of one copy never
+ * changes the values, the spelling, the verbatim judgment or the positions of
+ * the other. A copied link_definition is looked up with its label from its
+ * insertion into the tree on. The subtree is walked without recursion.
+ *
+ * AMARK_ERROR_INVALID_ARGUMENT for NULL arguments and the document node;
+ * AMARK_ERROR_OUT_OF_MEMORY, or the error of the copy function of a type. On
+ * failure *out is NULL and the document is unchanged.
+ */
+AMARK_API amark_error_t amark_node_copy(const amark_node_t *node, amark_node_t **out);
+
 /* ---- User pointers and extension data (4.5) ------------------------------------ */
 
 /* The pointer the application associated with node (NULL until set, and for a

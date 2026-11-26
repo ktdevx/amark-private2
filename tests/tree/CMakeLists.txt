@@ -46,7 +46,8 @@ amark_add_test(content_test SOURCES content_test.c INTERNAL)
 amark_add_test(label_index_test SOURCES label_index_test.c INTERNAL)
 
 # CopyImport: the copies and the imports.
-amark_add_test(copy_import_test SOURCES copy_import_test.c INTERNAL)
+amark_add_test(copy_import_test SOURCES copy_import_test.c INTERNAL
+  LIBRARIES amark_test_tree)
 
 # Position: the source ranges.
 amark_add_test(position_test SOURCES position_test.c INTERNAL
