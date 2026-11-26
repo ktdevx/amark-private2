@@ -1395,6 +1395,24 @@ static bool sort_items(builder_t *b, sx_t *sx, const amark_node_type_desc_t *des
     }
     mark_spelled(attrs->tokens, desc, attrs);
     mark_spelled(attrs->spelling, desc, attrs);
+    /* An empty CONTENT value of a node without :content is what a leaf without
+     * content reads (the dump writes it so): it is checked, not recorded, so
+     * that the leaf keeps no content. */
+    {
+        amark_facet_t facet;
+
+        for (facet = 1; facet <= desc->facet_count && facet <= AMARK_FACET_MAX; facet++)
+        {
+            const amark_facet_desc_t *facet_desc = amark_node_type_facet(desc, facet);
+
+            if ((facet_desc->flags & AMARK_FACET_CONTENT) != 0 && attrs->content == NULL &&
+                attrs->values[facet] != NULL && attrs->values[facet]->kind == SX_STRING &&
+                attrs->values[facet]->length == 0)
+            {
+                attrs->spelled[facet] = true;
+            }
+        }
+    }
     return true;
 }
 

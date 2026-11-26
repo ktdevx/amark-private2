@@ -287,14 +287,23 @@ void amark_tree_remove_facet_tokens(amark_node_t *node, amark_facet_t facet);
  * CONTENT facets of leaf and notifies the change. Allocates nothing. */
 void amark_tree_leaf_take_content(amark_node_t *leaf, amark_tree_content_t *content);
 
+/* Whether the node type desc has a CONTENT facet (the literal of code_block and
+ * html_block). Only the content of such a leaf can be empty free content with
+ * one line (the value "\n" of the facet); empty free content of any other leaf
+ * has no line. */
+bool amark_tree_type_has_content_facet(const amark_node_type_desc_t *desc);
+
 /*
  * Makes a new free content object with the bytes and the line count of source
  * (Facets, dropping the spelling of a leaf: laid content becomes free with the
- * same bytes; a virtual LF becomes a real one). The object has one owner, as
- * for amark_tree_content_from_value. AMARK_ERROR_OUT_OF_MEMORY leaves nothing
+ * same bytes; a virtual LF becomes a real one), for a leaf of the type desc:
+ * when source is empty and desc has no CONTENT facet, the copy has no line
+ * (amark_tree_type_has_content_facet). The object has one owner, as for
+ * amark_tree_content_from_value. AMARK_ERROR_OUT_OF_MEMORY leaves nothing
  * allocated.
  */
 amark_error_t amark_tree_content_free_copy(const amark_tree_content_t *source,
+                                           const amark_node_type_desc_t *desc,
                                            amark_tree_content_t **out);
 
 /* As amark_tree_leaf_take_content, and when content has the same bytes as the

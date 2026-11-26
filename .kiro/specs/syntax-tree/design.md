@@ -821,7 +821,7 @@ AMARK_API amark_error_t amark_node_content_base(const amark_node_t *node, const 
     - 配置済みの中身：部分を持つ行の数。空の行も長さ 0 の部分として数える。
     - 自由な中身：バイト列が空なら 0、そうでなければ LF の数 + 1。CONTENT の項目の設定は、この規則によらず行の数を明示する。
     
-    行が 0 の中身と、空の行が 1 つの中身を区別するために使う。
+    行が 0 の中身と、空の行が 1 つの中身を区別するために使う。空で行が 1 つの自由な中身（CONTENT の項目の値 `"\n"`）を持てるのは、CONTENT の項目を持つ型の葉だけである。CONTENT の項目を持たない型の葉の空の自由な中身は、常に行が 0 である。配置済みの中身を自由な中身に写すとき（綴りを捨てる操作、中身の置き換え）も、写す先の葉の型が CONTENT の項目を持たず中身が空なら、行を 0 にする。検査器はこの規則を確かめる。
 - **配置済みの中身の実体化**（8.1、8.2）：`amark_block_add_content` は、部分を行の順に足すたびに、中身のバイト列を延ばす。
   - 部分の範囲の元のバイトを写す。
   - 範囲の端がタブの途中なら、そのタブの中の範囲の列の数だけ空白を写す。
@@ -847,7 +847,7 @@ AMARK_API amark_error_t amark_node_content_base(const amark_node_t *node, const 
   
   どちらも、関わるノードの導出のキャッシュを捨てる。
 - **中身の置き換え**（8.6）：`source_leaf`（同じ文書か別の文書の、中身を持つ葉）の中身とインラインの子で、`target` の中身と子を置き換える。
-  - 置き換えた後の中身：`source_leaf` の中身のバイト列を写した、新しい自由な content オブジェクトになる。
+  - 置き換えた後の中身：`source_leaf` の中身のバイト列（と行の数）を写した、新しい自由な content オブジェクトになる。空の中身の行の数は、上の行の数の規則に従う。
   - インラインの子：複製する（別の文書なら取り込む）。トークンの土台が `source_leaf` の中身なら新しい中身に、それ以外の土台は CopyImport の規則で写す。
   - `target` に残すもの：行の範囲、葉自身の表記、style、値の項目。
   - 確保に失敗したら何も変えない。
@@ -1062,6 +1062,14 @@ AMARK_API bool amark_node_equal(const amark_node_t *a, const amark_node_t *b, ui
 #define AMARK_DUMP_POSITIONS 0x08u
 #define AMARK_DUMP_LINES     0x10u   /* 文書のノードに行の表 */
 AMARK_API amark_error_t amark_node_dump(const amark_node_t *node, uint32_t flags, amark_buffer_t *out);
+
+/* ダンプの書き手（拡張の型の dump の関数が、データの属性を書く） */
+AMARK_API amark_error_t amark_dump_write_string(amark_dump_writer_t *writer, const char *name,
+                                                const char *text, size_t length);
+AMARK_API amark_error_t amark_dump_write_int(amark_dump_writer_t *writer, const char *name, int64_t number);
+AMARK_API amark_error_t amark_dump_write_bool(amark_dump_writer_t *writer, const char *name, bool value);
+AMARK_API amark_error_t amark_dump_write_symbol(amark_dump_writer_t *writer, const char *name,
+                                                const char *symbol);
 ```
 - **走査**（4.2–4.4）：現在のノードとイベントだけを持ち、子を持てるノード（ブロックの子かインラインの子を受け入れる型）には入る・出るの 2 つ、それ以外には入るだけを返す。根の外へ出ない。
 - **比較**（13.1–13.3）：
@@ -1071,7 +1079,7 @@ AMARK_API amark_error_t amark_node_dump(const amark_node_t *node, uint32_t flags
   - テキストの正規化を指定したら、隣り合う text を連結して比べ、空の text を無視する。
   - 再帰を使わない。
 - **ダンプの形式**（13.4–13.7）：
-  - 形式は `node = "(" type-name {" " attr} [" " literal] {LF indent node} ")"`。字下げは 2 つの空白で、LF で終える。
+  - 形式は `node = "(" type-name {" " attr} [" " literal] {LF indent node} ")"`。字下げは深さ 1 段につき 2 つの空白で、LF で終える。ただし字下げは 64 段（128 個の空白）で頭打ちにする（深い木でもダンプの大きさをノードの数に線形に保つため。組み立ては空白を区切りとしてしか読まないので、往復は変わらない）。
   - 値の項目：`:name value` の形で出す。`literal` という名前の項目だけは、最後に文字列として出す。
   - `AMARK_DUMP_STYLE`：`:style (:name value ...)` を出す。未設定の項目は出さない。
   - `AMARK_DUMP_LAYOUT`：次を出す。
@@ -1085,6 +1093,12 @@ AMARK_API amark_error_t amark_node_dump(const amark_node_t *node, uint32_t flags
   - `AMARK_DUMP_LINES`：文書のノードに `:line_table ((source number offset length eol width) ...)` を出す。
   - 文字列のエスケープ：`\"`、`\\`、`\n`、`\r`、`\t` を使い、ほかの制御文字、0x7F、不正な UTF-8 のバイトは `\xHH` にする。
   - 拡張の型は、`dump` の関数で書き手に属性を書く。
+    - 書き手の関数は ` :name value` を、値の項目の後（`:style` の前）に書く。値は、文字列（`write_string`、エスケープは上と同じ）、10 進の整数（`write_int`）、`true` か `false`（`write_bool`）、記号（`write_symbol`）である。
+    - `name` と `symbol` は `[a-z][a-z0-9_]*` に合わなければ不正な引数とする。`text` が NULL で長さがあるときも不正な引数とする。
+    - 書き手は、それを渡された `dump` の関数の呼び出しの間だけ有効である。
+    - 関数が返したエラーはダンプの結果になり、出力のバッファは呼び出し前の長さに戻る。
+  - ENUM の項目の値は、名前が `[a-z][a-z0-9_]*` に合えば記号、そうでなければ文字列として出す。
+  - 空で行が 1 つの自由な中身（CONTENT の項目の値 `"\n"`。CONTENT の項目を持つ型の葉だけが持つ）は、`:content` を出さない。最後に出す literal の `"\n"` が、組み立てでその中身を作り直す。
 - **TreeCheck**（内部、`amark_tree_check`）：次の不変条件を確かめ、テストとファジングが各操作の後に呼ぶ。
   - 関係が対称である。
   - 全ノードの環がそろっている。

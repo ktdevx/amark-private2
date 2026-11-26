@@ -401,6 +401,14 @@ static bool check_content(check_context_t *context, const amark_node_t *node)
     {
         return fail(context, AMARK_TREE_VIOLATION_CONTENT, node, "a content object is malformed");
     }
+    /* Empty free content with one line is the value "\n" of a CONTENT facet:
+     * only a leaf whose type has one holds it. */
+    if ((content->state == AMARK_CONTENT_FREE) && (content->length == 0) &&
+        (content->line_count != 0) && !amark_tree_type_has_content_facet(node->desc))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CONTENT, node,
+                    "empty free content has a line on a type without a CONTENT facet");
+    }
     for (i = 0; i < content->piece_count; i++)
     {
         const amark_tree_piece_t *piece = &content->pieces[i];

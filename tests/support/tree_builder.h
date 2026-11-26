@@ -60,9 +60,14 @@
  * set, it is appended to its parent, its layout is recorded, its values and
  * styles are recorded, its content tokens are added, its children are built. A
  * CONTENT facet (the literal of code_block and html_block) is recorded only when
- * the node has no :content; otherwise, as every value given, it is checked
- * against the value read back (amark_node_get), which also checks a value
- * derived from the tokens.
+ * the node has no :content and the value is not empty (a leaf without content
+ * reads ""); otherwise, as every value given, it is checked against the value
+ * read back (amark_node_get), which also checks a value derived from the tokens.
+ *
+ * AMARK_CHECK_TREE_DUMP compares a dump (amark_node_dump) with an expected text.
+ * A dump with AMARK_DUMP_LAYOUT and AMARK_DUMP_SPELLING (and any other flag)
+ * builds back, into a document with the same sources, to a tree that dumps the
+ * same.
  */
 #ifndef AMARK_TEST_TREE_BUILDER_H
 #define AMARK_TEST_TREE_BUILDER_H
@@ -71,6 +76,7 @@
 #include <amark/document.h>
 #include <amark/value.h>
 #include <amark/spelling.h>
+#include <amark/buffer.h>
 #include <amark/dump.h>
 
 #include <naos/naos.h>
@@ -117,6 +123,25 @@ void amark_test_tree_free_reason(char *reason);
         NAOS_CHECK_STR_EQ("", amark_reason_ != NULL ? amark_reason_ : ""); \
         NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_error_); \
         amark_test_tree_free_reason(amark_reason_); \
+    } while (0)
+
+/*
+ * Dumps node with flags (amark_node_dump) and checks, at the line of the caller
+ * and without stopping the test, that the dump succeeds and equals the string
+ * expected; on a mismatch both texts are shown in the message of the check.
+ */
+#define AMARK_CHECK_TREE_DUMP(node, flags, expected) \
+    do { \
+        amark_buffer_t *amark_dump_buffer_ = NULL; \
+        amark_error_t amark_dump_error_ = amark_buffer_create(&amark_dump_buffer_); \
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_dump_error_); \
+        if (amark_dump_error_ == AMARK_ERROR_NONE) \
+        { \
+            amark_dump_error_ = amark_node_dump((node), (flags), amark_dump_buffer_); \
+            NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_dump_error_); \
+            NAOS_CHECK_STR_EQ((expected), amark_buffer_data(amark_dump_buffer_)); \
+        } \
+        amark_buffer_destroy(amark_dump_buffer_); \
     } while (0)
 
 #ifdef __cplusplus

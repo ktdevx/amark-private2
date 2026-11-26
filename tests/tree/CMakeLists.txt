@@ -69,7 +69,8 @@ amark_add_test(equal_test SOURCES equal_test.c INTERNAL
   LIBRARIES amark_test_tree)
 
 # Dump: the S-expression dump and the dump writer.
-amark_add_test(dump_test SOURCES dump_test.c INTERNAL)
+amark_add_test(dump_test SOURCES dump_test.c INTERNAL
+  LIBRARIES amark_test_tree)
 
 # The extension node types through the public API.
 amark_add_test(extension_type_test SOURCES extension_type_test.c INTERNAL)

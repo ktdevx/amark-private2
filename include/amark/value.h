@@ -176,8 +176,8 @@ AMARK_API amark_error_t amark_node_discard_facet_spelling(amark_node_t *node,
  *   2. the layout tokens, the content tokens, the margins and the blank lines
  *      of node are removed;
  *   3. laid content of a leaf becomes new free content with the same bytes and
- *      line count (the old object, which other leaves may share, is not
- *      changed), and the content tokens of the descendants of the leaf on the
+ *      line count (empty content has no line; the old object, which other
+ *      leaves may share, is not changed), and the content tokens of the descendants of the leaf on the
  *      old content move to it. For a leaf with a CONTENT facet, laid content
  *      and content with tokens of the leaf on it become the value of that
  *      facet as set (the replaced bytes as U+FFFD), and the tokens of the

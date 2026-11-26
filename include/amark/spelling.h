@@ -461,7 +461,9 @@ AMARK_API amark_error_t amark_node_content_base(const amark_node_t *node, const 
  * source_leaf, a block with content of the same document or of another one
  * (8.6, the msgstr insertion):
  *   - the content of target becomes new free content holding a copy of the
- *     bytes of the content of source_leaf (empty when it has none);
+ *     bytes and the line count of the content of source_leaf (empty, without
+ *     a line, when it has none; empty content has no line either when the type
+ *     of target has no CONTENT facet);
  *   - the children of target are destroyed, and the inline children of
  *     source_leaf are copied (amark_node_copy) or, from another document,
  *     imported (amark_node_import) in their place, with their spelling: their

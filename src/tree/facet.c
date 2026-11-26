@@ -965,7 +965,7 @@ amark_error_t amark_node_discard_spelling(amark_node_t *node)
         }
         else if ((node->content != NULL) && (node->content->state == AMARK_CONTENT_LAID))
         {
-            error = amark_tree_content_free_copy(node->content, &content);
+            error = amark_tree_content_free_copy(node->content, node->desc, &content);
         }
     }
     if (error != AMARK_ERROR_NONE)

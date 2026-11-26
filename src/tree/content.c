@@ -684,7 +684,22 @@ void amark_tree_leaf_take_content(amark_node_t *leaf, amark_tree_content_t *cont
     amark_tree_changed(leaf, AMARK_TREE_CHANGE_RECORD);
 }
 
+bool amark_tree_type_has_content_facet(const amark_node_type_desc_t *desc)
+{
+    size_t i;
+
+    for (i = 0; i < desc->facet_count; i++)
+    {
+        if ((desc->facets[i].flags & AMARK_FACET_CONTENT) != 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 amark_error_t amark_tree_content_free_copy(const amark_tree_content_t *source,
+                                           const amark_node_type_desc_t *desc,
                                            amark_tree_content_t **out)
 {
     amark_tree_content_t *content;
@@ -708,7 +723,10 @@ amark_error_t amark_tree_content_free_copy(const amark_tree_content_t *source,
     }
     content->bytes[source->length] = '\0';
     content->length = source->length;
-    content->line_count = source->line_count;
+    /* Empty free content of a leaf without a CONTENT facet has no line. */
+    content->line_count = ((source->length == 0) && !amark_tree_type_has_content_facet(desc))
+                              ? 0
+                              : source->line_count;
     content->state = AMARK_CONTENT_FREE;
     content->owners = 1;
     *out = content;

@@ -1281,7 +1281,7 @@ amark_error_t amark_block_replace_content(amark_node_t *target, const amark_node
     /* The new content: free, with the bytes of the content of the source. */
     if (source_leaf->content != NULL)
     {
-        error = amark_tree_content_free_copy(source_leaf->content, &content);
+        error = amark_tree_content_free_copy(source_leaf->content, target->desc, &content);
     }
     else
     {

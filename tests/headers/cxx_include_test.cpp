@@ -601,6 +601,60 @@ NAOS_TEST(iterator_functions_link)
     amark_document_destroy(document);
 }
 
+static amark_error_t cxx_box_dump(const amark_node_t *, const void *, amark_dump_writer_t *writer)
+{
+    amark_error_t error = amark_dump_write_string(writer, "s", "a", 1);
+
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_dump_write_int(writer, "i", -2);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_dump_write_bool(writer, "b", true);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_dump_write_symbol(writer, "y", "z");
+    }
+    return error;
+}
+
+NAOS_TEST(dump_functions_link)
+{
+    static const amark_node_type_desc_t box_type = {
+        sizeof(amark_node_type_desc_t), "cxx.box", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK,
+        AMARK_CONTENT_BLOCK, 0, NULL, 0, 0, NULL, NULL, NULL, NULL, NULL, cxx_box_dump, NULL};
+    static const amark_node_type_desc_t *const box_types[] = {&box_type};
+    static const amark_extension_t box_ext = {
+        sizeof(amark_extension_t), "cxx.boxes", box_types, 1, NULL, 0, NULL};
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_node_type_t box_id = AMARK_NODE_NONE;
+    amark_node_t *box = NULL;
+    amark_buffer_t *buffer = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_create(&set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_append(set, &box_ext));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_freeze(set));
+    NAOS_REQUIRE_TRUE(amark_syntax_set_find_node_type(set, "cxx.box", &box_id));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_take_syntax_set(document, set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, box_id, &box));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_append_child(amark_document_root(document), box));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&buffer));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_dump(amark_document_root(document),
+                                      AMARK_DUMP_STYLE | AMARK_DUMP_LAYOUT | AMARK_DUMP_SPELLING |
+                                          AMARK_DUMP_POSITIONS | AMARK_DUMP_LINES,
+                                      buffer));
+    NAOS_CHECK_STR_EQ("(document :line_table ()\n  (cxx.box :s \"a\" :i -2 :b true :y z))\n",
+                      amark_buffer_data(buffer));
+    amark_buffer_destroy(buffer);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -621,7 +675,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(content_token_functions_link),
     NAOS_ADD_TEST(block_stage_functions_link),
     NAOS_ADD_TEST(verbatim_functions_link),
-    NAOS_ADD_TEST(iterator_functions_link)
+    NAOS_ADD_TEST(iterator_functions_link),
+    NAOS_ADD_TEST(dump_functions_link)
 )
 
 NAOS_MAIN(
