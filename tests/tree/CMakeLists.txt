@@ -27,3 +27,8 @@ amark_add_test(edit_tracking_test SOURCES edit_tracking_test.c INTERNAL)
 # The check of the tree invariants, the containment rule on descriptors and the
 # internal counters (breaks the internal structs directly).
 amark_add_test(tree_check_test SOURCES tree_check_test.c INTERNAL)
+
+# Structural editing: the positions, moves, replacement, the rejections, unlinking,
+# destruction and their records (checks the invariants and reads the internal
+# counters).
+amark_add_test(structure_edit_test SOURCES structure_edit_test.c INTERNAL)

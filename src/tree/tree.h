@@ -90,10 +90,14 @@ struct amark_document
     size_t source_capacity;
     bool tracking;
     /* Counters for the INTERNAL tests of the complexity, never exposed: the
-     * ancestor steps of the edit propagation (amark_edit_mark) and the tokens
-     * moved by sorted insertions (token.c). 0 when the document is created. */
+     * ancestor steps of the edit propagation (amark_edit_mark, and the propagation
+     * of an inserted subtree's records in structure_edit.c), the tokens moved by
+     * sorted insertions (token.c) and the ancestor steps of the cycle check of
+     * the insertions (structure_edit.c; 0 for inserting a node without children).
+     * 0 when the document is created. */
     size_t stat_propagation_steps;
     size_t stat_token_moves;
+    size_t stat_cycle_steps;
 };
 
 /* --- edit_tracking.c ---------------------------------------------------------- */
