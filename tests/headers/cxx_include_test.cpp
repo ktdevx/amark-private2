@@ -398,6 +398,49 @@ NAOS_TEST(content_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(content_token_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *text = NULL;
+    amark_node_t *emph = NULL;
+    amark_source_id_t source = 0;
+    amark_content_token_t token;
+    const char *bytes = NULL;
+    size_t length = 0;
+    amark_content_state_t state = AMARK_CONTENT_NONE;
+    bool own = false;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, "a *b*\n", 6,
+                                                  AMARK_SOURCE_FINISHED, &source));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_EMPH, &emph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(paragraph, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 5));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(paragraph, text));
+    std::memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.start = 0;
+    token.end = 5;
+    token.kind = AMARK_SPELL_TEXT;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_add_content_token(text, paragraph, &token));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_split_content_token(text, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_move_content_tokens(text, emph, 1, 1));
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(emph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_content_token_at(emph, 0, &token));
+    NAOS_CHECK_UINT_EQ(2, token.start);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_content_base(text, &bytes, &length, &state, &own));
+    NAOS_CHECK_UINT_EQ(5, length);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_LAID, state);
+    NAOS_CHECK_TRUE(own);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -412,7 +455,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(source_and_line_functions_link),
     NAOS_ADD_TEST(facet_value_functions_link),
     NAOS_ADD_TEST(layout_functions_link),
-    NAOS_ADD_TEST(content_functions_link)
+    NAOS_ADD_TEST(content_functions_link),
+    NAOS_ADD_TEST(content_token_functions_link)
 )
 
 NAOS_MAIN(

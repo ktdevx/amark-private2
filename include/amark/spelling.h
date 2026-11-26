@@ -306,6 +306,102 @@ AMARK_API size_t amark_block_content_piece_count(const amark_node_t *leaf);
 AMARK_API amark_error_t amark_block_content_piece_at(const amark_node_t *leaf, size_t index,
                                                      amark_content_piece_t *out);
 
+/* ---- Content tokens -------------------------------------------------------------- */
+
+/*
+ * The content tokens spell the inline structure on the content of a leaf: each
+ * is a nonempty range of bytes of the content, recorded on the leaf itself or on
+ * one of its inline descendants. The tokens of a node are on one content object,
+ * their base (the content of the leaf they were recorded on, which they keep
+ * when the leaf gets another content or the node moves to another leaf), in the
+ * order of the content and without overlap. The kind must match the bytes:
+ *   - AMARK_SPELL_LINE_BREAK: line breaks only (the virtual "\n" of laid content,
+ *     an LF of free content);
+ *   - AMARK_SPELL_TAB_REMAINDER: spaces of laid content that stand for the
+ *     columns of a tab cut by the boundary of a piece;
+ *   - AMARK_SPELL_REPLACED: NUL bytes and invalid UTF-8 sequences only;
+ *   - AMARK_SPELL_ESCAPE: a backslash and an ASCII punctuation character;
+ *   - AMARK_SPELL_CHAR_REF: one character reference (amark_char_ref_decode);
+ *   - the other kinds: any bytes.
+ * Both ends of a token are boundaries of the UTF-8 characters of the content
+ * (an invalid sequence decodes as the bytes of its maximal subpart).
+ */
+
+/* A content token: the bytes [start, end) of its base. The caller sets
+ * struct_size to sizeof(amark_content_token_t). */
+typedef struct amark_content_token
+{
+    size_t struct_size;
+    size_t start;
+    size_t end;
+    amark_spell_kind_t kind;
+    /* The facet the token spells, or AMARK_FACET_NONE for structural spelling. */
+    amark_facet_t facet;
+    /* The meaning of the token for its type; 0 is none. */
+    uint16_t role;
+} amark_content_token_t;
+
+/*
+ * Appends token, on the content of leaf, to node: leaf itself or one of its
+ * inline descendants. AMARK_ERROR_INVALID_ARGUMENT, with the node unchanged, for
+ * NULL, a struct_size below sizeof(amark_content_token_t), a leaf that is not a
+ * block with content or has none, a node that is neither leaf nor an inline
+ * descendant of it, a node whose tokens are on another content object, an
+ * unknown kind, a facet the type of node does not have, an empty range, a range
+ * outside the content or with an end inside a UTF-8 character, a kind that does
+ * not match the bytes, and a token that starts before the end of the last token
+ * of node. AMARK_ERROR_OUT_OF_MEMORY leaves the node unchanged. The derived
+ * values of node are dropped and the change is notified.
+ */
+AMARK_API amark_error_t amark_node_add_content_token(amark_node_t *node, const amark_node_t *leaf,
+                                                     const amark_content_token_t *token);
+
+/* The number of content tokens of node (0 for NULL). */
+AMARK_API size_t amark_node_content_token_count(const amark_node_t *node);
+
+/* Reads content token index of node into *out (whose struct_size the caller
+ * sets). AMARK_ERROR_INVALID_ARGUMENT for NULL, a struct_size below
+ * sizeof(amark_content_token_t) and an index out of range. */
+AMARK_API amark_error_t amark_node_content_token_at(const amark_node_t *node, size_t index,
+                                                    amark_content_token_t *out);
+
+/*
+ * Moves the count tokens of from that start at index first to to, where they
+ * go between the tokens of to in the order of the content.
+ * AMARK_ERROR_INVALID_ARGUMENT, with both nodes unchanged, for NULL, the same
+ * node, nodes of different documents, a count of 0 or a range beyond the tokens
+ * of from, a to that is neither an inline node nor a block with content, a to
+ * whose tokens are on another content object, a token whose facet the type of
+ * to does not have, and tokens that would overlap the tokens of to.
+ * AMARK_ERROR_OUT_OF_MEMORY leaves both nodes unchanged. The derived values of
+ * both nodes are dropped and the changes are notified.
+ */
+AMARK_API amark_error_t amark_node_move_content_tokens(amark_node_t *from, amark_node_t *to,
+                                                       size_t first, size_t count);
+
+/*
+ * Splits the AMARK_SPELL_TEXT token index of node at the content position at
+ * into [start, at) and [at, end), both with the facet and the role of the
+ * token. AMARK_ERROR_INVALID_ARGUMENT, with the node unchanged, for NULL, an
+ * index out of range, a token of another kind, a position not strictly inside
+ * the token, and a position inside a UTF-8 character. AMARK_ERROR_OUT_OF_MEMORY
+ * leaves the node unchanged. The derived values of node are dropped and the
+ * change is notified.
+ */
+AMARK_API amark_error_t amark_node_split_content_token(amark_node_t *node, size_t index,
+                                                       size_t at);
+
+/*
+ * The base of the content tokens of node: its bytes (*bytes, never NULL, ""
+ * without tokens) and *length, its *state (AMARK_CONTENT_NONE when node has no
+ * tokens), and *is_own_leaf_content, whether the base is the current content of
+ * the nearest leaf among node and its ancestors (false without tokens). Each
+ * output may be NULL. AMARK_ERROR_INVALID_ARGUMENT for a NULL node.
+ */
+AMARK_API amark_error_t amark_node_content_base(const amark_node_t *node, const char **bytes,
+                                               size_t *length, amark_content_state_t *state,
+                                               bool *is_own_leaf_content);
+
 AMARK_END_DECLS
 
 #endif /* AMARK_SPELLING_H */

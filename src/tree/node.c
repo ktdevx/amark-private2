@@ -26,6 +26,7 @@ static void free_node_memory(amark_node_t *node)
         amark_free(node->facets);
     }
     amark_tree_records_free(node->records);
+    amark_tree_content_tokens_free(node->content_tokens);
     amark_tree_content_release(node->content, true);
     amark_free(node->data);
     amark_free(node);

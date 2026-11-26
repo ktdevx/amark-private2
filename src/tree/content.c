@@ -13,16 +13,25 @@
  * and the leaf changes only once every allocation has succeeded. Appending
  * never changes the bytes already there. Free content is always a new object:
  * the previous one is released, never changed.
+ *
+ * A node with content tokens counts as one base of the object its tokens are
+ * on. Tokens are appended in the order of the content and checked against its
+ * bytes; moving and splitting keep that order. The tokens of a node keep their
+ * base when the leaf gets another content or the node moves to another leaf.
  */
 #include "tree/tree.h"
 
 #include <amark/allocator.h>
+#include <amark/entity.h>
+#include <amark/utf8.h>
 
 #include <string.h>
 
-/* The first capacities of the bytes and of the pieces of a content object. */
+/* The first capacities of the bytes and of the pieces of a content object, and
+ * of the content tokens of a node. */
 #define BYTES_FIRST_CAPACITY 16u
 #define PIECES_FIRST_CAPACITY 4u
+#define TOKENS_FIRST_CAPACITY 4u
 
 /* ---- Content objects ----------------------------------------------------------------- */
 
@@ -416,5 +425,552 @@ amark_error_t amark_block_content_piece_at(const amark_node_t *leaf, size_t inde
     out->column_end = piece->end;
     out->content_start = piece->content_start;
     out->content_length = piece->content_length;
+    return AMARK_ERROR_NONE;
+}
+
+/* ---- Content tokens ------------------------------------------------------------------- */
+
+void amark_tree_content_tokens_free(amark_tree_content_tokens_t *tokens)
+{
+    if (tokens == NULL)
+    {
+        return;
+    }
+    amark_tree_content_release(tokens->base, false);
+    amark_free(tokens->items);
+    amark_free(tokens);
+}
+
+/* Drops the values derived from the tokens of node (its string caches). */
+static void drop_derived(amark_node_t *node)
+{
+    size_t i;
+
+    if (node->facets == NULL)
+    {
+        return;
+    }
+    for (i = 0; i < node->desc->facet_count; i++)
+    {
+        amark_free(node->facets[i].cache);
+        node->facets[i].cache = NULL;
+        node->facets[i].cache_length = 0;
+    }
+}
+
+/* The change of the tokens of node: its derived values are dropped and the
+ * change is notified. */
+static void tokens_changed(amark_node_t *node)
+{
+    drop_derived(node);
+    amark_tree_changed(node, AMARK_TREE_CHANGE_RECORD);
+}
+
+/*
+ * Makes room for extra more tokens in the tokens of node: *out receives the
+ * token structure of node, allocated when node has none (*created tells), which
+ * the caller stores in node once it commits. On failure node is unchanged and
+ * nothing is left allocated. Counts the tokens moved by a growth in the record
+ * steps.
+ */
+static amark_error_t reserve_tokens(amark_node_t *node, size_t extra,
+                                    amark_tree_content_tokens_t **out, bool *created)
+{
+    amark_tree_content_tokens_t *tokens = node->content_tokens;
+    amark_tree_content_token_t *grown;
+    size_t needed;
+    size_t capacity;
+
+    *created = false;
+    if (tokens == NULL)
+    {
+        tokens = (amark_tree_content_tokens_t *)amark_calloc(1, sizeof(*tokens));
+        if (tokens == NULL)
+        {
+            return AMARK_ERROR_OUT_OF_MEMORY;
+        }
+        *created = true;
+    }
+    if (extra > (SIZE_MAX - tokens->count))
+    {
+        if (*created)
+        {
+            amark_free(tokens);
+        }
+        return AMARK_ERROR_OVERFLOW;
+    }
+    needed = tokens->count + extra;
+    if (needed > tokens->capacity)
+    {
+        capacity = (tokens->capacity < TOKENS_FIRST_CAPACITY) ? TOKENS_FIRST_CAPACITY
+                                                              : tokens->capacity;
+        while (capacity < needed)
+        {
+            capacity = (capacity > (SIZE_MAX / 2)) ? needed : capacity * 2;
+        }
+        grown = NULL;
+        if (capacity <= (SIZE_MAX / sizeof(*grown)))
+        {
+            grown = (amark_tree_content_token_t *)amark_realloc(tokens->items,
+                                                                capacity * sizeof(*grown));
+        }
+        if (grown == NULL)
+        {
+            if (*created)
+            {
+                amark_free(tokens);
+            }
+            return (capacity <= (SIZE_MAX / sizeof(*grown))) ? AMARK_ERROR_OUT_OF_MEMORY
+                                                             : AMARK_ERROR_OVERFLOW;
+        }
+        tokens->items = grown;
+        tokens->capacity = capacity;
+        node->document->stats.record_steps += tokens->count;
+    }
+    *out = tokens;
+    return AMARK_ERROR_NONE;
+}
+
+static bool is_continuation(char c)
+{
+    return (((unsigned char)c) & 0xC0u) == 0x80u;
+}
+
+/*
+ * Whether position (at most length) is a boundary of the characters of the
+ * length bytes at bytes, decoded from the start with amark_utf8_decode (an
+ * invalid sequence takes the bytes of its maximal subpart). A byte that is not a
+ * continuation byte always starts a character, and a character is at most 4
+ * bytes, so the decoding starts at most 3 bytes before position: constant time.
+ */
+static bool is_boundary(const char *bytes, size_t length, size_t position)
+{
+    size_t start = position;
+    size_t steps = 0;
+
+    if ((position == 0) || (position >= length))
+    {
+        return true;
+    }
+    while ((start > 0) && (steps < 3) && is_continuation(bytes[start]))
+    {
+        start--;
+        steps++;
+    }
+    if ((start > 0) && is_continuation(bytes[start]))
+    {
+        /* The 3 bytes before position are continuation bytes too: no character
+         * that holds position can start before it. */
+        return true;
+    }
+    while (start < position)
+    {
+        start += amark_utf8_decode(bytes + start, length - start, NULL);
+    }
+    return start == position;
+}
+
+static bool is_ascii_punctuation(char c)
+{
+    unsigned char u = (unsigned char)c;
+
+    return ((u >= 0x21u) && (u <= 0x2Fu)) || ((u >= 0x3Au) && (u <= 0x40u)) ||
+           ((u >= 0x5Bu) && (u <= 0x60u)) || ((u >= 0x7Bu) && (u <= 0x7Eu));
+}
+
+/* Whether the bytes [start, end) (on character boundaries) are NUL bytes and
+ * invalid UTF-8 sequences only. */
+static bool all_replaced(const char *bytes, size_t start, size_t end)
+{
+    size_t position = start;
+
+    while (position < end)
+    {
+        uint32_t codepoint = 0;
+        size_t size;
+
+        if (bytes[position] == '\0')
+        {
+            position++;
+            continue;
+        }
+        size = amark_utf8_decode(bytes + position, end - position, &codepoint);
+        if ((codepoint != AMARK_UTF8_REPLACEMENT) ||
+            ((size == 3) && (memcmp(bytes + position, "\xEF\xBF\xBD", 3) == 0)))
+        {
+            return false;
+        }
+        position += size;
+    }
+    return true;
+}
+
+/*
+ * Whether the bytes [start, end) of laid content are spaces that stand for the
+ * columns of a tab cut by the start or the end of one piece: *ok receives the
+ * answer. Finds the piece by binary search over the content positions.
+ * AMARK_ERROR_OUT_OF_MEMORY when the index of the tabs of the line cannot be
+ * built.
+ */
+static amark_error_t tab_remainder_ok(const amark_document_t *document,
+                                      const amark_tree_content_t *content, size_t start,
+                                      size_t end, bool *ok)
+{
+    const amark_tree_piece_t *piece;
+    piece_shape_t shape;
+    size_t low = 0;
+    size_t high = content->piece_count;
+    size_t piece_end;
+    amark_error_t error;
+
+    *ok = false;
+    /* The last piece that starts at or before start. */
+    while (low < high)
+    {
+        size_t middle = low + ((high - low) / 2);
+
+        if (content->pieces[middle].content_start <= start)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    if (low == 0)
+    {
+        return AMARK_ERROR_NONE;
+    }
+    piece = &content->pieces[low - 1];
+    piece_end = piece->content_start + piece->content_length;
+    if (end > piece_end)
+    {
+        return AMARK_ERROR_NONE;
+    }
+    error = shape_piece(document, piece->line, piece->start, piece->end, &shape);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    *ok = (end <= piece->content_start + shape.lead) || (start >= piece_end - shape.trail);
+    return AMARK_ERROR_NONE;
+}
+
+/* Checks the bytes [start, end) of content for a token of kind: a nonempty
+ * range within the content, on character boundaries, whose bytes match the
+ * kind. AMARK_ERROR_INVALID_ARGUMENT otherwise. */
+static amark_error_t check_token_bytes(const amark_document_t *document,
+                                       const amark_tree_content_t *content, size_t start,
+                                       size_t end, amark_spell_kind_t kind)
+{
+    const char *bytes = content->bytes;
+    size_t i;
+    uint32_t codepoints[2];
+    size_t count = 0;
+    bool ok = false;
+    amark_error_t error;
+
+    if ((kind < AMARK_SPELL_TEXT) || (kind > AMARK_SPELL_TAB_REMAINDER) || (start >= end) ||
+        (end > content->length) || !is_boundary(bytes, content->length, start) ||
+        !is_boundary(bytes, content->length, end))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    switch (kind)
+    {
+    case AMARK_SPELL_LINE_BREAK:
+        /* A line holds no LF: every LF of laid content is a virtual one. */
+        for (i = start; i < end; i++)
+        {
+            if (bytes[i] != '\n')
+            {
+                return AMARK_ERROR_INVALID_ARGUMENT;
+            }
+        }
+        return AMARK_ERROR_NONE;
+    case AMARK_SPELL_TAB_REMAINDER:
+        if (content->state != AMARK_CONTENT_LAID)
+        {
+            return AMARK_ERROR_INVALID_ARGUMENT;
+        }
+        error = tab_remainder_ok(document, content, start, end, &ok);
+        if (error != AMARK_ERROR_NONE)
+        {
+            return error;
+        }
+        return ok ? AMARK_ERROR_NONE : AMARK_ERROR_INVALID_ARGUMENT;
+    case AMARK_SPELL_REPLACED:
+        return all_replaced(bytes, start, end) ? AMARK_ERROR_NONE : AMARK_ERROR_INVALID_ARGUMENT;
+    case AMARK_SPELL_ESCAPE:
+        return ((end - start == 2) && (bytes[start] == '\\') &&
+                is_ascii_punctuation(bytes[start + 1]))
+                   ? AMARK_ERROR_NONE
+                   : AMARK_ERROR_INVALID_ARGUMENT;
+    case AMARK_SPELL_CHAR_REF:
+        return amark_char_ref_decode(bytes + start, end - start, codepoints, &count)
+                   ? AMARK_ERROR_NONE
+                   : AMARK_ERROR_INVALID_ARGUMENT;
+    default:
+        return AMARK_ERROR_NONE;
+    }
+}
+
+/* Whether node is leaf or an inline descendant of leaf (every node between them
+ * is inline). */
+static bool is_leaf_or_inline_of(const amark_node_t *node, const amark_node_t *leaf)
+{
+    const amark_node_t *current = node;
+
+    while (current != leaf)
+    {
+        if ((current == NULL) || (current->desc->level != AMARK_NODE_LEVEL_INLINE))
+        {
+            return false;
+        }
+        current = current->parent;
+    }
+    return true;
+}
+
+amark_error_t amark_node_add_content_token(amark_node_t *node, const amark_node_t *leaf,
+                                           const amark_content_token_t *token)
+{
+    amark_tree_content_tokens_t *tokens;
+    amark_tree_content_token_t *item;
+    amark_tree_content_t *content;
+    bool created = false;
+    amark_error_t error;
+
+    if ((node == NULL) || (token == NULL) || (token->struct_size < sizeof(*token)) ||
+        !is_content_leaf(leaf) || (leaf->content == NULL) || !is_leaf_or_inline_of(node, leaf) ||
+        (token->facet > node->desc->facet_count))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    content = leaf->content;
+    tokens = node->content_tokens;
+    if ((tokens != NULL) && (tokens->count > 0) &&
+        ((tokens->base != content) || (token->start < tokens->items[tokens->count - 1].end)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    error = check_token_bytes(node->document, content, token->start, token->end, token->kind);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    error = reserve_tokens(node, 1, &tokens, &created);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+
+    /* Commit. The content is shorter than 4 GiB: the positions fit. */
+    item = &tokens->items[tokens->count];
+    item->start = (uint32_t)token->start;
+    item->end = (uint32_t)token->end;
+    item->kind = (uint8_t)token->kind;
+    item->facet = (uint8_t)token->facet;
+    item->role = token->role;
+    if (tokens->count == 0)
+    {
+        tokens->base = content;
+        content->bases++;
+    }
+    tokens->count++;
+    node->content_tokens = tokens;
+    node->document->stats.record_steps++;
+    tokens_changed(node);
+    return AMARK_ERROR_NONE;
+}
+
+size_t amark_node_content_token_count(const amark_node_t *node)
+{
+    return ((node != NULL) && (node->content_tokens != NULL)) ? node->content_tokens->count : 0;
+}
+
+amark_error_t amark_node_content_token_at(const amark_node_t *node, size_t index,
+                                          amark_content_token_t *out)
+{
+    const amark_tree_content_token_t *item;
+
+    if ((out == NULL) || (out->struct_size < sizeof(*out)) ||
+        (index >= amark_node_content_token_count(node)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    item = &node->content_tokens->items[index];
+    out->start = item->start;
+    out->end = item->end;
+    out->kind = (amark_spell_kind_t)item->kind;
+    out->facet = item->facet;
+    out->role = item->role;
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_node_move_content_tokens(amark_node_t *from, amark_node_t *to, size_t first,
+                                             size_t count)
+{
+    amark_tree_content_tokens_t *source;
+    amark_tree_content_tokens_t *target;
+    const amark_tree_content_token_t *moved;
+    size_t target_count;
+    size_t low;
+    size_t high;
+    size_t i;
+    bool created = false;
+    amark_error_t error;
+
+    if ((from == NULL) || (to == NULL) || (from == to) || (from->document != to->document) ||
+        ((to->desc->level != AMARK_NODE_LEVEL_INLINE) && !is_content_leaf(to)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    source = from->content_tokens;
+    if ((source == NULL) || (count == 0) || (first >= source->count) ||
+        (count > (source->count - first)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    target = to->content_tokens;
+    target_count = (target != NULL) ? target->count : 0;
+    if ((target_count > 0) && (target->base != source->base))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    moved = &source->items[first];
+    for (i = 0; i < count; i++)
+    {
+        if (moved[i].facet > to->desc->facet_count)
+        {
+            return AMARK_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    /* The place of the moved tokens among the tokens of to: the first token
+     * that starts after the first moved one; the moved tokens must fit between
+     * it and the one before. */
+    low = 0;
+    high = target_count;
+    while (low < high)
+    {
+        size_t middle = low + ((high - low) / 2);
+
+        if (target->items[middle].start < moved[0].start)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    if (((low > 0) && (target->items[low - 1].end > moved[0].start)) ||
+        ((low < target_count) && (target->items[low].start < moved[count - 1].end)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    error = reserve_tokens(to, count, &target, &created);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+
+    /* Commit. */
+    memmove(&target->items[low + count], &target->items[low],
+            (target->count - low) * sizeof(*target->items));
+    memcpy(&target->items[low], moved, count * sizeof(*target->items));
+    if (target->count == 0)
+    {
+        target->base = source->base;
+        target->base->bases++;
+    }
+    target->count += count;
+    to->content_tokens = target;
+    memmove(&source->items[first], &source->items[first + count],
+            (source->count - first - count) * sizeof(*source->items));
+    source->count -= count;
+    if (source->count == 0)
+    {
+        /* to holds the base now: the object stays. */
+        amark_tree_content_release(source->base, false);
+        source->base = NULL;
+    }
+    from->document->stats.record_steps += count;
+    tokens_changed(from);
+    tokens_changed(to);
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_node_split_content_token(amark_node_t *node, size_t index, size_t at)
+{
+    amark_tree_content_tokens_t *tokens;
+    amark_tree_content_token_t item;
+    bool created = false;
+    amark_error_t error;
+
+    if (index >= amark_node_content_token_count(node))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    tokens = node->content_tokens;
+    item = tokens->items[index];
+    if ((item.kind != AMARK_SPELL_TEXT) || (at <= item.start) || (at >= item.end) ||
+        !is_boundary(tokens->base->bytes, tokens->base->length, at))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    error = reserve_tokens(node, 1, &tokens, &created);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+
+    /* Commit. */
+    memmove(&tokens->items[index + 2], &tokens->items[index + 1],
+            (tokens->count - index - 1) * sizeof(*tokens->items));
+    tokens->items[index].end = (uint32_t)at;
+    item.start = (uint32_t)at;
+    tokens->items[index + 1] = item;
+    tokens->count++;
+    node->document->stats.record_steps++;
+    tokens_changed(node);
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_node_content_base(const amark_node_t *node, const char **bytes,
+                                     size_t *length, amark_content_state_t *state,
+                                     bool *is_own_leaf_content)
+{
+    const amark_tree_content_t *base;
+    const amark_node_t *leaf;
+
+    if (node == NULL)
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    base = (node->content_tokens != NULL) ? node->content_tokens->base : NULL;
+    if (bytes != NULL)
+    {
+        *bytes = ((base != NULL) && (base->bytes != NULL)) ? base->bytes : "";
+    }
+    if (length != NULL)
+    {
+        *length = (base != NULL) ? base->length : 0;
+    }
+    if (state != NULL)
+    {
+        *state = (base != NULL) ? (amark_content_state_t)base->state : AMARK_CONTENT_NONE;
+    }
+    if (is_own_leaf_content != NULL)
+    {
+        /* The nearest leaf: the first block among node and its ancestors. */
+        leaf = node;
+        while ((leaf != NULL) && (leaf->desc->level == AMARK_NODE_LEVEL_INLINE))
+        {
+            leaf = leaf->parent;
+        }
+        *is_own_leaf_content = (base != NULL) && (leaf != NULL) && (leaf->content == base);
+    }
     return AMARK_ERROR_NONE;
 }

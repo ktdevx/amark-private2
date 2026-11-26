@@ -219,6 +219,37 @@ typedef struct amark_tree_content
  * base; frees the object once both counts are 0 (NULL does nothing). */
 void amark_tree_content_release(amark_tree_content_t *content, bool owner);
 
+/* A content token (amark_content_token_t without the size; 12 bytes): the
+ * bytes [start, end) of the base of its node. */
+typedef struct amark_tree_content_token
+{
+    uint32_t start;
+    uint32_t end;
+    uint8_t kind;  /* amark_spell_kind_t */
+    uint8_t facet; /* amark_facet_t, at most AMARK_FACET_MAX */
+    uint16_t role;
+} amark_tree_content_token_t;
+
+/*
+ * The content tokens of a node, allocated by its first token (a new node has
+ * none):
+ *   - base: the content object the tokens are on, of which the node counts as
+ *     one base; NULL exactly when count is 0;
+ *   - items: the tokens in the order of the content, nonempty and without
+ *     overlap, within the bytes of the base (grows by doubling; NULL while the
+ *     capacity is 0).
+ */
+typedef struct amark_tree_content_tokens
+{
+    amark_tree_content_t *base;
+    amark_tree_content_token_t *items;
+    size_t count;
+    size_t capacity;
+} amark_tree_content_tokens_t;
+
+/* Frees tokens, releasing its base (NULL does nothing). */
+void amark_tree_content_tokens_free(amark_tree_content_tokens_t *tokens);
+
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
 /* The states of the storage of a facet (amark_tree_facet_t.state). */
@@ -285,6 +316,9 @@ struct amark_node
     /* The content of a leaf (Content), of which the leaf is an owner; NULL
      * while it has none (AMARK_CONTENT_NONE). */
     amark_tree_content_t *content;
+    /* The content tokens (Content) of a leaf or an inline node, NULL until
+     * the first token. */
+    amark_tree_content_tokens_t *content_tokens;
     /* The dropped-spelling marks (AMARK_TREE_DROPPED_*). */
     uint32_t dropped;
     /* The mark of the last internal check (amark_tree_check) that saw the
@@ -542,7 +576,12 @@ typedef enum amark_tree_violation
      * out of order or outside the line range or the width of their lines, bytes
      * that are not the pieces joined as laid content (or free content that holds
      * a CR), a wrong line count, or an owner or base count that differs from
-     * the nodes that refer to the object. */
+     * the nodes that refer to the object; content tokens on a node that is
+     * neither an inline node nor a block with content, tokens without a base
+     * (or a base without tokens), a token array whose count exceeds its
+     * capacity, and tokens that are empty, beyond the bytes of their base, out
+     * of order or overlapping, of an unknown kind, or of a facet the type does
+     * not have. */
     AMARK_TREE_VIOLATION_CONTENT
 } amark_tree_violation_t;
 

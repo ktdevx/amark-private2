@@ -11,8 +11,9 @@
  *      table;
  *   2. the walk visits each node of each tree once and runs the node checks
  *      (node_checks[]) on it: the relations, the containment rules, the link in
- *      link rule, the cache invariant, the storage of the facets and the
- *      layout (the line range and the layout records).
+ *      link rule, the cache invariant, the storage of the facets, the
+ *      layout (the line range and the layout records), the content of a leaf
+ *      and the content tokens.
  * A component that adds records or caches adds its invariant as a node check
  * (records of one node: facets, margins, tokens, content tokens) or as a
  * document check after the walk (whole-document counts: the owners of the
@@ -414,6 +415,50 @@ static bool check_content(check_context_t *context, const amark_node_t *node)
     return true;
 }
 
+/* The content tokens of a node (Content), as far as one node can tell: only an
+ * inline node or a block with content has them; they have a base exactly when
+ * there are some; the array fits its capacity; each token is nonempty, within
+ * the bytes of the base, after the end of the previous one, of a known kind and
+ * of a facet of the type. The base counts are checked by check_contents. */
+static bool check_content_tokens(check_context_t *context, const amark_node_t *node)
+{
+    const amark_tree_content_tokens_t *tokens = node->content_tokens;
+    size_t i;
+
+    if (tokens == NULL)
+    {
+        return true;
+    }
+    if ((node->desc->level != AMARK_NODE_LEVEL_INLINE) &&
+        ((node->desc->flags & AMARK_NODE_TYPE_CONTENT) == 0))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CONTENT, node,
+                    "a node that is neither inline nor a block with content has content "
+                    "tokens");
+    }
+    if ((tokens->count > tokens->capacity) || ((tokens->capacity > 0) && (tokens->items == NULL)) ||
+        ((tokens->count > 0) != (tokens->base != NULL)))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CONTENT, node,
+                    "a content token array is malformed or its base does not match its tokens");
+    }
+    for (i = 0; i < tokens->count; i++)
+    {
+        const amark_tree_content_token_t *token = &tokens->items[i];
+
+        if ((token->start >= token->end) || (token->end > tokens->base->length) ||
+            ((i > 0) && (token->start < tokens->items[i - 1].end)) ||
+            (token->kind < AMARK_SPELL_TEXT) || (token->kind > AMARK_SPELL_TAB_REMAINDER) ||
+            (token->facet > node->desc->facet_count))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_CONTENT, node,
+                        "a content token is empty, beyond its base, out of order, overlapping "
+                        "or malformed");
+        }
+    }
+    return true;
+}
+
 /* The checks of one node, in order. Add the invariants of the records and the
  * caches of a node here. */
 static const node_check_t node_checks[] = {
@@ -424,6 +469,7 @@ static const node_check_t node_checks[] = {
     check_facets,
     check_layout,
     check_content,
+    check_content_tokens,
 };
 
 /* ---- The walk of the trees ----------------------------------------------------- */
@@ -845,27 +891,82 @@ static bool free_content_ok(const amark_tree_content_t *content)
     return content->line_count == ((content->length == 0) ? 0 : lines + 1);
 }
 
+/* Whether a content object is well formed: a known state, arrays within their
+ * capacities, bytes terminated and shorter than 4 GiB, no pieces on free
+ * content, and pieces in order on lines of the line table within their widths.
+ * (check_content checks the same for the content of a leaf, with its line
+ * range; an object reached only as a base of tokens is checked here.) */
+static bool content_object_ok(const amark_document_t *document,
+                              const amark_tree_content_t *content)
+{
+    size_t i;
+
+    if (((content->state != AMARK_CONTENT_LAID) && (content->state != AMARK_CONTENT_FREE)) ||
+        (content->length > AMARK_TREE_MAX_CONTENT) ||
+        ((content->capacity > 0) ? ((content->bytes == NULL) ||
+                                    (content->length >= content->capacity) ||
+                                    (content->bytes[content->length] != '\0'))
+                                 : (content->length != 0)) ||
+        (content->piece_count > content->piece_capacity) ||
+        ((content->piece_capacity > 0) && (content->pieces == NULL)) ||
+        ((content->state == AMARK_CONTENT_FREE) && (content->piece_count > 0)))
+    {
+        return false;
+    }
+    for (i = 0; i < content->piece_count; i++)
+    {
+        const amark_tree_piece_t *piece = &content->pieces[i];
+        const amark_tree_piece_t *last = (i > 0) ? &content->pieces[i - 1] : NULL;
+
+        if ((piece->line >= document->line_count) || (piece->start > piece->end) ||
+            (piece->end > document->lines[piece->line].width) ||
+            ((last != NULL) && ((piece->line < last->line) ||
+                                ((piece->line == last->line) && (piece->start < last->end)))))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The content object a node refers to as an owner (which = 0) or as the base of
+ * its tokens (which = 1), or NULL. */
+static amark_tree_content_t *referred(const amark_node_t *node, int which)
+{
+    if (which == 0)
+    {
+        return node->content;
+    }
+    return (node->content_tokens != NULL) ? node->content_tokens->base : NULL;
+}
+
 /* The content objects (Content): the owner count of each object is the number
  * of leaves whose content it is, its base count the number of nodes whose
- * content tokens are on it (none yet), and its bytes are those of its state.
- * Each object is counted with its check marks: the first pass over the ring
- * resets the counters of each object reached (mark in_tree), the second counts
- * the references, the third checks each object once (mark in_ring). Linear in
- * the nodes and the bytes of the contents. Runs after the node checks and
- * check_lines. */
+ * content tokens are on it, and its bytes are those of its state. The objects
+ * are reached from the nodes, as contents and as bases. Each object is counted
+ * with its check marks: the first pass over the ring resets the counters of
+ * each object reached (mark in_tree), the second counts the references, the
+ * third checks each object once (mark in_ring). Linear in the nodes and the
+ * bytes of the contents. Runs after the node checks and check_lines. */
 static bool check_contents(check_context_t *context)
 {
     const amark_document_t *document = context->document;
     amark_node_t *root = document->root;
     amark_node_t *node = root;
+    int which;
 
     do
     {
-        if ((node->content != NULL) && (node->content->check_mark != context->in_tree))
+        for (which = 0; which < 2; which++)
         {
-            node->content->check_mark = context->in_tree;
-            node->content->check_owners = 0;
-            node->content->check_bases = 0;
+            amark_tree_content_t *content = referred(node, which);
+
+            if ((content != NULL) && (content->check_mark != context->in_tree))
+            {
+                content->check_mark = context->in_tree;
+                content->check_owners = 0;
+                content->check_bases = 0;
+            }
         }
         node = node->ring_next;
     } while (node != root);
@@ -875,14 +976,22 @@ static bool check_contents(check_context_t *context)
         {
             node->content->check_owners++;
         }
+        if ((node->content_tokens != NULL) && (node->content_tokens->base != NULL))
+        {
+            node->content_tokens->base->check_bases++;
+        }
         node = node->ring_next;
     } while (node != root);
     do
     {
-        amark_tree_content_t *content = node->content;
-
-        if ((content != NULL) && (content->check_mark == context->in_tree))
+        for (which = 0; which < 2; which++)
         {
+            amark_tree_content_t *content = referred(node, which);
+
+            if ((content == NULL) || (content->check_mark != context->in_tree))
+            {
+                continue;
+            }
             content->check_mark = context->in_ring;
             if ((content->owners != content->check_owners) ||
                 (content->bases != content->check_bases))
@@ -890,6 +999,11 @@ static bool check_contents(check_context_t *context)
                 return fail(context, AMARK_TREE_VIOLATION_CONTENT, node,
                             "the owner or base count of a content object differs from its "
                             "references");
+            }
+            if (!content_object_ok(document, content))
+            {
+                return fail(context, AMARK_TREE_VIOLATION_CONTENT, node,
+                            "a content object is malformed");
             }
             if ((content->state == AMARK_CONTENT_LAID) ? !laid_content_ok(document, content)
                                                        : !free_content_ok(content))
