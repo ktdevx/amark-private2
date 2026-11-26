@@ -1074,17 +1074,16 @@ static amark_error_t check_token_bytes(const amark_document_t *document,
  * is inline). */
 static bool is_leaf_or_inline_of(const amark_node_t *node, const amark_node_t *leaf)
 {
-    const amark_node_t *current = node;
-
-    while (current != leaf)
+    if (node == leaf)
     {
-        if ((current == NULL) || (current->desc->level != AMARK_NODE_LEVEL_INLINE))
-        {
-            return false;
-        }
-        current = current->parent;
+        return true;
     }
-    return true;
+    /* The leaf of an inline node is the nearest block among its ancestors, the
+     * nodes between them being inline: remembered, so that recording the
+     * tokens of nested inline nodes in document order costs a constant per
+     * token (14.6). */
+    return (node->desc->level == AMARK_NODE_LEVEL_INLINE) &&
+           (amark_tree_leaf_of(node, &node->document->stats.record_steps) == leaf);
 }
 
 amark_error_t amark_node_add_content_token(amark_node_t *node, const amark_node_t *leaf,

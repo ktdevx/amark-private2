@@ -374,6 +374,20 @@ amark_error_t amark_tree_content_cover(const amark_node_t *leaf,
                                        amark_tree_cover_t *out);
 
 /*
+ * The leaf of the inline node (not NULL): the nearest block among its
+ * ancestors, every node between them being inline, or NULL when there is none.
+ * The leaf changes only with the structure, so each inline node remembers it
+ * (leaf_memo) for the structure generation of the document: the walk goes up
+ * only to the first ancestor that remembers it (or to the leaf), and every node
+ * on the way remembers it too. Finding the leaves of all the inline nodes, or of
+ * nested inline nodes from the top down, takes time proportional to them
+ * between two structural changes. Each node visited counts one step of *steps
+ * (the counter of the caller: verbatim_steps for the judgment, record_steps for
+ * the records of content tokens). Allocates nothing.
+ */
+const amark_node_t *amark_tree_leaf_of(const amark_node_t *node, size_t *steps);
+
+/*
  * The value derived from the layout for an OVERRIDABLE facet of node without an
  * override, the step 2 of the getter (design, Tree: Facets): for the tight of
  * a list (3.7), true with *number 1 for tight and 0 for loose, the result
@@ -463,7 +477,8 @@ struct amark_node
     /* The leaf of an inline node (the nearest block among its ancestors, or
      * NULL), remembered by the verbatim judgment (verbatim.c) while
      * leaf_memo_generation is the structure generation of the document + 1 (0:
-     * nothing remembered). A remembered inline node has a block parent that is
+     * nothing remembered; amark_tree_leaf_of, also used by the records of
+     * content tokens). A remembered inline node has a block parent that is
      * its leaf, or an inline parent that remembers the same leaf. Not part of
      * the value of the node: a copy does not carry it. */
     amark_node_t *leaf_memo;
@@ -857,7 +872,9 @@ typedef struct amark_tree_stats
     /* The nodes visited by the change notification. */
     size_t invalidation_steps;
     /* The steps of the layout records (Layout): one per record appended, plus
-     * the records moved by each growth of an array. */
+     * the records moved by each growth of an array; and, for a content token,
+     * the nodes visited to find the leaf of its inline node
+     * (amark_tree_leaf_of). */
     size_t record_steps;
     /* The content objects copied because they were shared when a leaf changed
      * its content (Content, copy on write). */

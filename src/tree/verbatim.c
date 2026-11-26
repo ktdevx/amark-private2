@@ -881,24 +881,20 @@ static amark_error_t judge_subtree(amark_node_t *top)
 }
 
 /*
- * The leaf of the inline node: the nearest block among its ancestors (NULL when
- * there is none). The leaf changes only with the structure, so each inline node
- * remembers it for the structure generation of the document: the walk goes up
+ * The leaf of the inline node (amark_tree_leaf_of in tree.h): the walk goes up
  * only to the first ancestor that remembers it (or to the leaf), and every node
- * on the way remembers it too. Finding the leaves of all the inline nodes takes
- * time proportional to them between two structural changes.
+ * on the way remembers it too.
  */
-static const amark_node_t *leaf_of(const amark_node_t *node)
+const amark_node_t *amark_tree_leaf_of(const amark_node_t *node, size_t *steps)
 {
-    amark_document_t *document = node->document;
-    uint64_t current = document->structure_generation + 1;
+    uint64_t current = node->document->structure_generation + 1;
     amark_node_t *walk = (amark_node_t *)node;
     amark_node_t *leaf;
 
     /* Up to the first block or remembering inline node. */
     for (;;)
     {
-        document->stats.verbatim_steps++;
+        (*steps)++;
         if (walk->leaf_memo_generation == current)
         {
             leaf = walk->leaf_memo;
@@ -920,7 +916,7 @@ static const amark_node_t *leaf_of(const amark_node_t *node)
     for (walk = (amark_node_t *)node; walk->leaf_memo_generation != current;
          walk = walk->parent)
     {
-        document->stats.verbatim_steps++;
+        (*steps)++;
         walk->leaf_memo = leaf;
         walk->leaf_memo_generation = current;
         if ((walk->parent == NULL) || (walk->parent->desc->level == AMARK_NODE_LEVEL_BLOCK))
@@ -934,7 +930,8 @@ static const amark_node_t *leaf_of(const amark_node_t *node)
 /* Whether the tokens of the inline node are on the laid content of its leaf. */
 static bool on_own_leaf_content(const amark_node_t *node)
 {
-    const amark_node_t *leaf = leaf_of(node);
+    const amark_node_t *leaf =
+        amark_tree_leaf_of(node, &node->document->stats.verbatim_steps);
 
     return (leaf != NULL) && (leaf->content != NULL) &&
            (leaf->content->state == AMARK_CONTENT_LAID) && (node->content_tokens != NULL) &&
