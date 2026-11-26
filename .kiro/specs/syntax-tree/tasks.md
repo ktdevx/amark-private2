@@ -90,7 +90,7 @@
   - _Requirements: 2.2, 2.6, 5.1, 5.2, 5.3, 5.4, 5.6, 5.8, 7.1, 7.6_
 
 - [ ] 5. トークンを使う機能、複製、走査
-- [ ] 5.1 (P) ロスレス性の検証を実装する
+- [x] 5.1 (P) ロスレス性の検証を実装する
   - 根から到達できるノードの、指定したソースのトークンを作業領域に集めて整列し、行頭からの列（4 列のタブストップ、1 行目は BOM の後から）を数えながら抜け・重なり・部分的なタブの列の誤りを最初の位置と所有者つきで報告する。不整合は `AMARK_ERROR_NOT_LOSSLESS` で返し、報告の出力引数は NULL でもよい
   - 下流の継ぎ目の代表例（引用の接頭辞と CRLF、遅延継続行、`>\t\tfoo` の部分的なタブ、リストの続きのインデント、BOM、NUL の置換、エスケープと文字参照）を手で組み立てたトークンで表し、すべて成功することを確かめる
   - テストで、意図的な抜け・重なり・タブの列の誤り・切り離したノードのトークンの除外がそれぞれ期待の位置で検出されることを確かめられる
@@ -200,3 +200,4 @@
 - 4.2: `PARTIAL_TAB` を持たないトークンは `tab_column_offset` と `tab_columns` を 0 にしなければならない（違反は INVALID_ARGUMENT。design の TokenStore に追記）。種類の名前は `text`、`marker`、`space`、`line_ending`、`escape`、`char_ref`、`replaced`、`bom`、`lazy_continuation`、未知は `unknown`。`stat_token_moves` は整列した挿入と移動のマージでずらした既存の要素の数。移動で等しいキーは、移したトークンが移動先の既存のトークンの後ろに入る
 - 4.3: tree.h の内部関数 `amark_text_check` / `amark_text_has_line_ending` / `amark_text_has_blank_line` / `amark_text_normalize`（空は NULL、CR がなければそのまま複製）/ `amark_text_equal` を attr.c（4.4）で使う。一括設定は各改行（LF、CR、CRLF）を 1 つの softbreak にし、空の text を作らない。空文字列は子をすべて取り除き、子がなく空なら何も記録しない（子の構成が変わらないため）。text の子のリテラルは直接設定し CONTENT を付けない。改行を含むときは softbreak も包含の規則で検査する（この経路と、子を持つノードへの空文字列の CHILDREN の記録は、7.1 の拡張の型のテストで確かめるとよい）
 - 4.4: title と label は SPAN のリテラルと同じく LF に揃える（末尾の LF は足さない）。label の「空白」は空白、タブ、LF、CR。符号位置の数は CRLF を 1 つ、エスケープを 2 つと数える。エスケープは ASCII の句読点の前の `\`。末尾の対にならない `\` は拒否する（閉じ括弧をエスケープしてしまうため）。空の label の設定は拒否する。list の start は種類によらず保持・比較し、変われば CONTENT を記録する
+- 5.1: ロスレス性の検証の列はバイト単位で数える（`amark_document_position` と同じ。CommonMark では部分的なタブの前に来るのは ASCII のコンテナの接頭辞だけ）。長さ 0 のトークンは集めない。部分的なタブのバイトを通常のトークンが覆うと TAB_COLUMNS。`struct_size` が v1 未満の報告には何も書かない。テストは公開 API だけで書ける（`token_check_test` は INTERNAL でない）

@@ -41,3 +41,8 @@ amark_add_test(token_test SOURCES token_test.c INTERNAL)
 # the records, the tokens kept and the out-of-memory sweeps (calls the internal
 # helpers and checks the invariants).
 amark_add_test(literal_attr_test SOURCES literal_attr_test.c INTERNAL)
+
+# The lossless check of the syntax tokens: the seams of the parsers built by hand,
+# each kind of problem with its offset and owner, the detached nodes left out and
+# the out-of-memory sweep (public API only).
+amark_add_test(token_check_test SOURCES token_check_test.c)
