@@ -2,7 +2,7 @@
  * Copyright (c) The Amark Authors */
 
 /* Copies and imports from another document (source copies and identifier
- * remapping). */
+ * remapping), of a subtree or of all the children of a node. */
 
 #include <amark/node.h>
 
@@ -43,8 +43,10 @@ typedef struct copy_context
     size_t to_source_count;
 } copy_context_t;
 
-static amark_error_t context_init(copy_context_t *context, amark_document_t *to,
-                                  const amark_document_t *from)
+/* Starts a copy from from into to, without allocating anything (the source map is
+ * made by context_alloc_source_map after the checks). */
+static void context_init(copy_context_t *context, amark_document_t *to,
+                         const amark_document_t *from)
 {
     context->to = to;
     context->from = from;
@@ -52,27 +54,34 @@ static amark_error_t context_init(copy_context_t *context, amark_document_t *to,
     context->cached_type = AMARK_NODE_NONE;
     context->source_map = NULL;
     context->to_source_count = to->source_count;
+}
 
-    if ((to != from) && (from->source_count != 0))
+/* Allocates the source map, every entry SOURCE_UNUSED (nothing for the same
+ * document or a document without sources). */
+static amark_error_t context_alloc_source_map(copy_context_t *context)
+{
+    size_t bytes;
+    size_t i;
+
+    if ((context->to == context->from) || (context->from->source_count == 0))
     {
-        size_t bytes;
-        size_t i;
+        return AMARK_ERROR_NONE;
+    }
 
-        if (!amark_size_mul(from->source_count, sizeof(uint32_t), &bytes))
-        {
-            return AMARK_ERROR_OVERFLOW;
-        }
+    if (!amark_size_mul(context->from->source_count, sizeof(uint32_t), &bytes))
+    {
+        return AMARK_ERROR_OVERFLOW;
+    }
 
-        context->source_map = amark_malloc(bytes);
-        if (context->source_map == NULL)
-        {
-            return AMARK_ERROR_OUT_OF_MEMORY;
-        }
+    context->source_map = amark_malloc(bytes);
+    if (context->source_map == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
 
-        for (i = 0; i < from->source_count; i++)
-        {
-            context->source_map[i] = SOURCE_UNUSED;
-        }
+    for (i = 0; i < context->from->source_count; i++)
+    {
+        context->source_map[i] = SOURCE_UNUSED;
     }
 
     return AMARK_ERROR_NONE;
@@ -377,13 +386,13 @@ static amark_error_t import_subtree(amark_document_t *to, const amark_node_t *no
     copy_context_t context;
     amark_error_t err;
 
-    err = context_init(&context, to, node->document);
-    if (err != AMARK_ERROR_NONE)
+    context_init(&context, to, node->document);
+    err = check_types(&context, node);
+    if (err == AMARK_ERROR_NONE)
     {
-        return err;
+        err = context_alloc_source_map(&context);
     }
 
-    err = check_types(&context, node);
     if (err == AMARK_ERROR_NONE)
     {
         mark_sources(&context, node);
@@ -434,4 +443,161 @@ amark_error_t amark_node_import(amark_document_t *document, const amark_node_t *
     }
 
     return import_subtree(document, node, out_copy);
+}
+
+/* --- Import of the children ------------------------------------------------------- */
+
+/* Steps 2 and 3 of the import of the children of source_parent under parent: every
+ * type of their subtrees is in the destination, then each child is allowed under
+ * parent. AMARK_ERROR_INVALID_ARGUMENT otherwise. */
+static amark_error_t check_children(copy_context_t *context, const amark_node_t *parent,
+                                    const amark_node_t *source_parent)
+{
+    const amark_node_t *child;
+
+    for (child = source_parent->first_child; child != NULL; child = child->next)
+    {
+        amark_error_t err = check_types(context, child);
+
+        if (err != AMARK_ERROR_NONE)
+        {
+            return err;
+        }
+    }
+
+    for (child = source_parent->first_child; child != NULL; child = child->next)
+    {
+        if (!amark_node_allows_child(parent, child->desc))
+        {
+            return AMARK_ERROR_INVALID_ARGUMENT;
+        }
+    }
+
+    return AMARK_ERROR_NONE;
+}
+
+/* Frees the copies chained from first by their next links (not yet in the tree). */
+static void destroy_copies(amark_node_t *first)
+{
+    while (first != NULL)
+    {
+        amark_node_t *next = first->next;
+
+        first->next = NULL;
+        amark_node_destroy_subtree(first);
+        first = next;
+    }
+}
+
+/*
+ * Step 5: copies every child of source_parent into a detached subtree, chained by
+ * their next links from *out_first in the order of the children. All the copies
+ * are made before any is linked, so they show the children as they are at the
+ * call even when source_parent is parent or one of its ancestors. On failure frees
+ * the copies it made.
+ */
+static amark_error_t copy_children(copy_context_t *context, const amark_node_t *source_parent,
+                                   amark_node_t **out_first)
+{
+    const amark_node_t *child;
+    amark_node_t *first = NULL;
+    amark_node_t *last = NULL;
+
+    *out_first = NULL;
+    for (child = source_parent->first_child; child != NULL; child = child->next)
+    {
+        amark_node_t *copy;
+        amark_error_t err = copy_subtree(context, child, &copy);
+
+        if (err != AMARK_ERROR_NONE)
+        {
+            destroy_copies(first);
+            return err;
+        }
+
+        if (last == NULL)
+        {
+            first = copy;
+        }
+        else
+        {
+            last->next = copy;
+        }
+
+        last = copy;
+    }
+
+    *out_first = first;
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_node_import_children(amark_node_t *parent, amark_node_t *before,
+                                         const amark_node_t *source_parent)
+{
+    copy_context_t context;
+    const amark_node_t *child;
+    amark_node_t *copy = NULL;
+    amark_error_t err;
+
+    /* Step 1: the arguments. */
+    if ((parent == NULL) || (source_parent == NULL)
+        || ((before != NULL) && (before->parent != parent)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (source_parent->first_child == NULL)
+    {
+        return AMARK_ERROR_NONE;
+    }
+
+    /* Steps 2 and 3: every check before any allocation. */
+    context_init(&context, parent->document, source_parent->document);
+    err = check_children(&context, parent, source_parent);
+    if (err != AMARK_ERROR_NONE)
+    {
+        return err;
+    }
+
+    /* Step 4: each source referenced by the children, once. */
+    err = context_alloc_source_map(&context);
+    if (err == AMARK_ERROR_NONE)
+    {
+        for (child = source_parent->first_child; child != NULL; child = child->next)
+        {
+            mark_sources(&context, child);
+        }
+
+        err = copy_sources(&context);
+    }
+
+    /* Step 5: the copies. */
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = copy_children(&context, source_parent, &copy);
+        if (err != AMARK_ERROR_NONE)
+        {
+            context_rollback(&context);
+        }
+    }
+
+    context_deinit(&context);
+    if (err != AMARK_ERROR_NONE)
+    {
+        return err;
+    }
+
+    /* Step 6: the links, which allocate nothing. Each records AMARK_EDIT_CHILDREN
+     * on parent (a bit set once) and AMARK_EDIT_RELOCATED on the copy, and
+     * propagates the records of the copy: the walk up stops at the first ancestor
+     * that has AMARK_EDIT_DESCENDANTS, so the ancestors are walked once in all. */
+    while (copy != NULL)
+    {
+        amark_node_t *next = copy->next;
+
+        amark_node_link_child(parent, before, copy);
+        copy = next;
+    }
+
+    return AMARK_ERROR_NONE;
 }

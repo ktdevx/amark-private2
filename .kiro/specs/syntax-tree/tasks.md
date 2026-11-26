@@ -107,7 +107,7 @@
   - _Depends: 4.1, 4.2, 4.4_
   - _Requirements: 4.6, 4.7, 4.8, 7.3, 8.12_
 
-- [ ] 5.5 (P) 子をまとめた取り込みを実装する
+- [x] 5.5 (P) 子をまとめた取り込みを実装する
   - 挿入の位置が親の子であること、子の部分木のすべての型の対応付け、直接の子のそれぞれの包含の判定を、確保と木の変更の前にすべて行い、違反は不正な引数を返して何も挿入しない
   - すべての子の部分木が参照するソースを重複を除いて集めて 1 回ずつ複製し、子ごとに切り離された複製を作ってから、元の順で指定の位置につなぐ。親に「子の構成の変更」、各複製に「位置の変更」を記録し、複製の記録を祖先へ伝播する
   - 確保の失敗では、作った複製と追加したソースを取り除いて取り込み先を変えない。同じ文書の中ではソースを複製せず、呼び出しの時点の子の並びを写す。子のない取り込み元は何もせず成功する
@@ -203,3 +203,4 @@
 - 5.1: ロスレス性の検証の列はバイト単位で数える（`amark_document_position` と同じ。CommonMark では部分的なタブの前に来るのは ASCII のコンテナの接頭辞だけ）。長さ 0 のトークンは集めない。部分的なタブのバイトを通常のトークンが覆うと TAB_COLUMNS。`struct_size` が v1 未満の報告には何も書かない。テストは公開 API だけで書ける（`token_check_test` は INTERNAL でない）
 - 5.2: 内部関数 `amark_node_create_copy`（node.c。0 で埋めて `init` を呼ばず、`copy` かバイトの複製でデータを作る。`copy` の失敗では `deinit` を呼ばない）と `amark_document_truncate_sources`（document.c）を tree.h に加えた。複製は記録をそのまま写し、複製自体には `CREATED` を付けない。取り込みは使われるソースだけを識別子の増える順に複製する（トークンの順が保たれる）。copy_import.c の context_init / check_types / mark_sources / copy_sources / copy_subtree / context_rollback は 5.5 で再利用する
 - 5.2: 公開の extension.h に、`init` と `copy` は失敗時に自分で確保したものを解放すること、所有するデータを持つ型は `copy` を用意すること（ないとバイトの複製になる）を 7.1 か 7.5 で書き足す。`amark_node_create_copy` は `data_size` が 0 のとき `copy` を呼ばない（init/deinit とは非対称。必要なら直す）
+- 5.5: copy_import.c の context_init は確保しない初期化と `context_alloc_source_map` に分けた。型の検査が確保より先になったので、`amark_node_copy` / `amark_node_import` でも型の拒否は OOM より INVALID_ARGUMENT が優先される。子をまとめた取り込みは、複製をすべて作ってから（スナップショット）`amark_node_link_child` でつなぐ
