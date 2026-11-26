@@ -172,6 +172,12 @@
 - **Trade-offs**：MSYS2 や Linux のディストリビューションのように両方を 1 つのパッケージに入れる場合、ライブラリは衝突しないが、CMake の設定と `amark.pc` は後勝ちになる。必要になれば、`find_package(Amark)` と `Amark::amark` の契約を保って同居への対応を足せる。
 - 後続の spec の影響：なし。
 
+### 2026-11-26：`AMARK_ERROR_NOT_LOSSLESS` の追加（`syntax-tree` の依頼）
+- **Context**：`syntax-tree` のロスレス性の検証（`amark_document_check_tokens`）は、不整合を `amark_error_t` とは別の列挙（`amark_token_check_error_t`）で出力引数に返していた。呼び出し側は戻り値と結果の 2 段で判定する必要があり、不整合をそのまま上へ伝えられなかった。`markdown-renderer` の `AMARK_ERROR_UNREPRESENTABLE` と同じく、ライブラリのエラーコードで失敗を返し、詳細を報告の構造体に書く形にそろえる。
+- **変更**：`AMARK_ERROR_NOT_LOSSLESS` を一覧の末尾（値 7、10.7 の規則に従う）に追加し、説明の文字列を既存の形式に合わせて `"not lossless"` にした。要件 10.10、design の Error と Downstream Extension Points と Error Categories、タスク 2.1、`include/amark/error.h`、`tests/base/error_test.c`（値の固定、コードの数、説明、未知の値の範囲を 8 以上に）に反映した。
+- **名前**：`syntax-tree` の要件 6.9 と design が一貫して使う「ロスレス性」の否定にした。抜け・重なり・タブの列の誤りのどれも、トークンからソースを正確に復元できない状態に含まれる。検討した代替：`LOSSY`（重なりは「失われた」と言いにくい）、`TOKEN_MISMATCH`（何が合わないかが曖昧）、`INCOMPLETE_TOKENS`（抜けしか表さない）、`INVALID_TOKENS`（個々のトークンの不正に読め、それは追加時の `INVALID_ARGUMENT` が担う）、`INCONSISTENT_TOKENS`（範囲が広く、何が一貫しないかが名前から読めない）。コードの範囲を名前に合わせるため、覆い方でない検査は別の関数とすることを `syntax-tree` の design に記した。
+- **Implications**：追加だけなので既存のコードの値と利用者の振る舞いは変わらない（未知の非 0 の値は一般的な失敗として扱う規約）。エラーコードの追加は既定の Revalidation Trigger。タスク 2.1 は実装と検証を済ませて完了のまま。承認は維持する。
+
 ## References
 - [Naos v0.4.0](https://github.com/vabelorg/naos/tree/v0.4.0) — テストフレームワーク、CMake 関数、DLL の扱い
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — 文字の分類の定義

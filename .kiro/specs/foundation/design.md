@@ -70,6 +70,7 @@
 | `inline-parser` | `.gitattributes` | `tests/spec/data/` の spec.txt と NOTICE.txt の `export-ignore` | RepoDocs の「配布しないテストデータには `export-ignore` を付ける」規則 |
 | `inline-parser` | `.github/workflows/ci.yml` | 全ジョブの構成に `-DAMARK_REQUIRE_SPEC_TESTS=ON` を加える | CIWorkflow の構成の段（構成のオプションを追加できる） |
 | `markdown-renderer` | `include/amark/error.h`、`src/base/error.c` | `AMARK_ERROR_UNREPRESENTABLE` | エラーコードの末尾への追加（10.7）。2026-11-25 にこの spec に取り込み済み（値 6、要件 10.9、タスク 2.1） |
+| `syntax-tree` | `include/amark/error.h`、`src/base/error.c` | `AMARK_ERROR_NOT_LOSSLESS` | エラーコードの末尾への追加（10.7）。2026-11-26 にこの spec に取り込み済み（値 7、要件 10.10、タスク 2.1） |
 
 - 表のほかに、すべての後続の spec が行う定型の追加として、`src/CMakeLists.txt` へのソース、`include/amark/amark.h` への公開ヘッダ（PublicHeaders の正規の順の自分の位置に）、`tests/CMakeLists.txt` と `fuzz/CMakeLists.txt` へのサブディレクトリ（FuzzInfra の「ファジング用の補助ライブラリの規則」に従う）がある。
 - 上の追加で `src/base/` に入るファイルは、This Spec Owns の「`src/base/` のすべて」の例外として、追加する spec が所有する。ライセンスヘッダ、`amark_` 接頭辞、アロケータの経由、レイヤーの規則などの規約はこの spec のものに従う。
@@ -347,6 +348,7 @@ graph TB
 | 9.7 | `amark.h` の正規の include の順 | PublicHeaders | `amark.h` | — |
 | 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7 | エラーコードと失敗の規約 | Error、Error conventions | `amark_error_t`、`amark_error_string()` | — |
 | 10.9 | 表現できないことのエラーコード | Error | `AMARK_ERROR_UNREPRESENTABLE`、`amark_error_string()` | — |
+| 10.10 | ロスレスでないことのエラーコード | Error | `AMARK_ERROR_NOT_LOSSLESS`、`amark_error_string()` | — |
 | 10.8 | アロケータの設定のほかにグローバルな可変状態を持たない | Base 全体 | 規約 | — |
 | 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9 | グローバルのアロケータ | Allocator | `amark_allocator_set()`、`amark_malloc()` など | — |
 | 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8 | バッファ | Buffer | `amark_buffer_*` | — |
@@ -810,7 +812,8 @@ AMARK_API const char *amark_version_string(void); /* 静的な文字列。解放
     X(AMARK_ERROR_OVERFLOW, "overflow")                  /* サイズの計算が size_t を超える */ \
     X(AMARK_ERROR_LIMIT_EXCEEDED, "limit exceeded")      /* 文書化された上限（入れ子の深さなど）を超えた */ \
     X(AMARK_ERROR_INVALID_STATE, "invalid state")        /* オブジェクトの状態がその操作を許さない */ \
-    X(AMARK_ERROR_UNREPRESENTABLE, "unrepresentable")    /* 対象を要求された形式で意味を変えずに表せない（例：Markdown の出力） */
+    X(AMARK_ERROR_UNREPRESENTABLE, "unrepresentable")    /* 対象を要求された形式で意味を変えずに表せない（例：Markdown の出力） */ \
+    X(AMARK_ERROR_NOT_LOSSLESS, "not lossless")          /* 構文トークンがソースを抜けも重なりもなく覆っていない */
 
 typedef enum amark_error {
 #define AMARK_ERROR_ENUM(name, text) name,
@@ -824,6 +827,7 @@ AMARK_API const char *amark_error_string(amark_error_t error);
 - コードと説明は `AMARK_ERROR_LIST` の X マクロで 1 か所に定義する。検索で定義が見つかるように、名前は `##` で組み立てず完全な形で書く。`amark_error_string` は `error.c` の `switch` に同じ一覧を `case name: return text;` として展開し、`switch` の後で `"unknown error"` を返す（`default` は書かない）。
 - 値は明示せず、一覧の順で決まる（先頭の `AMARK_ERROR_NONE` が 0）。具体的な値に意味はなく、利用者は名前で比較する。既存の値を変えない（10.7）ため、並べ替え、途中への挿入、削除をせず、新しいコードは末尾に追加する（追加は Revalidation Trigger）。利用者は未知の非 0 の値を一般的な失敗として扱う。
 - `AMARK_ERROR_UNREPRESENTABLE`（10.9）は 2026-11-25 に `markdown-renderer` の依頼で追加した。一覧の末尾（値は 6）に置く。説明の文字列は `"unrepresentable"`。共通基盤自身はこのコードを返さない。どの操作がいつ返すか（`amark_markdown_render` など）と、理由の報告は、返す spec が定める。
+- `AMARK_ERROR_NOT_LOSSLESS`（10.10）は 2026-11-26 に `syntax-tree` の依頼で追加した。一覧の末尾（値は 7）に置く。説明の文字列は `"not lossless"`。共通基盤自身はこのコードを返さない。返すのは `syntax-tree` の `amark_document_check_tokens` で、不整合の種類と位置の報告もその spec が定める。
 
 #### Allocator
 
@@ -983,6 +987,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - **利用者の誤り**：NULL の必須引数、範囲外の切り詰め、不完全なアロケータ → `AMARK_ERROR_INVALID_ARGUMENT`。
 - **資源の不足**：確保の失敗 → `AMARK_ERROR_OUT_OF_MEMORY`、サイズの桁あふれ → `AMARK_ERROR_OVERFLOW`。
 - **表現できない対象**：→ `AMARK_ERROR_UNREPRESENTABLE`。共通基盤は定義と説明だけを持ち、返すのは後続の spec（`markdown-renderer`）。
+- **ロスレスでない文書**：→ `AMARK_ERROR_NOT_LOSSLESS`。共通基盤は定義と説明だけを持ち、返すのは後続の spec（`syntax-tree`）。
 - **入力の不正**：不正な UTF-8 はエラーではなく U+FFFD として扱い、処理を続ける。
 
 ### Monitoring
@@ -995,7 +1000,7 @@ AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);    /* U+0021–2F
 - **buffer**：NUL を含む追加と常に NUL 終端であること（12.1, 12.2）、各操作（12.3）、テスト用アロケータで再確保の回数が追加の総量の対数に収まること（12.7）、`AMARK_CHECK_OOM_SWEEP` で全操作のメモリ不足時に内容が変わらずリークしないこと（12.4, 11.4）、必要な容量が桁あふれする予約と追加（空のバッファでの `SIZE_MAX` など）が、アロケータを呼ばずに `AMARK_ERROR_OVERFLOW` を返し、内容が変わらないこと（12.5。桁あふれしない巨大な予約は、失敗を注入するテスト用アロケータで試す）、長すぎる切り詰めの拒否（12.6）、`detach` と `amark_free` の組み合わせ（12.8）、自分自身の内容の追加、2 つのバッファの交互の操作が干渉しないこと（10.8）。`buffer_internal_test.c`（INTERNAL）で埋め込み用の初期化と破棄。
 - **utf8**：データ駆動のテストベクタ（`data/utf8_cases.txt`、`amark_add_generated_tests`）で、正しい 1–4 バイト、境界値、冗長な表現、サロゲート、U+10FFFF 超、途中で切れた並び、単独の継続バイトのそれぞれの符号位置と消費バイト数（13.1, 13.2）。`decode_before` と前向きの区切りの一致（13.3）、`validate` の位置（13.4）、`encode` の全境界と不正な値（13.5）、長さ 0 と途中の NUL（13.6, 13.7）。
 - **unicode**：各 Zs の文字と 4 つの制御文字（14.1）、P と S の代表（`$`、`+`、`^`、`€`、`¡`、`「`、絵文字の記号）と非該当（文字、数字、結合文字）（14.2）、ASCII 句読点の 32 文字すべてと隣接する値（14.3）、サロゲートと U+110000 以上（14.4）、`AMARK_UNICODE_VERSION_*` が 17.0.0 であること（14.5）。
-- **version / error**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため 0–6 の値を直接検査する）、`AMARK_ERROR_UNREPRESENTABLE` が 6 で他のコードと異なり、説明が `"unrepresentable"` であること（10.9）。
+- **version / error**：マクロと実行時の値の一致（9.4, 9.5）、全コードの説明と未知のコード（10.3）、値が固定されていること（10.7 のため 0–7 の値を直接検査する）、`AMARK_ERROR_UNREPRESENTABLE` が 6 で他のコードと異なり、説明が `"unrepresentable"` であること（10.9）、`AMARK_ERROR_NOT_LOSSLESS` が 7 で他のコードと異なり、説明が `"not lossless"` であること（10.10）。
 
 ### Integration Tests（CTest）
 - `package.*`：4 つの取り込み方法と、種類の指定がない場合、要求した種類と一致しない場合（3.2–3.4, 3.6, 3.7, 1.5, 4.11）。

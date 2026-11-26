@@ -161,6 +161,14 @@
 - **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
 - **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-26：ソフトブレークの出し方を enum のフィールドにする（要件 4.5 の変更）
+- **Context**：全 spec の定数の集合を、開いた集合、ビットの印、閉じた選択肢の 3 つに分類し直した（steering の tech.md の規約）。オプションの `AMARK_HTML_HARDBREAKS`（0x02）と `AMARK_HTML_NOBREAKS`（0x04）は、ソフトブレークを「改行／`<br />`／空白」のどれで出すかの三者択一を 2 つのビットで表し、両方のときは「HARDBREAKS が優先」の規則（要件 4.5）で片方を無視していた。組み合わせられない値をビットで表すと、矛盾した指定が型の上で書けてしまう。
+- **変更**：`typedef enum amark_html_softbreak { AMARK_HTML_SOFTBREAK_LF = 0, _BR = 1, _SPACE = 2 }` を足し、`amark_html_options_t` にフィールド `softbreak` を加えた。2 つのビットをなくし、`AMARK_HTML_UNSAFE` を 0x08 から 0x02 に詰めた（実装はまだなく、公開した ABI はない）。入口は範囲外の `softbreak` を `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。出力の文脈に問い合わせ `amark_html_softbreak` を足し、文脈の状態に `softbreak` を持たせた。ケースのデータのオプションの語は `hardbreaks` / `nobreaks` から `softbreak=lf|br|space` にした。レンダラの入口の共通の規則に、閉じた選択肢はビットにせず enum のフィールドにする、を加えた。
+- **0 を既定にする理由**：ノード型の記述子の `level`（`syntax-tree`）では書き忘れを検出するために 0 を不正にしたが、ソフトブレークは改行のままが正しい既定（要件 4.7）で、`amark_html_options_init` も 0 で埋める。0 を既定の LF にする。
+- **要件の変更**：4.5 を「両方の指定があればハードブレークを優先する」から「改行・ハードブレーク・空白のうち 1 つだけを選ぶ指定として受け付ける」に書き換えた。4.3、4.4、4.7 はそのまま満たす。受け入れ基準の意味が変わるが、利用者の要望による見直しであり、承認はこの改訂を含めて維持する。
+- **検討した代替**：cmark のオプション（`CMARK_OPT_HARDBREAKS`、`CMARK_OPT_NOBREAKS`）と同じ形を残す案は、移行の分かりやすさの利点があるが、矛盾した指定を許す。cmark との対応は enum のコメントに書いた。
+- **Implications**：design の Traceability、オプションの契約、出力の表、入口の共通の規則、テストの方針、ケースの形式、タスク 2.4 を合わせた。`markdown-renderer` は `amark_html_options_t` を使わないので影響はない。`AMARK_HTML_UNSAFE` を名前で使う `inline-parser` のテストの補助は変わらない。
+
 ## References
 - cmark 0.31.1 `src/html.c`、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re` — 出力とエスケープと危険な URL の規則
 - CommonMark Spec 0.31.2 — 準拠の対象

@@ -54,6 +54,10 @@
  *                                 requested output format without changing its
  *                                 meaning (Markdown output, for example). The
  *                                 functions that return it document when.
+ *   AMARK_ERROR_NOT_LOSSLESS      The syntax tokens of a document do not cover
+ *                                 its source exactly once (a gap, an overlap or
+ *                                 a tab split into wrong columns). The functions
+ *                                 that return it document when.
  */
 #define AMARK_ERROR_LIST(X)                             \
     X(AMARK_ERROR_NONE, "no error")                     \
@@ -62,7 +66,8 @@
     X(AMARK_ERROR_OVERFLOW, "overflow")                 \
     X(AMARK_ERROR_LIMIT_EXCEEDED, "limit exceeded")     \
     X(AMARK_ERROR_INVALID_STATE, "invalid state")       \
-    X(AMARK_ERROR_UNREPRESENTABLE, "unrepresentable")
+    X(AMARK_ERROR_UNREPRESENTABLE, "unrepresentable")   \
+    X(AMARK_ERROR_NOT_LOSSLESS, "not lossless")
 
 AMARK_BEGIN_DECLS
 

@@ -86,7 +86,7 @@
 ## Architecture
 
 ### Architecture Pattern & Boundary Map
-**Selected pattern**：段階のコールバックを持つ汎用エンジン。エンジンは 1 行の処理の 5 段階（照合、開始、遅延継続、行の追加、閉鎖）と、ブロック構文の性質の印だけを知る。構文ごとの知識は `src/syntax/` のコールバックに閉じる。
+**Selected pattern**：段階のコールバックを持つ汎用エンジン。エンジンは 1 行の処理の 5 段階（照合、開始、遅延継続、行の追加、閉鎖）と、ブロック構文の形と性質の印だけを知る。構文ごとの知識は `src/syntax/` のコールバックに閉じる。
 
 ```mermaid
 graph TB
@@ -309,7 +309,7 @@ graph TB
 ```
 - 開始を試すとき、照合できなかったブロックはまだ閉じない。`amark_block_open` が呼ばれた時点で、照合できなかったブロックと、新しいブロックを受け入れられない祖先を閉じる（3.3）。
 - 中断の判定（`amark_block_interrupting`）は「最後に照合したブロックが段落の類で、それが最も内側の開いているブロック」のとき真。遅延継続の可能性（`amark_block_lazy_possible`）は「最も内側の開いているブロックが段落の類」のとき真。
-- 深さが上限に達しているとき、`AMARK_BLOCK_SYNTAX_CONTAINER` の印を持つ構文の開始は試さない（12.2）。
+- 深さが上限に達しているとき、形が `AMARK_BLOCK_SHAPE_CONTAINER` の構文の開始は試さない（12.2）。
 
 ### パーサの状態
 ```mermaid
@@ -346,10 +346,10 @@ stateDiagram-v2
 | 3.1 | 外側からの照合 | BlockEngine | `continue_line` | 1 行の処理 |
 | 3.2 | 優先度の順の開始 | BlockEngine | `priority` | 1 行の処理 |
 | 3.3 | 包含による閉鎖と親の決定 | BlockContext | `amark_block_open` | 1 行の処理 |
-| 3.4 | 遅延継続 | BlockEngine | `AMARK_BLOCK_SYNTAX_PARAGRAPH` | 1 行の処理 |
+| 3.4 | 遅延継続 | BlockEngine | `AMARK_BLOCK_SHAPE_PARAGRAPH` | 1 行の処理 |
 | 3.5 | 空行の扱いと記録 | BlockEngine, BlockContext | `amark_block_last_line_blank` | 1 行の処理 |
 | 3.6 | 終わりでの閉鎖 | BlockEngine | `finish` | パースの全体 |
-| 3.7 | 構文の知識を持たない | BlockEngine | 性質の印 | — |
+| 3.7 | 構文の知識を持たない | BlockEngine | ブロックの形と性質の印 | — |
 | 3.8 | 構文を取り除いたとき | BlockEngine, CommonMarkSet | `amark_syntax_set_remove` | — |
 | 4.1 | ブロック構文の定義と登録 | BlockContext | `amark_block_syntax_t` | — |
 | 4.2 | 段落の中断の指定 | BlockEngine, BlockContext | `AMARK_BLOCK_START_INTERRUPTS`, `amark_block_interrupting` | 1 行の処理 |
@@ -448,7 +448,7 @@ stateDiagram-v2
 | Requirements | 1.1–1.8, 2.7, 4.8, 5.2, 5.4, 5.5, 6.1, 6.4, 6.6, 11.1–11.3 |
 
 **Responsibilities & Constraints**
-- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）を受け取る。文書を作り（`amark_document_create`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_create` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_create_take_syntax_set` だけが行う。これは `amark_parser_create` と同じ内部の生成（`amark_parser_build`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_create_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
+- 生成：構文セット（必須、凍結済み。凍結していなければ `AMARK_ERROR_INVALID_STATE`）、オプション（NULL なら既定）を受け取る。文書を作り（`amark_document_create`）、空のソースを登録する（ソースの識別子は 0）。構文セットのスロットの索引から、ブロック構文を検査し（`shape` が既知の値、`flags` が既知のビットだけ。違反は `AMARK_ERROR_INVALID_ARGUMENT`）、（優先度、構文セットの順）で整列した候補の表と、段落の先頭の消費・後処理・パースの状態の表を作る。パースの状態のスロットの `init` を構文セットの順に呼ぶ。`amark_parser_create` は構文セットを `const` で借りるだけで、所有権を扱わない（文書も所有しない）。所有権の受け渡しは、非 `const` の構文セットを受け取る別の入口 `amark_parser_create_take_syntax_set` だけが行う。これは `amark_parser_create` と同じ内部の生成（`amark_parser_build`、`const` で受ける）を行い、その最後の段階（他のすべての確保と `init` の後）で、呼び出し側から非 `const` のまま受け取った `syntax` で `amark_document_take_syntax_set(parser->document, syntax)` を呼び、構文セットの所有権を文書へ渡す。`const` を外すキャストはどこにもない。`syntax-tree` の規則で、この呼び出しは確保をせず、静的な構文セット（`amark_syntax_set_core()`）、文書が使っていない構文セット、2 回目の受け渡しだけを `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。新しい文書には 2 回目は起こらないので、拒否されるのは静的な構文セットだけである。拒否されたら初期化済みの状態を逆順に破棄し、文書を解放して `AMARK_ERROR_INVALID_ARGUMENT` を返す（所有権は呼び出し側に残る）。受け渡しを `amark_parser_create_take_syntax_set` の最後に置くことで、「生成が失敗したら所有権は呼び出し側に残り、成功したら文書のものになる」が 1 か所で決まる。
 - 入力：バイト列をソースに追加し（`amark_document_append_source`）、LineReader が切り出した完全な行を BlockEngine に渡す。
 - 終了：最後の行を処理し、開いているブロックをすべて閉じる → 後処理（インラインの前）→ インラインの段階 → 後処理（インラインの後）→ パースの状態の `deinit` とパースの間のデータの解放 → 追跡の有効化（オプションで無効にしない限り）→ 文書を返す。構文セットの所有権は生成のときに文書へ渡してあるので、返した文書はそれを保持し続け、パーサと独立する（11.3）。
 - インラインの段階：根から前順にたどり、インラインの入力が登録されたノードごとに `delegate->parse` を呼ぶ。`begin` は最初の呼び出しの前に 1 回、`end` は最後（失敗のときも）に 1 回。
@@ -502,7 +502,7 @@ AMARK_API amark_error_t amark_parse(const amark_syntax_set_t *syntax, const char
 AMARK_API const amark_inline_delegate_t *amark_inline_delegate_default(void);
 AMARK_API const amark_inline_delegate_t *amark_inline_delegate_plain(void);
 ```
-- Preconditions：`syntax` は NULL でない凍結済みの構文セット（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`max_container_depth` が上限を超える、`inline_delegate` の `parse` が NULL、`struct_size` が不足、未知の `flags` のビットは `AMARK_ERROR_INVALID_ARGUMENT`。`flags` の 0x02 は使わない（以前の所有権の印。未知のビットとして拒否する）。`amark_parser_create_take_syntax_set` の `syntax` はヒープに作られた構文セット（静的な構文セットは型の上でも `const` なので渡せず、仮に渡されても `amark_document_take_syntax_set` が拒否し、生成が `AMARK_ERROR_INVALID_ARGUMENT` で失敗する）。生成が失敗したとき、所有権は呼び出し側に残る。`amark_parse` は借りるだけで、所有権を受け取る一括の版は持たない（必要なら `amark_parse_commonmark` か、`amark_parser_create_take_syntax_set` と feed と finish を使う）。
+- Preconditions：`syntax` は NULL でない凍結済みの構文セット（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`max_container_depth` が上限を超える、`inline_delegate` の `parse` が NULL、`struct_size` が不足、未知の `flags` のビット、ブロック構文の未知の `shape` や未知の `flags` のビットは `AMARK_ERROR_INVALID_ARGUMENT`。`flags` の 0x02 は使わない（以前の所有権の印。未知のビットとして拒否する）。`amark_parser_create_take_syntax_set` の `syntax` はヒープに作られた構文セット（静的な構文セットは型の上でも `const` なので渡せず、仮に渡されても `amark_document_take_syntax_set` が拒否し、生成が `AMARK_ERROR_INVALID_ARGUMENT` で失敗する）。生成が失敗したとき、所有権は呼び出し側に残る。`amark_parse` は借りるだけで、所有権を受け取る一括の版は持たない（必要なら `amark_parse_commonmark` か、`amark_parser_create_take_syntax_set` と feed と finish を使う）。
 - Postconditions：`finish` の成功で、文書は無編集で、追跡は有効（印がなければ）。`feed` の `data` が NULL で `length` が 0 なら何もしない。
 - Invariants：同じ入力は、区切り方によらず同じ木とトークンになる（1.3）。
 
@@ -545,12 +545,12 @@ bool amark_line_reader_next(amark_line_reader_t *reader, const char *data, size_
 **Responsibilities & Constraints**
 - 開いているブロックの鎖（根から最も内側の葉まで）を配列で持つ。各要素は `{node, handler, block_data, last_line_blank, open_line}`。
 - **照合**：根の次から順に `handler->continue_line` を呼ぶ。`AMARK_BLOCK_CONTINUE_NO` の最初の要素より内側は照合できなかったもの。`AMARK_BLOCK_CONTINUE_CLOSE_LINE` はそのブロックを閉じ、行の処理を終える（閉じたフェンス）。`continue_line` が NULL なら常に照合する。
-- **開始**：最後に照合したブロックが `AMARK_BLOCK_SYNTAX_VERBATIM_LINES` でなければ、候補を順に試す。中断中（`interrupting`）は `AMARK_BLOCK_START_INTERRUPTS` を持たない候補を飛ばす。`trigger` があり、行の最初の非空白の文字が含まれなければ飛ばす（`trigger` を NULL にした候補は常に試す）。`AMARK_BLOCK_START_NONE` を返した候補が行の位置を進めた、またはブロックを開いた場合は `AMARK_ERROR_INVALID_STATE`（段落の先頭の消費だけは許す）。`CONTAINER` を返したら候補の先頭から試し直す（行の残りで）。
-- **遅延継続**：開始がなく、最も内側の開いているブロックが `AMARK_BLOCK_SYNTAX_PARAGRAPH` で、照合できなかったブロックがあり、行の残りが空行でなければ、照合できなかった各コンテナ（`CONTAINER` の印）に長さ 0 の `LAZY_CONTINUATION`（`CONTAINER_PREFIX`、役割 `AMARK_ROLE_ENGINE_LAZY`、位置は行の先頭）を記録し、最も内側のブロックの `add_line` を呼ぶ（行の記録は `lazy`）。
+- **開始**：最後に照合したブロックの形が `AMARK_BLOCK_SHAPE_VERBATIM` でなければ、候補を順に試す。中断中（`interrupting`）は `AMARK_BLOCK_START_INTERRUPTS` を持たない候補を飛ばす。`trigger` があり、行の最初の非空白の文字が含まれなければ飛ばす（`trigger` を NULL にした候補は常に試す）。`AMARK_BLOCK_START_NONE` を返した候補が行の位置を進めた、またはブロックを開いた場合は `AMARK_ERROR_INVALID_STATE`（段落の先頭の消費だけは許す）。`CONTAINER` を返したら候補の先頭から試し直す（行の残りで）。
+- **遅延継続**：開始がなく、最も内側の開いているブロックの形が `AMARK_BLOCK_SHAPE_PARAGRAPH` で、照合できなかったブロックがあり、行の残りが空行でなければ、照合できなかった各コンテナ（`CONTAINER` の印）に長さ 0 の `LAZY_CONTINUATION`（`CONTAINER_PREFIX`、役割 `AMARK_ROLE_ENGINE_LAZY`、位置は行の先頭）を記録し、最も内側のブロックの `add_line` を呼ぶ（行の記録は `lazy`）。
 - **行の追加**：それ以外は照合できなかったブロックを閉じ、行の残りが空行なら、残りの空白を `SPACE`（`AMARK_ROLE_ENGINE_BLANK_SPACE`）、改行を `LINE_ENDING`（`AMARK_ROLE_ENGINE_BLANK_ENDING`）として最も内側の開いているブロックに記録する（9.6）。空行でなく、最も内側が `add_line` を持てばそれを呼び、持たなければ受け皿（`AMARK_BLOCK_SYNTAX_FALLBACK` の最初の候補）の `start` を呼んでから `add_line` を呼ぶ。受け皿がなければ、残りのバイトと改行を最も内側のブロックに `TEXT`（`AMARK_ROLE_ENGINE_UNCLAIMED`）と `LINE_ENDING` として記録する（被覆を保つ）。
 - **空行の印**：空行のとき、最も内側の照合したブロックの `last_line_blank` を、`AMARK_BLOCK_SYNTAX_IGNORE_BLANK` がなければ真にし、祖先の印を偽にする（cmark と同じ規則）。構文は `amark_block_set_last_line_blank` で上書きできる。
 - **閉鎖**：ブロックを閉じるとき、内側から順に `handler->close` を呼ぶ。終了時は鎖のすべてを内側から閉じる（3.6）。
-- **深さ**：鎖のうち `CONTAINER` の印を持つブロックの数が `max_container_depth` 以上なら、`CONTAINER` の候補の開始を試さない（12.2）。
+- **深さ**：鎖のうち形が `CONTAINER` のブロックの数が `max_container_depth` 以上なら、形が `CONTAINER` の候補の開始を試さない（12.2）。
 - 再帰を使わない（12.4）。鎖と候補の表は配列で持つ。
 - INTERNAL のカウンタ：照合の呼び出しの回数、開始の試行の回数、記録したトークンの数（12.3 のテスト用）。
 
@@ -582,12 +582,18 @@ amark_error_t amark_engine_finish(amark_parser_t *parser);
 typedef struct amark_block_context amark_block_context_t;
 typedef struct amark_block_syntax amark_block_syntax_t;
 
-/* 性質の印（ハンドラとしての性質） */
-#define AMARK_BLOCK_SYNTAX_CONTAINER      0x01u  /* 子のブロックを持つ。深さに数え、遅延継続の印の対象 */
-#define AMARK_BLOCK_SYNTAX_PARAGRAPH      0x02u  /* 段落の類：遅延継続、中断の対象、先頭の消費、解釈し直し */
-#define AMARK_BLOCK_SYNTAX_VERBATIM_LINES 0x04u  /* 照合した後に開始を試さない（コードブロック、HTML ブロック） */
-#define AMARK_BLOCK_SYNTAX_IGNORE_BLANK   0x08u  /* 空行の印を立てない */
-#define AMARK_BLOCK_SYNTAX_FALLBACK       0x10u  /* 受け皿：どの開始も成立しない空でない行を受ける */
+/* ブロックの形（ハンドラとしての形）。1 つの構文は 1 つの形だけを持つ閉じた集合なので enum にする。
+   0 は不正（書き忘れを生成時の検査で拒否するため） */
+typedef enum amark_block_shape {
+    AMARK_BLOCK_SHAPE_LEAF = 1,        /* 葉（見出し、区切り線など）。下の 3 つの扱いを受けない */
+    AMARK_BLOCK_SHAPE_CONTAINER = 2,   /* 子のブロックを持つ。深さに数え、遅延継続の印の対象 */
+    AMARK_BLOCK_SHAPE_PARAGRAPH = 3,   /* 段落の類：遅延継続、中断の対象、先頭の消費、解釈し直し */
+    AMARK_BLOCK_SHAPE_VERBATIM = 4     /* 照合した後に開始を試さない葉（コードブロック、HTML ブロック） */
+} amark_block_shape_t;
+
+/* 性質の印（形と独立に組み合わせる） */
+#define AMARK_BLOCK_SYNTAX_IGNORE_BLANK   0x01u  /* 空行の印を立てない */
+#define AMARK_BLOCK_SYNTAX_FALLBACK       0x02u  /* 受け皿：どの開始も成立しない空でない行を受ける */
 /* 開始の性質 */
 #define AMARK_BLOCK_START_INTERRUPTS      0x100u /* 段落の類を中断しうる（最終的な判断は start が行う） */
 
@@ -607,7 +613,8 @@ typedef enum amark_block_continue_result {
 struct amark_block_syntax {
     amark_slot_t base;                      /* kind = AMARK_SLOT_BLOCK_SYNTAX */
     const char *name;                       /* 診断用。例："atx_heading" */
-    uint32_t flags;
+    amark_block_shape_t shape;
+    uint32_t flags;                         /* AMARK_BLOCK_SYNTAX_* と AMARK_BLOCK_START_* */
     int32_t priority;                       /* 小さいほど先に試す。同じ値は構文セットの順 */
     const unsigned char *trigger;           /* 256 ビットの集合（32 バイト）。NULL なら常に試す */
     size_t block_data_size;
@@ -991,16 +998,16 @@ AMARK_API amark_error_t amark_parse_commonmark(const char *data, size_t length, 
 
 **Responsibilities & Constraints（構文ごと）**
 
-| Extension（ファイル） | 性質・優先度 | 開始 / 継続 / 閉鎖の要点 | 記録するトークン（所有者） |
+| Extension（ファイル） | 形・性質・優先度 | 開始 / 継続 / 閉鎖の要点 | 記録するトークン（所有者） |
 |----------------------|--------------|--------------------------|----------------------------|
 | block_quote | CONTAINER、IGNORE_BLANK、INTERRUPTS、100、`>` | 開始：インデント 0–3 と `>`、任意の空白 1 列。継続：同じ（遅延継続はエンジン） | インデント、`>`、空白（すべて接頭辞、引用） |
 | list_item（リスト：CONTAINER、start なし） | 項目：CONTAINER、INTERRUPTS、700、`-+*0-9` | 開始：マーカーと詰め物（1–4 列、5 以上や空行なら 1 列）。親が同じ種類（文字、区切り）のリストでなければリストを開く。中断中は空の項目と 1 以外の順序付きを拒否。継続：空行（子がなく最初の行なら不成立）か内容のインデント以上。閉鎖（リスト）：タイトの判定、種類と開始番号 | マーカーの前の空白、マーカー、詰め物、続く行のインデント（接頭辞、項目） |
-| atx_heading | INTERRUPTS、200、`#` | 1–6 個の `#` と空白か行末。閉じる列の判定 | インデント、開きの `#`、空白、閉じの空白と `#`、末尾の空白、改行（見出し）。中身はインラインの区間 |
-| setext_heading | INTERRUPTS、500、`=-` | 中断中で、最も内側が段落の類のとき、下線を判定し、先頭の消費（final）の後に残りがあれば `reinterpret(0)` して下線を記録し閉じる。残りがなければ NONE | 下線の行のインデント、下線、末尾の空白、改行（見出し）。内容の行は段落と同じ |
-| thematic_break | INTERRUPTS、600、`*-_` | 3 つ以上の同じ文字と空白だけ | インデント、文字の並び、間の空白、末尾の空白、改行 |
-| fenced_code | VERBATIM_LINES、IGNORE_BLANK、INTERRUPTS、300、`` `~ `` | 3 つ以上のフェンス、情報文字列（バッククォートのフェンスでは `` ` `` を含まない）。継続：閉じるフェンスなら CLOSE_LINE、それ以外は開きのインデント分まで空白を除く | インデント、フェンス、空白、情報文字列（解読）、末尾の空白、改行、内容の行のインデントの除去分、内容、改行、閉じのフェンスの行 |
-| indented_code | VERBATIM_LINES、800 | インデント 4 列以上、中断不可、`lazy_possible` のとき不成立、空行でない。継続：4 列以上か空行。閉鎖：末尾の空行をリテラルから除く | 4 列のインデント（部分的なタブ）、内容、改行、末尾の空行（役割 TRAILING_BLANK） |
-| html_block | VERBATIM_LINES、INTERRUPTS（種類 7 は中断中に不成立）、400、`<` | 7 種類の開始の条件と終わりの条件（1–5 は同じ行でも終わる、6 と 7 は空行の前で終わる）。判定は `amark_scan_html_block_start` / `_end`（Scanners）に行の `<` からのバイト列を渡すだけで、種類はブロックのデータに持つ | 内容（インデントを含む）、改行 |
+| atx_heading | LEAF、INTERRUPTS、200、`#` | 1–6 個の `#` と空白か行末。閉じる列の判定 | インデント、開きの `#`、空白、閉じの空白と `#`、末尾の空白、改行（見出し）。中身はインラインの区間 |
+| setext_heading | LEAF、INTERRUPTS、500、`=-` | 中断中で、最も内側が段落の類のとき、下線を判定し、先頭の消費（final）の後に残りがあれば `reinterpret(0)` して下線を記録し閉じる。残りがなければ NONE | 下線の行のインデント、下線、末尾の空白、改行（見出し）。内容の行は段落と同じ |
+| thematic_break | LEAF、INTERRUPTS、600、`*-_` | 3 つ以上の同じ文字と空白だけ | インデント、文字の並び、間の空白、末尾の空白、改行 |
+| fenced_code | VERBATIM、IGNORE_BLANK、INTERRUPTS、300、`` `~ `` | 3 つ以上のフェンス、情報文字列（バッククォートのフェンスでは `` ` `` を含まない）。継続：閉じるフェンスなら CLOSE_LINE、それ以外は開きのインデント分まで空白を除く | インデント、フェンス、空白、情報文字列（解読）、末尾の空白、改行、内容の行のインデントの除去分、内容、改行、閉じのフェンスの行 |
+| indented_code | VERBATIM、800 | インデント 4 列以上、中断不可、`lazy_possible` のとき不成立、空行でない。継続：4 列以上か空行。閉鎖：末尾の空行をリテラルから除く | 4 列のインデント（部分的なタブ）、内容、改行、末尾の空行（役割 TRAILING_BLANK） |
+| html_block | VERBATIM、INTERRUPTS（種類 7 は中断中に不成立）、400、`<` | 7 種類の開始の条件と終わりの条件（1–5 は同じ行でも終わる、6 と 7 は空行の前で終わる）。判定は `amark_scan_html_block_start` / `_end`（Scanners）に行の `<` からのバイト列を渡すだけで、種類はブロックのデータに持つ | 内容（インデントを含む）、改行 |
 | link_reference_definition | 段落の先頭の消費（再開の状態つき） | ラベル、`:`、宛先、任意のタイトル、行末。表に最初の定義を登録 | 各部分のマーカー、テキスト（解読）、空白、改行（link_definition） |
 | paragraph | PARAGRAPH、FALLBACK | 継続：空行でない。閉鎖：先頭の消費（final）、空なら捨てる、トークンとインラインの入力 | 各行のインデント、最後の行の末尾の空白と改行（段落）。中身はインラインの区間 |
 
@@ -1086,7 +1093,7 @@ typedef struct amark_test_parse_spec {
     uint32_t dump_flags;                  /* AMARK_DUMP_TOKENS など */
 } amark_test_parse_spec_t;
 
-/* input を一括でパースし、(1) amark_document_check_tokens が OK、(2) amark_tree_check が成功（INTERNAL のときだけ）、
+/* input を一括でパースし、(1) amark_document_check_tokens が AMARK_ERROR_NONE、(2) amark_tree_check が成功（INTERNAL のときだけ）、
    (3) 1 バイトずつ・2 分割・ランダムな区切りの逐次の入力のダンプ（spec->dump_flags）が一括と一致、を確かめる。
    すべて通れば AMARK_ERROR_NONE を返し、一括でパースした文書を *out_document に渡す（呼び出し側が amark_document_destroy で解放する）。
    パースが失敗したらそのエラーコードを、検査が失敗したら入力・失敗した検査・両方のダンプを表示して
@@ -1220,7 +1227,7 @@ struct amark_parser {
 ## Error Handling
 
 ### Error Strategy
-- 引数の誤り（NULL、未知の印、上限外の深さ、不足した `struct_size`、範囲外の消費、別の文書のノード）は `AMARK_ERROR_INVALID_ARGUMENT` で、パーサの状態を変えない。
+- 引数の誤り（NULL、未知の印、ブロック構文の未知の形、上限外の深さ、不足した `struct_size`、範囲外の消費、別の文書のノード）は `AMARK_ERROR_INVALID_ARGUMENT` で、パーサの状態を変えない。
 - 状態の誤り（凍結していない構文セット、終了後の操作、`close` の中の行の操作、副作用のある `NONE`）は `AMARK_ERROR_INVALID_STATE`。
 - 確保の失敗とコールバック・委譲先の失敗は、そのエラーコードを返してパーサを `Failed` にする（共通の規約の例外）。拡張の状態の `deinit`、委譲先の `end`、ブロックのデータの `deinit_block_data` は失敗時にも呼ぶ。リークしない。
 - 不正な入力（不正な UTF-8、NUL、深すぎる入れ子）はエラーにしない（2.5、12.2）。
@@ -1239,7 +1246,7 @@ struct amark_parser {
 ### Unit Tests（`tests/parse/`、`tests/base/`）
 - **parser_api**：一括のパースの確保が、設定したテスト用アロケータを通ること（1.1）、便宜の関数で返した文書がパーサの解放後も構文セットを保つこと（1.2、11.3）、凍結していない構文セット（1.4）、終了後の `feed` と二重の `finish`（1.5）、追跡が有効で返ることと `NO_EDIT_TRACKING`（1.8、11.1）、空の入力（2.7）、2 つのパーサの交互の操作が干渉しないこと（1.7）。
 - **line_reader**：LF/CR/CRLF の混在、チャンクの境目の CR と LF、BOM の 3 バイトの分割、改行で終わらない最後の行（2.1、2.4、2.6、1.3）。
-- **engine**（`test_syntaxes`）：外側からの照合と照合できなかったブロックの閉鎖（3.1）、優先度と同じ値での構文セットの順（3.2）、受け入れられない親を閉じながらたどること（3.3）、遅延継続と印（3.4、9.3）、空行の印と `IGNORE_BLANK`（3.5）、終わりでの閉鎖の順（3.6）、構文を取り除いた構文セットで他が変わらないこと（3.8）、深さの上限での劣化（12.1、12.2）。
+- **engine**（`test_syntaxes`）：形が 0 か未知の値、未知の印のビットを持つブロック構文がパーサの生成で拒否されること、外側からの照合と照合できなかったブロックの閉鎖（3.1）、優先度と同じ値での構文セットの順（3.2）、受け入れられない親を閉じながらたどること（3.3）、遅延継続と印（3.4、9.3）、空行の印と `IGNORE_BLANK`（3.5）、終わりでの閉鎖の順（3.6）、構文を取り除いた構文セットで他が変わらないこと（3.8）、深さの上限での劣化（12.1、12.2）。
 - **block_api**：部分的なタブの消費とトークン（2.2、4.6）、複数のブロックを入れ子に開くこととブロックのデータ（4.3）、中断の指定（4.2）、`reinterpret` の 0 行目と途中の行（4.4）、消費の処理の `PENDING` の再開・`NONE`・`final`（4.5）、コールバックの失敗の伝播と副作用のある `NONE`（4.8）。
 - **postprocess**：段階の順序と構文セットの順（5.1、5.2）、拡張の状態の生成と解放（失敗時を含む）（5.3、5.4）、後処理の変更が記録されないこと（5.5）。
 - **delegate**：文書の順の呼び出し、区間に接頭辞と行頭の空白が含まれないこと、`begin` / `end` の回数、失敗の伝播、委譲先の指定、単純な委譲先の木（6.1–6.6）、`consume_inline_prefix`（4.7）。

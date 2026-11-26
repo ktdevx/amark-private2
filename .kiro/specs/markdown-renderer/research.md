@@ -174,6 +174,13 @@
 - **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
 - **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-26：定数の集合の分類を規約にそろえる
+- **Context**：全 spec の定数の集合を、開いた集合（`uint32_t` と `#define` の連番）、ビットの印、閉じた選択肢（`typedef enum`）の 3 つに分類し直した（steering の tech.md の規約）。この spec では 2 つが規約と食い違っていた。
+- **`amark_markdown_problem_t` を `#define` にする**：問題の種類は `AMARK_MARKDOWN_PROBLEM_EXTENSION_FIRST`（0x100）以上を拡張が定める開いた集合で、報告の `problem` と `amark_markdown_fail` の引数はすでに `uint32_t` だった。開いた集合に enum 型を作ると、型の値の範囲が閉じているように読め、拡張の値を enum 型の変数に入れることになる。同じ名前と値の `#define`（`u` 付き）にし、型の名前 `amark_markdown_problem_t` をなくした。値と使い方（比較、`switch` の `case`）は変わらない。
+- **`AMARK_MARKDOWN_BYTE_*` を enum にする**：バイトの分類（`TEXT`、`FIXED`、`MARKUP`、`DELIMITER`）は 1 つのバイトが 1 つだけを持つ閉じた集合で、`#define` の連番だった。`typedef enum amark_markdown_byte_kind`（値は同じ 1–4）にした。`amark_markdown_line_t` の `kinds` は 1 バイトずつ詰めて持つため `const unsigned char *` のままとする（`syntax-tree` の内部のトークンの記録が `uint8_t kind` で enum の値を持つのと同じ）。
+- **変えないもの**：`amark_markdown_delimiter_t` の `uint32_t rule` は `inline-parser` の閉じた enum `amark_delimiter_rule_t` の値を持つが、`src/render/` と `markdown.h` は `inline.h` を include しないレイヤーの規則があるため、型を使わずに整数で受け取る。`AMARK_MARKDOWN_STATE_*`、`AMARK_MARKDOWN_INLINE_*`、`AMARK_MARKDOWN_ENCODE_*`、`AMARK_MARKDOWN_LINE_*`、`AMARK_MARKDOWN_VERBATIM_NO_INDENT` は組み合わせるビットの印で、正しい。
+- **Implications**：要件・タスクの範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — エスケープ、文字参照、ブロックの構造、flanking と照合の規則
 - [cmark](https://github.com/commonmark/cmark) — `inlines.c`（照合）、`commonmark.c`（正規化した書き戻し）

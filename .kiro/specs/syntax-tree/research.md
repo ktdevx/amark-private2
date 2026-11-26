@@ -231,6 +231,26 @@
 - **変更**：型を `amark_slot_t`（タグ `struct amark_slot`）に改名した。種類ごとの構造体が先頭に埋め込むメンバーの名前は `base` にする（下流の spec が合わせる）。文書の中では「スロットの基底」と呼ぶ。フィールド（`struct_size`、`kind`）、構造体の形、API の振る舞いは変えない。
 - **Implications**：型とメンバーの名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-25：ノード型の記述子の `flags` を enum の `node_class` にする
+- **Context**：記述子の `uint32_t flags` は、ビットの定数 `AMARK_NODE_TYPE_BLOCK`（`0x01u`）と `AMARK_NODE_TYPE_INLINE`（`0x02u`）を持っていた。しかし、使えるのはどちらか一方だけで（記述子の検査で両方・どちらでもない値を拒否する）、ビットを組み合わせる用途はない。要件（2.4、8.1）は「ブロックかインラインか」の二者択一で、下流の 4 つの spec もこのフィールドとビットの定数を参照しない（包含の判定は `provides` / `accepts` と `can_contain` で行う）。性質のビットを足す計画もない。steering（tech.md）の規約では、閉じた選択肢の集合は `typedef enum` にする。型が `uint32_t` のビットの印だと、両方を立てられるかのように読める。
+- **変更**：`typedef enum amark_node_class { AMARK_NODE_CLASS_BLOCK = 1, AMARK_NODE_CLASS_INLINE = 2 } amark_node_class_t` を `extension.h` に置き、記述子のフィールドを `amark_node_class_t node_class` にした。ビットの定数 `AMARK_NODE_TYPE_BLOCK` / `INLINE` はなくした。記述子の検査は「`BLOCK` か `INLINE` のどちらか一方」から「`node_class` が既知の値」にした（`literal_mode` の検査と同じ形）。組み込みの型の表の列名を `node_class` にした。
+- **値を 1 と 2 にする理由**：記述子は指示付き初期化子で静的に定義するのが普通で、書き忘れたメンバーは 0 になる。ブロックかインラインかには正しい既定値がないので、0 を有効な値（例：BLOCK）にすると、書き忘れたインラインの型が黙ってブロックとして登録される。0 を不正にして登録の検査で拒否する。`literal_mode` が `NONE = 0` を有効にしているのは、「リテラルを持たない」が多くの型で正しい既定値だから。同じ二者択一の `amark_fragment_context_t`（`block-parser`、`BLOCK = 1`、`INLINE = 2`）とも値をそろえた。
+- **検討した代替**：(1) ビットのまま残す：組み合わせられない値をビットで表す理由がなく、規約にも合わない。(2) 値を 0 と 1 にする：書き忘れを検出できない。ブロックを既定にするなら enum より `bool is_inline` が素直だが、拡張の作者に分類の明示を求めるため採らなかった。(3) 開いた集合として `uint32_t` と `#define` にする：拡張が第 3 の分類を足す必要がなく、包含の分類は `provides` / `accepts` が担う。
+- **Implications**：公開 API の型とフィールドの名前の変更だが、C の実装はまだないので互換性の影響はない。`amark_node_is_block` / `amark_node_is_inline` の形と振る舞い、要件、タスクの範囲は変わらない（タスク 2.2 の「ブロック/インラインのどちらか一方」の検査は、enum の既知の値の検査として満たす）。下流の spec は該当する記述を持たないので変更はない。承認は維持する。
+
+### 2026-11-26：ロスレス性の検証の不整合を `AMARK_ERROR_NOT_LOSSLESS` で返す
+- **Context**：`amark_document_check_tokens` は、検査を最後まで実行できたかを `amark_error_t` で、文書が正しいかを別の列挙 `amark_token_check_error_t`（`OK`、`GAP`、`OVERLAP`、`TAB_COLUMNS`）で返していた。呼び出し側（`block-parser` と `inline-parser` のテストの補助を含む）は 2 段で判定し、不整合を伝えるときは自分でエラーコードを選ぶ必要があった。`markdown-renderer` は、表現できない木を `foundation` に追加したエラーコード `AMARK_ERROR_UNREPRESENTABLE` で返し、詳細を報告の構造体（`amark_markdown_report_t`、種類は `amark_markdown_problem_t`）に書く。同じ形にそろえる。
+- **変更**：`foundation` に `AMARK_ERROR_NOT_LOSSLESS`（10.10）を追加した。不整合のときはこのコードを返し、`out_report` が NULL でなければ最初の不整合を書く。`amark_token_check_error_t` を `amark_token_problem_t`（`NONE = 0`、`GAP`、`OVERLAP`、`TAB_COLUMNS`）に、`amark_token_check_t` を `amark_token_report_t`（`error` を `problem` に）に改名した。`out_report` は NULL 可にした（テストでは成功したかどうかだけを見ることが多いため。`markdown-renderer` の `report` も任意）。`NONE = 0` は「問題なし」という正しい既定値なので 0 を使う（`node_class` で 0 を不正にした事情とは異なる）。
+- **範囲**：この関数とコードは、トークンがソースのバイトを過不足なく覆うか（ロスレス性）だけを扱う。トークンの意味が文脈に合うかなどの検査を足すときは別の関数にする、と design に記した。名前（`NOT_LOSSLESS`）が将来の追加で不正確にならないようにするため。
+- **検討した代替**：(1) いまの 2 段の形を残す：検査の実行の失敗と文書の不整合を戻り値で区別できるが、`markdown-renderer` と形がそろわず、呼び出し側が不整合を自分でコードに直す必要がある。(2) `GAP` などをそれぞれ `amark_error_t` に加える：1 つの関数のためにコードが 3 つ増える。種類は報告の構造体に残す。
+- **Implications**：TokenCheck の Contracts と Responsibilities、共通の規約の構造体名、Error Handling、Testing Strategy、Revalidation Triggers、タスク 5.1 を合わせた。`block-parser` の design のテストの補助の説明（`OK` を `AMARK_ERROR_NONE` に）を直した。`block-parser` の research と `inline-parser` の記述は関数名と種類名（GAP など）だけで、変更は要らない。要件 6.9 の文言は変えない。承認は維持する。
+
+### 2026-11-26：ノード型の記述子の `node_class` を `level` に改名する
+- **Context**：`node_class` は `class` が C++ の予約語のため `node_` を付けた名前で、ノード型の記述子のメンバーとしては冗長だった。
+- **変更**：型を `amark_node_level_t`、定数を `AMARK_NODE_LEVEL_BLOCK`（1）と `AMARK_NODE_LEVEL_INLINE`（2）、記述子のメンバーを `level` にした。値、0 を不正にする規則、記述子の検査は変えない。
+- **名前**：HTML と CSS で定着した「block-level／inline-level」の言い方に合わせた。見出しの属性のレベル（1–6）と単語は同じだが、あちらはノードの属性（`amark_node_heading_level`）で、記述子のメンバーとは層が違うので取り違えにくい。文書では「ブロックレベルかインラインレベルか」と「見出しのレベル」と書き分ける。検討した代替：`layer`（steering のコードのレイヤーの規則と言葉が重なる）、`context`（`amark_block_context_t` などの処理の文脈と紛れる）、`category`（`provides` / `accepts` の「分類」と重なる）、`kind`（スロットとトークンの `kind` と重なる）。
+- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。C の実装はまだない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則
