@@ -207,6 +207,31 @@ NAOS_TEST(document_and_node_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(structural_edit_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *root;
+    amark_node_t *a = NULL;
+    amark_node_t *b = NULL;
+    amark_node_t *c = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    root = amark_document_root(document);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_PARAGRAPH, &a));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_PARAGRAPH, &b));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_PARAGRAPH, &c));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(root, a));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_prepend_child(root, b));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_before(a, c));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_after(a, c));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_replace(b, c));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_unlink(a));
+    NAOS_CHECK_PTR_EQ(c, amark_node_first_child(root));
+    NAOS_CHECK_PTR_EQ(c, amark_node_last_child(root));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_append_child(c, b));
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -216,7 +241,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(entity_functions_link),
     NAOS_ADD_TEST(registry_functions_link),
     NAOS_ADD_TEST(builtin_types_link),
-    NAOS_ADD_TEST(document_and_node_functions_link)
+    NAOS_ADD_TEST(document_and_node_functions_link),
+    NAOS_ADD_TEST(structural_edit_functions_link)
 )
 
 NAOS_MAIN(

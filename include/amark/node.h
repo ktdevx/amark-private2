@@ -158,6 +158,49 @@ AMARK_API bool amark_node_has_content(const amark_node_t *node);
  * the syntax set of its document (false for NULL and for an unknown type). */
 AMARK_API bool amark_node_can_contain(const amark_node_t *parent, amark_node_type_t child);
 
+/* ---- Structural editing (1.5, 5.2-5.5, 14.5) ------------------------------------ */
+
+/*
+ * The structural edits change only the links: the moved nodes keep their
+ * subtrees, their layout and their spelling (5.3). A node that is already in a
+ * tree (or under a detached node) is first removed from its place, so an edit
+ * also moves nodes within the tree.
+ *
+ * AMARK_ERROR_INVALID_ARGUMENT, with no change, for:
+ *   - NULL;
+ *   - nodes of different documents;
+ *   - the document node as the node to place, to unlink or to replace, or as the
+ *     anchor of insert_before and insert_after;
+ *   - an anchor (insert_before, insert_after) or an old node (replace) without a
+ *     parent: it has no position;
+ *   - a node placed under itself or under one of its descendants;
+ *   - a violation of the containment rules of the new parent
+ *     (amark_node_can_contain), and a link that would get a link among its
+ *     descendants, at any depth.
+ *
+ * The time is proportional to the depths of the old and the new places, whatever
+ * the number of nodes of the document (14.5); an insertion under a link also
+ * walks the inserted subtree.
+ */
+
+/* Removes node (with its subtree) from the tree; it stays in its document and
+ * can be inserted again (1.5). Does nothing when node has no parent. */
+AMARK_API amark_error_t amark_node_unlink(amark_node_t *node);
+
+/* Places node just before or just after anchor, under the parent of anchor.
+ * Nothing changes when node is anchor. */
+AMARK_API amark_error_t amark_node_insert_before(amark_node_t *anchor, amark_node_t *node);
+AMARK_API amark_error_t amark_node_insert_after(amark_node_t *anchor, amark_node_t *node);
+
+/* Places node as the first or the last child of parent. */
+AMARK_API amark_error_t amark_node_prepend_child(amark_node_t *parent, amark_node_t *node);
+AMARK_API amark_error_t amark_node_append_child(amark_node_t *parent, amark_node_t *node);
+
+/* Places new_node where old_node is and leaves old_node (with its remaining
+ * subtree) detached (5.4). new_node may come from anywhere in the document, even
+ * from the subtree of old_node. Nothing changes when new_node is old_node. */
+AMARK_API amark_error_t amark_node_replace(amark_node_t *old_node, amark_node_t *new_node);
+
 /* ---- User pointers and extension data (4.5) ------------------------------------ */
 
 /* The pointer the application associated with node (NULL until set, and for a

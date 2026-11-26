@@ -140,6 +140,30 @@ void amark_tree_node_detach(amark_node_t *node)
     node->parent = NULL;
     node->prev = NULL;
     node->next = NULL;
+    amark_tree_changed(parent, AMARK_TREE_CHANGE_STRUCTURE);
+}
+
+/* ---- Change notification ---------------------------------------------------- */
+
+void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind)
+{
+    amark_document_t *document = node->document;
+    amark_node_t *current;
+
+    if (kind == AMARK_TREE_CHANGE_STRUCTURE)
+    {
+        document->structure_generation++;
+    }
+    /* A node whose cache is invalid has only invalid ancestors: stop there. */
+    for (current = node; current != NULL; current = current->parent)
+    {
+        document->stats.invalidation_steps++;
+        if ((current->cache_flags & AMARK_TREE_CACHE_VALID) == 0)
+        {
+            break;
+        }
+        current->cache_flags &= ~AMARK_TREE_CACHE_VALID;
+    }
 }
 
 amark_error_t amark_node_create(amark_document_t *document, amark_node_type_t type,

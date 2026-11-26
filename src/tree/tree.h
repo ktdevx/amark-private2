@@ -121,6 +121,10 @@ struct amark_node
     amark_node_t *ring_next;
     amark_node_t *ring_prev;
     void *user_data;
+    /* The cache flags (AMARK_TREE_CACHE_*). A node whose cache is valid has
+     * only children whose cache is valid: a change invalidates the node and its
+     * ancestors (amark_tree_changed). A new node has none. */
+    uint32_t cache_flags;
     /* desc->facet_count entries (NULL when there is none). */
     amark_tree_facet_t *facets;
     /* desc->data_size bytes of extension data (NULL when 0). */
@@ -140,9 +144,34 @@ amark_error_t amark_tree_node_new(amark_document_t *document, amark_node_type_t 
  * ring of its document and frees it. Its tree links are not looked at. */
 void amark_tree_node_release(amark_node_t *node);
 
-/* Removes node from its parent and its siblings (only the links; node keeps its
- * children). Does nothing when node has no parent. */
+/* Removes node from its parent and its siblings (node keeps its children) and
+ * notifies the old parent of a structural change. Does nothing when node has
+ * no parent. */
 void amark_tree_node_detach(amark_node_t *node);
+
+/* The cached results of a node (Verbatim) are valid. */
+#define AMARK_TREE_CACHE_VALID 0x01u
+
+/* The kinds of the changes notified with amark_tree_changed. */
+typedef enum amark_tree_change
+{
+    /* The records, the values or the styles of the node changed. */
+    AMARK_TREE_CHANGE_RECORD = 1,
+    /* The children of the node changed (a node was inserted, moved, replaced
+     * or removed under it). */
+    AMARK_TREE_CHANGE_STRUCTURE = 2
+} amark_tree_change_t;
+
+/*
+ * The change notification, called by the structural edits, the recording and
+ * the setters after a change of node:
+ *   - invalidates the cache of node and of its ancestors, up to the first one
+ *     already invalid (its ancestors are then invalid too);
+ *   - for a structural change, advances the structure generation of the
+ *     document (DefinitionIndex uses it to drop its document-order results).
+ * Each node visited counts one step of stats.invalidation_steps.
+ */
+void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind);
 
 /* ---- Document (document.c) ------------------------------------------------- */
 
@@ -158,6 +187,12 @@ typedef struct amark_tree_stats
     size_t nodes_released;
     /* The steps of the walks that free subtrees. */
     size_t release_steps;
+    /* The steps of the checks of the structural edits (the ancestors of the
+     * insertion point and, under a link, the descendants of the inserted
+     * node). */
+    size_t structure_steps;
+    /* The nodes visited by the change notification. */
+    size_t invalidation_steps;
 } amark_tree_stats_t;
 
 struct amark_document
@@ -170,6 +205,8 @@ struct amark_document
     amark_node_t *root;
     /* The number of nodes in the ring, the root included. */
     size_t node_count;
+    /* Advanced by every structural change (amark_tree_changed). */
+    uint64_t structure_generation;
     amark_tree_stats_t stats;
 };
 
