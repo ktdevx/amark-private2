@@ -281,6 +281,24 @@ NAOS_TEST(label_normalize_links)
     amark_buffer_destroy(buffer);
 }
 
+NAOS_TEST(find_definition_links)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *definition = NULL;
+    amark_node_t *found = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_append_child(amark_document_root(document), definition));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_record_string(definition, AMARK_LINK_DEFINITION_LABEL, "Foo", 3));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_find_definition(document, "FOO", 3, &found));
+    NAOS_CHECK_PTR_EQ(definition, found);
+    amark_document_destroy(document);
+}
+
 NAOS_TEST(facet_value_functions_link)
 {
     amark_document_t *document = NULL;
@@ -502,6 +520,7 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(structural_edit_functions_link),
     NAOS_ADD_TEST(source_and_line_functions_link),
     NAOS_ADD_TEST(label_normalize_links),
+    NAOS_ADD_TEST(find_definition_links),
     NAOS_ADD_TEST(facet_value_functions_link),
     NAOS_ADD_TEST(layout_functions_link),
     NAOS_ADD_TEST(content_functions_link),

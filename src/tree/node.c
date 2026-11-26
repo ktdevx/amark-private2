@@ -109,6 +109,7 @@ void amark_tree_node_release(amark_node_t *node)
     {
         node->desc->deinit(node, node->data);
     }
+    amark_tree_def_index_forget(node);
     node->ring_prev->ring_next = node->ring_next;
     node->ring_next->ring_prev = node->ring_prev;
     document->node_count--;
@@ -156,6 +157,12 @@ void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind)
     if (kind == AMARK_TREE_CHANGE_STRUCTURE)
     {
         document->structure_generation++;
+    }
+    else
+    {
+        /* The label of a definition may have changed: the next lookup of the
+         * definition index reads it again. */
+        amark_tree_def_index_mark(node);
     }
     /* A node whose cache is invalid has only invalid ancestors: stop there. */
     for (current = node; current != NULL; current = current->parent)

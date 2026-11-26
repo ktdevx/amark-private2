@@ -8,7 +8,7 @@
  * The checks run in order and stop at the first violation:
  *   1. the document checks (document_checks[]): the document node, the ring of
  *      every node, the walk of every tree, then the sources and the line
- *      table;
+ *      table, the content objects and the definition index;
  *   2. the walk visits each node of each tree once and runs the node checks
  *      (node_checks[]) on it: the relations, the containment rules, the link in
  *      link rule, the cache invariant, the storage of the facets, the
@@ -1070,6 +1070,215 @@ static bool check_contents(check_context_t *context)
     return true;
 }
 
+/* The label of node, a link_definition, as the getter reads it, when it is
+ * known without allocation: the cache of a label spelled by tokens (none while
+ * it is not derived yet), else the stored value, else the default value. */
+static bool known_label(const amark_node_t *node, const char **text, size_t *length)
+{
+    const amark_facet_t facet = AMARK_LINK_DEFINITION_LABEL;
+    const amark_tree_facet_t *slot;
+    const amark_facet_desc_t *desc = amark_node_type_facet(node->desc, facet);
+
+    if ((desc == NULL) || (node->facets == NULL))
+    {
+        return false;
+    }
+    slot = &node->facets[facet - 1];
+    if (amark_tree_layout_spells(node, facet) || amark_tree_content_spells(node, facet))
+    {
+        *text = slot->cache;
+        *length = slot->cache_length;
+        return slot->cache != NULL;
+    }
+    if (slot->state != AMARK_TREE_FACET_NONE)
+    {
+        *text = slot->text;
+        *length = slot->length;
+        return (slot->text != NULL) || (slot->length == 0);
+    }
+    *text = desc->default_text != NULL ? desc->default_text : "";
+    *length = strlen(*text);
+    return true;
+}
+
+/* A node that the index may list: a link_definition of the document, in a
+ * tree (all the nodes are, after the walk). */
+static bool indexable(const check_context_t *context, const amark_node_t *node)
+{
+    return (node->document == context->document) && (node->check_mark == context->in_tree) &&
+           (node->type == AMARK_NODE_LINK_DEFINITION);
+}
+
+/* The dirty list of the definition index: linked both ways, of marked
+ * link_definition nodes of the document, as long as its count. */
+static bool check_dirty_list(check_context_t *context)
+{
+    const amark_tree_def_index_t *index = &context->document->def_index;
+    const amark_node_t *prev = NULL;
+    const amark_node_t *node;
+    size_t count = 0;
+
+    for (node = index->dirty_first; node != NULL; node = node->dirty_next)
+    {
+        if (count >= context->document->node_count)
+        {
+            return fail(context, AMARK_TREE_VIOLATION_INDEX, node,
+                        "the dirty list is longer than the nodes");
+        }
+        if (!indexable(context, node) || !node->def_dirty || (node->dirty_prev != prev))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_INDEX, node,
+                        "the dirty list holds a node that is not a marked definition, or its "
+                        "links are not symmetric");
+        }
+        prev = node;
+        count++;
+    }
+    if ((index->dirty_last != prev) || (index->dirty_count != count))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_INDEX, prev,
+                    "the end or the count of the dirty list is wrong");
+    }
+    return true;
+}
+
+/* A group of the definition index in bucket: its key and hash, its members
+ * (linked both ways, link_definition nodes that point to it, as many as its
+ * count) and its cached result (a member, decided at a past generation).
+ * Adds its members to *members. */
+static bool check_group(check_context_t *context, const amark_tree_def_group_t *group,
+                        size_t bucket, size_t *members)
+{
+    const amark_tree_def_index_t *index = &context->document->def_index;
+    const amark_node_t *prev = NULL;
+    const amark_node_t *node;
+    size_t count = 0;
+
+    if ((group->key == NULL) || (group->key_length == 0) ||
+        (group->key[group->key_length] != '\0') ||
+        (group->hash != amark_tree_label_hash(group->key, group->key_length)) ||
+        ((size_t)(group->hash & (uint64_t)(index->bucket_count - 1u)) != bucket))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_INDEX, group->first,
+                    "a group of the index has an empty key, a wrong hash or a wrong bucket");
+    }
+    for (node = group->first; node != NULL; node = node->def_next)
+    {
+        if (count >= context->document->node_count)
+        {
+            return fail(context, AMARK_TREE_VIOLATION_INDEX, node,
+                        "the members of a group are more than the nodes");
+        }
+        if (!indexable(context, node) || (node->def_group != group) || (node->def_prev != prev))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_INDEX, node,
+                        "a member of a group is not a definition of that group, or its links "
+                        "are not symmetric");
+        }
+        prev = node;
+        count++;
+    }
+    if ((count == 0) || (group->last != prev) || (group->count != count))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_INDEX, group->first,
+                    "a group is empty, or its end or its count is wrong");
+    }
+    if (group->cached_valid &&
+        ((group->cached_generation > context->document->structure_generation) ||
+         ((group->cached != NULL) && (group->cached->def_group != group))))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_INDEX, group->cached,
+                    "the cached result of a group is not a member or is from the future");
+    }
+    *members += count;
+    return true;
+}
+
+/* The definition index (DefinitionIndex): the dirty list, the table of the
+ * groups, and for each node of the ring: only definitions are in the index, a
+ * node that points to a group is one of its members, and a definition that is
+ * not dirty is in the group of its label (in none for a label that normalizes
+ * to nothing), when its label is known without allocation. Linear in the
+ * nodes, the buckets and the labels. */
+static bool check_index(check_context_t *context)
+{
+    const amark_document_t *document = context->document;
+    const amark_tree_def_index_t *index = &document->def_index;
+    const amark_node_t *root = document->root;
+    const amark_node_t *node = root;
+    size_t members = 0;
+    size_t groups = 0;
+    size_t grouped = 0;
+    size_t dirty = 0;
+    size_t i;
+
+    if (!check_dirty_list(context))
+    {
+        return false;
+    }
+    if ((index->bucket_count & (index->bucket_count - 1u)) != 0 ||
+        ((index->bucket_count != 0) != (index->buckets != NULL)))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_INDEX, NULL,
+                    "the table of the index is not a power of 2");
+    }
+    for (i = 0; i < index->bucket_count; i++)
+    {
+        const amark_tree_def_group_t *group;
+
+        for (group = index->buckets[i]; group != NULL; group = group->bucket_next)
+        {
+            if (groups >= document->node_count)
+            {
+                return fail(context, AMARK_TREE_VIOLATION_INDEX, NULL,
+                            "the groups of the index are more than the nodes");
+            }
+            if (!check_group(context, group, i, &members))
+            {
+                return false;
+            }
+            groups++;
+        }
+    }
+    if (groups != index->group_count)
+    {
+        return fail(context, AMARK_TREE_VIOLATION_INDEX, NULL,
+                    "the group count of the index differs from its groups");
+    }
+    do
+    {
+        const char *label;
+        size_t length;
+
+        if (((node->def_group != NULL) || node->def_dirty) &&
+            (node->type != AMARK_NODE_LINK_DEFINITION))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_INDEX, node,
+                        "a node that is not a definition is in the index");
+        }
+        grouped += (node->def_group != NULL) ? 1u : 0u;
+        dirty += node->def_dirty ? 1u : 0u;
+        if ((node->type == AMARK_NODE_LINK_DEFINITION) && !node->def_dirty &&
+            known_label(node, &label, &length) &&
+            !((node->def_group != NULL)
+                  ? amark_tree_label_matches(label, length, node->def_group->key,
+                                             node->def_group->key_length)
+                  : amark_tree_label_matches(label, length, "", 0)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_INDEX, node,
+                        "the label of a definition that is not dirty does not match its group");
+        }
+        node = node->ring_next;
+    } while (node != root);
+    if ((grouped != members) || (dirty != index->dirty_count))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_INDEX, NULL,
+                    "a node points to a group it is not a member of, or a marked node is not on "
+                    "the dirty list");
+    }
+    return true;
+}
+
 /* The checks of the document, in order. Add the invariants that span the
  * document (counts of references, the label index) after check_trees. */
 static const document_check_t document_checks[] = {
@@ -1078,6 +1287,7 @@ static const document_check_t document_checks[] = {
     check_trees,
     check_lines,
     check_contents,
+    check_index,
 };
 
 /* ---- Entry points ---------------------------------------------------------------- */
@@ -1139,6 +1349,8 @@ const char *amark_tree_violation_name(amark_tree_violation_t kind)
         return "layout";
     case AMARK_TREE_VIOLATION_CONTENT:
         return "content";
+    case AMARK_TREE_VIOLATION_INDEX:
+        return "index";
     default:
         return "unknown";
     }

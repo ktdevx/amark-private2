@@ -379,6 +379,16 @@ struct amark_node
     amark_tree_content_tokens_t *content_tokens;
     /* The dropped-spelling marks (AMARK_TREE_DROPPED_*). */
     uint32_t dropped;
+    /* The definition index (DefinitionIndex, def_index.c), for a
+     * link_definition only: the group of its key (NULL while it is in none),
+     * its neighbours among the members of that group, and the dirty mark with
+     * the links of the dirty list of the document. */
+    struct amark_tree_def_group *def_group;
+    amark_node_t *def_next;
+    amark_node_t *def_prev;
+    bool def_dirty;
+    amark_node_t *dirty_next;
+    amark_node_t *dirty_prev;
     /* The mark of the last internal check (amark_tree_check) that saw the
      * node; meaningless outside of it. */
     uint64_t check_mark;
@@ -394,7 +404,8 @@ amark_error_t amark_tree_node_new(amark_document_t *document, amark_node_type_t 
                                   amark_node_t **out);
 
 /* Releases one node: calls the deinit function of its type, removes it from the
- * ring of its document and frees it. Its tree links are not looked at. */
+ * definition index and the ring of its document and frees it. Its tree links
+ * are not looked at. */
 void amark_tree_node_release(amark_node_t *node);
 
 /* Removes node from its parent and its siblings (node keeps its children) and
@@ -421,10 +432,88 @@ typedef enum amark_tree_change
  *   - invalidates the cache of node and of its ancestors, up to the first one
  *     already invalid (its ancestors are then invalid too);
  *   - for a structural change, advances the structure generation of the
- *     document (DefinitionIndex uses it to drop its document-order results).
+ *     document (DefinitionIndex uses it to drop its document-order results);
+ *   - for a change of the records or the values, puts a link_definition on the
+ *     dirty list of the definition index (its label may have changed).
  * Each node visited counts one step of stats.invalidation_steps.
  */
 void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind);
+
+/* ---- DefinitionIndex (label.c, def_index.c) -------------------------------- */
+
+/*
+ * A group of the definition index: the link_definition nodes (attached or not)
+ * whose label normalizes to key.
+ *   - bucket_next: the next group of the same bucket of the table;
+ *   - hash: the hash of key (amark_tree_label_hash);
+ *   - key, key_length: the normalized label, owned, terminated by NUL, never
+ *     empty;
+ *   - first, last, count: the members, linked by def_next and def_prev;
+ *   - cached, cached_generation, cached_valid: the result of the last lookup
+ *     (the first member attached to the document node in document order, or
+ *     NULL for none) and the structure generation it was decided at; dropped
+ *     when the members change.
+ */
+typedef struct amark_tree_def_group
+{
+    struct amark_tree_def_group *bucket_next;
+    uint64_t hash;
+    char *key;
+    size_t key_length;
+    amark_node_t *first;
+    amark_node_t *last;
+    size_t count;
+    amark_node_t *cached;
+    uint64_t cached_generation;
+    bool cached_valid;
+} amark_tree_def_group_t;
+
+/*
+ * The definition index of a document: a hash table of the groups (buckets,
+ * bucket_count a power of 2 or 0, group_count groups in all), and the dirty
+ * list (the link_definition nodes whose label may have changed since they were
+ * put in their group, in the order they were marked).
+ */
+typedef struct amark_tree_def_index
+{
+    amark_tree_def_group_t **buckets;
+    size_t bucket_count;
+    size_t group_count;
+    amark_node_t *dirty_first;
+    amark_node_t *dirty_last;
+    size_t dirty_count;
+} amark_tree_def_index_t;
+
+/* The hash of a normalized label (FNV-1a). */
+uint64_t amark_tree_label_hash(const char *key, size_t length);
+
+/* Whether the label of length bytes normalizes (amark_label_normalize) to the
+ * key_length bytes at key. Allocates nothing (for the internal check). */
+bool amark_tree_label_matches(const char *label, size_t length, const char *key,
+                              size_t key_length);
+
+/* Puts node on the dirty list of its document when it is a link_definition
+ * not already on it: called by the change notification for every change of
+ * the records or the values of a node (amark_tree_changed). Allocates
+ * nothing. */
+void amark_tree_def_index_mark(amark_node_t *node);
+
+/* Removes node from its group and from the dirty list (the release of a
+ * node). Allocates nothing. */
+void amark_tree_def_index_forget(amark_node_t *node);
+
+/* Frees the table of the index of document (after its nodes are released). */
+void amark_tree_def_index_deinit(amark_document_t *document);
+
+/*
+ * The lookup (amark_document_find_definition without the argument checks):
+ * processes the dirty list, then finds in *out the first link_definition
+ * attached to the document node, in document order, whose label normalizes as
+ * label does, or NULL. AMARK_ERROR_OUT_OF_MEMORY writes NULL; the index stays
+ * consistent (the definitions not yet processed stay on the dirty list).
+ */
+amark_error_t amark_tree_find_definition(amark_document_t *document, const char *label,
+                                         size_t length, amark_node_t **out);
 
 /* ---- Derive (derive.c) ------------------------------------------------------- */
 
@@ -601,6 +690,10 @@ typedef struct amark_tree_stats
     /* The content objects copied because they were shared when a leaf changed
      * its content (Content, copy on write). */
     size_t content_copies;
+    /* The steps of the definition index (DefinitionIndex): one per dirty
+     * definition processed, per ancestor visited to see whether a candidate is
+     * attached, and per node visited to order several candidates. */
+    size_t index_steps;
 } amark_tree_stats_t;
 
 struct amark_document
@@ -626,6 +719,8 @@ struct amark_document
     size_t line_count;
     size_t line_capacity;
     uint8_t default_eol;
+    /* The definition index (DefinitionIndex). */
+    amark_tree_def_index_t def_index;
     /* The epoch of the internal check (amark_tree_check): each check advances
      * it by 2 and marks the nodes it sees with it. */
     uint64_t check_epoch;
@@ -692,7 +787,18 @@ typedef enum amark_tree_violation
      * capacity, and tokens that are empty, beyond the bytes of their base, out
      * of order or overlapping, of an unknown kind, or of a facet the type does
      * not have. */
-    AMARK_TREE_VIOLATION_CONTENT
+    AMARK_TREE_VIOLATION_CONTENT,
+    /* The definition index: a dirty list that is broken or asymmetric, holds a
+     * node that is not a link_definition of the document or not marked, or
+     * differs from the marked nodes; a group in the wrong bucket, with a wrong
+     * hash, an empty key, a broken member list or a wrong count, or a group
+     * count that differs from the groups; a member that is not a
+     * link_definition or points to another group; a node outside the table
+     * that points to a group; a link_definition that is not dirty whose label
+     * does not normalize to the key of its group (or to nothing when it is in
+     * none); a cached result that is not a member of its group, or decided at
+     * a future generation. */
+    AMARK_TREE_VIOLATION_INDEX
 } amark_tree_violation_t;
 
 /* The first violation found by amark_tree_check. */

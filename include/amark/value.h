@@ -54,6 +54,11 @@ typedef struct amark_value
 /*
  * Reads the value of facet into *out. The caller sets out->struct_size to
  * sizeof(amark_value_t). The value is, in order:
+ *   - for the destination and the title of a link or an image of a reference
+ *     form (full, collapsed, shortcut): the value of the definition found
+ *     with its label (amark_document_find_definition), or the state
+ *     UNRESOLVED, with the number, the text and the length of an UNSET value,
+ *     when there is none (9.4, 9.5); the label itself reads as usual;
  *   - the value set or recorded for the facet;
  *   - for a value facet, the default value of its type (state PRESENT);
  *   - for a style, the state UNSET (3.6).
@@ -61,8 +66,10 @@ typedef struct amark_value
  * has its text, terminated by NUL, and its length, and a number of 0. An UNSET
  * value has a number of 0, a NULL text and a length of 0. The text belongs to
  * the node or to its type: it stays valid until the next change of the facet
- * or the release of the node, and the caller does not free it. On failure *out is not
- * written; AMARK_ERROR_INVALID_ARGUMENT also for a NULL out and a struct_size
+ * or the release of the node (for a resolved destination or title, of the
+ * definition), and the caller does not free it. On failure *out is not
+ * written (AMARK_ERROR_OUT_OF_MEMORY when a derived value or the update of the
+ * definition index cannot be allocated); AMARK_ERROR_INVALID_ARGUMENT also for a NULL out and a struct_size
  * smaller than sizeof(amark_value_t).
  */
 AMARK_API amark_error_t amark_node_get(const amark_node_t *node, amark_facet_t facet,

@@ -236,6 +236,27 @@ AMARK_API amark_eol_t amark_document_default_eol(const amark_document_t *documen
 AMARK_API amark_error_t amark_label_normalize(const char *label, size_t length,
                                               amark_buffer_t *out);
 
+/*
+ * Finds in *out the link reference definition (a link_definition node) for
+ * label, of length bytes (9.2, 9.3): among the definitions attached to the
+ * document node whose label (amark_node_get of AMARK_LINK_DEFINITION_LABEL)
+ * normalizes (amark_label_normalize) to the same bytes as label, the first in
+ * document order; NULL when there is none, for a label that normalizes to
+ * nothing, and for the definitions of a detached subtree. The lookup sees every
+ * change made before it (labels, insertions, removals, moves). It takes time
+ * proportional to the length of label, the number of definitions of that
+ * label and the depth of the tree, plus, for the first lookup of a label of
+ * several definitions after a structural change, the time to order them
+ * (14.8); the labels changed since the last lookup are normalized again first.
+ * label may be NULL when length is 0. AMARK_ERROR_INVALID_ARGUMENT for a NULL
+ * document or out and a NULL label with a length; AMARK_ERROR_OUT_OF_MEMORY
+ * when the index cannot be updated. On failure *out is NULL (when out is not
+ * NULL); the tree is never changed.
+ */
+AMARK_API amark_error_t amark_document_find_definition(const amark_document_t *document,
+                                                       const char *label, size_t length,
+                                                       amark_node_t **out);
+
 AMARK_END_DECLS
 
 #endif /* AMARK_DOCUMENT_H */

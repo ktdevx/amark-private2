@@ -56,25 +56,92 @@ static const amark_facet_desc_t *facet_desc(const amark_node_t *node, amark_face
 /*
  * The current value of facet (desc) of node, in the order of the getter
  * (design, Tree: Facets):
- *   1. the destination and the title of a reference link or image, resolved by
- *      the definition index (UNRESOLVED without a definition) (DefinitionIndex
- *      adds it here);
+ *   1. the destination and the title of a reference link or image (form full,
+ *      collapsed or shortcut): those of the definition of its label, found by
+ *      the definition index, or UNRESOLVED without one;
  *   2. an OVERRIDABLE facet without an override: the value derived from the
  *      layout (tight) (Verbatim adds it here);
  *   3. a STRING facet with tokens: the value derived from its tokens;
  *   4. a CONTENT facet: the value derived from the content of the leaf;
  *   5. the value set or recorded;
  *   6. the default value of a value facet, and UNSET for a style.
- * The steps 3 and 4 fill the cache of the derived value:
- * AMARK_ERROR_OUT_OF_MEMORY when it cannot be allocated.
+ * The steps 3 and 4 fill the cache of the derived value, and the step 1
+ * updates the definition index: AMARK_ERROR_OUT_OF_MEMORY when they cannot
+ * allocate.
  */
+static amark_error_t facet_value(const amark_node_t *node, amark_facet_t facet,
+                                 const amark_facet_desc_t *desc, amark_value_t *out);
+
+/*
+ * The step 1 of the getter for facet of node: when node is a link or an image
+ * of a reference form and facet is its destination or its title, *resolved is
+ * true and *out receives the value of the definition found with the label of
+ * node (DefinitionIndex), or UNRESOLVED (no number, no text) when there is
+ * none (9.4, 9.5); otherwise *resolved is false and *out is not written.
+ */
+static amark_error_t resolve_reference(const amark_node_t *node, amark_facet_t facet,
+                                       bool *resolved, amark_value_t *out)
+{
+    amark_value_t form;
+    amark_value_t label;
+    amark_node_t *definition = NULL;
+    amark_facet_t target;
+    amark_error_t error;
+
+    *resolved = false;
+    if (((node->type != AMARK_NODE_LINK) && (node->type != AMARK_NODE_IMAGE)) ||
+        ((facet != AMARK_LINK_DESTINATION) && (facet != AMARK_LINK_TITLE)))
+    {
+        return AMARK_ERROR_NONE;
+    }
+    form.struct_size = sizeof(form);
+    error = facet_value(node, AMARK_LINK_FORM, facet_desc(node, AMARK_LINK_FORM), &form);
+    if ((error != AMARK_ERROR_NONE) || (form.state != AMARK_VALUE_PRESENT) ||
+        ((form.number != AMARK_LINK_FORM_FULL) && (form.number != AMARK_LINK_FORM_COLLAPSED) &&
+         (form.number != AMARK_LINK_FORM_SHORTCUT)))
+    {
+        return error;
+    }
+    label.struct_size = sizeof(label);
+    error = facet_value(node, AMARK_LINK_LABEL, facet_desc(node, AMARK_LINK_LABEL), &label);
+    if (error == AMARK_ERROR_NONE)
+    {
+        /* The lookup updates the index of the document, not node. */
+        error = amark_tree_find_definition(node->document, label.text, label.length,
+                                           &definition);
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    *resolved = true;
+    if (definition == NULL)
+    {
+        out->state = AMARK_VALUE_UNRESOLVED;
+        out->number = 0;
+        out->text = NULL;
+        out->length = 0;
+        return AMARK_ERROR_NONE;
+    }
+    target = (facet == AMARK_LINK_DESTINATION) ? AMARK_LINK_DEFINITION_DESTINATION
+                                               : AMARK_LINK_DEFINITION_TITLE;
+    return facet_value(definition, target, facet_desc(definition, target), out);
+}
+
 static amark_error_t facet_value(const amark_node_t *node, amark_facet_t facet,
                                  const amark_facet_desc_t *desc, amark_value_t *out)
 {
     const amark_tree_facet_t *slot = &node->facets[facet - 1];
     bool derived = false;
+    bool resolved = false;
     amark_error_t error;
 
+    /* 1. */
+    error = resolve_reference(node, facet, &resolved, out);
+    if ((error != AMARK_ERROR_NONE) || resolved)
+    {
+        return error;
+    }
     out->state = AMARK_VALUE_PRESENT;
     out->number = 0;
     out->text = NULL;

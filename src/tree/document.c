@@ -64,6 +64,7 @@ void amark_document_destroy(amark_document_t *document)
         amark_tree_node_release(root->ring_next);
     }
     amark_tree_node_release(root);
+    amark_tree_def_index_deinit(document);
     amark_line_table_deinit(document);
     /* The owned syntax set goes last, after every node (1.8). */
     owned_set = document->owned_set;
