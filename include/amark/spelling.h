@@ -132,8 +132,8 @@ typedef struct amark_layout_token
  * Sets the line range of block to the count lines from first (count 0 removes
  * the range; first is then ignored). AMARK_ERROR_INVALID_ARGUMENT for NULL, a node
  * that is not a block, a range outside the line table, and a range that leaves
- * out a record of the block (a range cannot be removed while the block has
- * records). Setting the same range changes nothing; otherwise the change is
+ * out a record or a content piece of the block (a range cannot be removed
+ * while the block has records or pieces). Setting the same range changes nothing; otherwise the change is
  * notified.
  */
 AMARK_API amark_error_t amark_block_set_lines(amark_node_t *block, amark_line_id_t first,
@@ -220,6 +220,91 @@ AMARK_API amark_error_t amark_block_token_at(const amark_node_t *block, size_t i
 AMARK_API amark_error_t amark_block_find_margin(const amark_node_t *container,
                                                 amark_line_id_t line, amark_margin_t *out,
                                                 bool *found);
+
+/* ---- Content -------------------------------------------------------------------- */
+
+/*
+ * The content of a leaf (a block whose type has AMARK_NODE_TYPE_CONTENT) is the
+ * text that is left of its lines once the margins and its own spelling are
+ * taken out, in the order of the lines. It is in one of these states:
+ *   - none: the leaf has no content yet;
+ *   - laid: each piece of the content is a range of columns of a line of the
+ *     document; the pieces of different lines are joined by a virtual "\n" (the
+ *     line ending itself belongs to the line table), the pieces of one line are
+ *     joined without anything between them (the columns between them are the
+ *     own spelling of the leaf), and the columns of a tab cut by the start or the
+ *     end of a piece are spaces;
+ *   - free: the content holds bytes of its own that do not come from the lines,
+ *     with CRLF and CR normalized to LF.
+ */
+typedef enum amark_content_state
+{
+    AMARK_CONTENT_NONE = 1,
+    AMARK_CONTENT_LAID = 2,
+    AMARK_CONTENT_FREE = 3
+} amark_content_state_t;
+
+/* A piece of laid content: the columns [column_start, column_end) of line, and
+ * the bytes [content_start, content_start + content_length) of the content they
+ * become (a tab cut by a boundary counts as spaces). The caller sets
+ * struct_size to sizeof(amark_content_piece_t). */
+typedef struct amark_content_piece
+{
+    size_t struct_size;
+    amark_line_id_t line;
+    uint32_t column_start;
+    uint32_t column_end;
+    size_t content_start;
+    size_t content_length;
+} amark_content_piece_t;
+
+/*
+ * Appends the columns [column_start, column_end) of line to the laid content of
+ * leaf (the content becomes laid when it was none). Pieces are added in order:
+ * on a later line than the last piece (an empty range stands for an empty
+ * line), or on the same line from the end of the last piece on, with columns.
+ * AMARK_ERROR_INVALID_ARGUMENT, with the leaf unchanged, for NULL, a node that is
+ * not a block with content, free content, a line outside the line table or the
+ * line range of the leaf, a piece out of order, column_start after column_end,
+ * a column beyond the width of the line or inside a character other than a
+ * tab. AMARK_ERROR_LIMIT_EXCEEDED when the content would reach 4 GiB,
+ * AMARK_ERROR_OUT_OF_MEMORY; both leave the leaf unchanged. The change is
+ * notified.
+ */
+AMARK_API amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
+                                                uint32_t column_start, uint32_t column_end);
+
+/*
+ * Makes the content of leaf free content holding a copy of the length bytes at
+ * bytes, with CRLF and CR normalized to LF (bytes may be NULL when length is 0).
+ * The previous content of the leaf is released, never changed.
+ * AMARK_ERROR_INVALID_ARGUMENT for a NULL leaf, a node that is not a block with
+ * content, and NULL bytes with a length; AMARK_ERROR_LIMIT_EXCEEDED when the
+ * content would reach 4 GiB; AMARK_ERROR_OUT_OF_MEMORY. On failure the leaf is
+ * unchanged. The change is notified.
+ */
+AMARK_API amark_error_t amark_block_set_free_content(amark_node_t *leaf, const char *bytes,
+                                                     size_t length);
+
+/* The state of the content of leaf (AMARK_CONTENT_NONE for NULL and for a node
+ * that has no content). */
+AMARK_API amark_content_state_t amark_block_content_state(const amark_node_t *leaf);
+
+/* The bytes of the content of leaf: *bytes (never NULL; "" when there is no
+ * content) and *length. AMARK_ERROR_INVALID_ARGUMENT for NULL arguments and a node
+ * that is not a block with content. */
+AMARK_API amark_error_t amark_block_content_bytes(const amark_node_t *leaf, const char **bytes,
+                                                  size_t *length);
+
+/* The number of pieces of the content of leaf (0 for NULL, and for content that
+ * is not laid). */
+AMARK_API size_t amark_block_content_piece_count(const amark_node_t *leaf);
+
+/* Reads piece index of the content of leaf into *out (whose struct_size the
+ * caller sets). AMARK_ERROR_INVALID_ARGUMENT for NULL, a struct_size below
+ * sizeof(amark_content_piece_t) and an index out of range. */
+AMARK_API amark_error_t amark_block_content_piece_at(const amark_node_t *leaf, size_t index,
+                                                     amark_content_piece_t *out);
 
 AMARK_END_DECLS
 

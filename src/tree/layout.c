@@ -208,6 +208,15 @@ static amark_error_t check_record(const amark_node_t *node, amark_line_id_t line
     return error;
 }
 
+amark_error_t amark_tree_check_record_columns(const amark_node_t *node, amark_line_id_t line,
+                                              uint32_t start, uint32_t end)
+{
+    size_t start_byte = 0;
+    bool start_in_tab = false;
+
+    return check_record(node, line, start, end, &start_byte, &start_in_tab);
+}
+
 /* Whether the bytes of line from byte (or from inside the tab at byte) to its
  * end are spaces and tabs only. */
 static bool blank_from(const amark_document_t *document, amark_line_id_t line, size_t byte)
@@ -282,6 +291,18 @@ amark_error_t amark_block_set_lines(amark_node_t *block, amark_line_id_t first, 
                        : high;
         }
         if (any && ((count == 0) || (low < first) || ((high - first) >= count)))
+        {
+            return AMARK_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    /* The pieces of the content are in the order of the lines too. */
+    if ((block->content != NULL) && (block->content->piece_count > 0))
+    {
+        const amark_tree_content_t *content = block->content;
+        amark_line_id_t low = content->pieces[0].line;
+        amark_line_id_t high = content->pieces[content->piece_count - 1].line;
+
+        if ((count == 0) || (low < first) || ((high - first) >= count))
         {
             return AMARK_ERROR_INVALID_ARGUMENT;
         }

@@ -364,6 +364,40 @@ NAOS_TEST(layout_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(content_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *code = NULL;
+    amark_source_id_t source = 0;
+    amark_content_piece_t piece;
+    const char *bytes = NULL;
+    size_t length = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, ">\t\tfoo\n", 7,
+                                                  AMARK_SOURCE_FINISHED, &source));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_CODE_BLOCK, &code));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(code, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_NONE, amark_block_content_state(code));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(code, 0, 6, 11));
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_LAID, amark_block_content_state(code));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(code, &bytes, &length));
+    NAOS_CHECK_UINT_EQ(5, length);
+    NAOS_CHECK_TRUE(std::memcmp(bytes, "  foo", 5) == 0);
+    NAOS_CHECK_UINT_EQ(1, amark_block_content_piece_count(code));
+    std::memset(&piece, 0, sizeof(piece));
+    piece.struct_size = sizeof(piece);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_piece_at(code, 0, &piece));
+    NAOS_CHECK_UINT_EQ(6, piece.column_start);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_free_content(code, "a\r\nb", 4));
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(code));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(code, &bytes, &length));
+    NAOS_CHECK_UINT_EQ(3, length);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -377,7 +411,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(structural_edit_functions_link),
     NAOS_ADD_TEST(source_and_line_functions_link),
     NAOS_ADD_TEST(facet_value_functions_link),
-    NAOS_ADD_TEST(layout_functions_link)
+    NAOS_ADD_TEST(layout_functions_link),
+    NAOS_ADD_TEST(content_functions_link)
 )
 
 NAOS_MAIN(

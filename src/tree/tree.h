@@ -143,10 +143,81 @@ typedef struct amark_tree_records
 /* Frees records and what it holds (NULL does nothing). */
 void amark_tree_records_free(amark_tree_records_t *records);
 
+/*
+ * Checks a record of node on line with the columns [start, end): the line is in
+ * the line table and in the line range of node, start <= end <= the width of
+ * the line, and both boundaries are boundaries of characters or inside tabs.
+ * AMARK_ERROR_INVALID_ARGUMENT otherwise; AMARK_ERROR_OUT_OF_MEMORY when the
+ * index of the tabs of the line cannot be built (an internal cache of the line
+ * table; the node is not changed).
+ */
+amark_error_t amark_tree_check_record_columns(const amark_node_t *node, amark_line_id_t line,
+                                              uint32_t start, uint32_t end);
+
 /* The dropped-spelling marks of a node (amark_node_t.dropped): bit 0 is the
  * structural spelling (the margins, the blank lines and the layout tokens),
  * bit n (1 to 31) is the spelling of facet n. */
 #define AMARK_TREE_DROPPED_STRUCTURE 0x01u
+
+/* ---- Content (content.c) ---------------------------------------------------- */
+
+/* The largest content: a content is shorter than 4 GiB, so that the positions
+ * of the content tokens fit in 32 bits (AMARK_ERROR_LIMIT_EXCEEDED beyond). */
+#define AMARK_TREE_MAX_CONTENT ((size_t)UINT32_MAX)
+
+/* A piece of laid content (amark_content_piece_t without the size). */
+typedef struct amark_tree_piece
+{
+    amark_line_id_t line;
+    uint32_t start;
+    uint32_t end;
+    size_t content_start;
+    size_t content_length;
+} amark_tree_piece_t;
+
+/*
+ * A content object: the content of the leaves that own it. It refers to no
+ * node; the nodes refer to it, counted in two separate reference counts:
+ *   - owners: the leaves whose content it is (amark_node_t.content);
+ *   - bases: the nodes whose content tokens are on it (Content tokens).
+ * It is freed when both counts reach 0 (amark_tree_content_release). A shared
+ * object (owners >= 2, or bases >= 1 for an edit that moves existing bytes) is
+ * copied before it changes, so its existing bytes and state never change while
+ * it is shared.
+ *
+ *   - state: AMARK_CONTENT_LAID or AMARK_CONTENT_FREE.
+ *   - bytes, length, capacity: the bytes of the content, terminated by NUL
+ *     (bytes is NULL while capacity is 0); length is at most
+ *     AMARK_TREE_MAX_CONTENT. Laid content is the pieces joined by a virtual
+ *     LF between lines; free content holds no CR.
+ *   - line_count: for laid content, the lines that have a piece (an empty line
+ *     is an empty piece); for free content, 0 when empty, else its LFs + 1.
+ *   - pieces: for laid content, its pieces in the order of the lines and the
+ *     columns (grows by doubling; NULL while the capacity is 0); none for free
+ *     content.
+ *   - check_mark, check_owners, check_bases: the scratch of the internal check
+ *     (amark_tree_check); meaningless outside of it.
+ */
+typedef struct amark_tree_content
+{
+    size_t owners;
+    size_t bases;
+    uint8_t state; /* amark_content_state_t */
+    char *bytes;
+    size_t length;
+    size_t capacity;
+    size_t line_count;
+    amark_tree_piece_t *pieces;
+    size_t piece_count;
+    size_t piece_capacity;
+    uint64_t check_mark;
+    size_t check_owners;
+    size_t check_bases;
+} amark_tree_content_t;
+
+/* Releases one reference to content: one owner when owner is true, else one
+ * base; frees the object once both counts are 0 (NULL does nothing). */
+void amark_tree_content_release(amark_tree_content_t *content, bool owner);
 
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
@@ -211,6 +282,9 @@ struct amark_node
     uint32_t line_count;
     /* The layout records (Layout), NULL until the first record. */
     amark_tree_records_t *records;
+    /* The content of a leaf (Content), of which the leaf is an owner; NULL
+     * while it has none (AMARK_CONTENT_NONE). */
+    amark_tree_content_t *content;
     /* The dropped-spelling marks (AMARK_TREE_DROPPED_*). */
     uint32_t dropped;
     /* The mark of the last internal check (amark_tree_check) that saw the
@@ -461,7 +535,15 @@ typedef enum amark_tree_violation
      * end at the end of its line, an empty token, a record array whose count
      * exceeds its capacity, or a dropped mark of a facet the type does not
      * have. */
-    AMARK_TREE_VIOLATION_LAYOUT
+    AMARK_TREE_VIOLATION_LAYOUT,
+    /* The content of a leaf: content on a node that is not a block with
+     * content, an unknown state, an array whose count exceeds its capacity, a
+     * length of 4 GiB or more, bytes not terminated, pieces on free content or
+     * out of order or outside the line range or the width of their lines, bytes
+     * that are not the pieces joined as laid content (or free content that holds
+     * a CR), a wrong line count, or an owner or base count that differs from
+     * the nodes that refer to the object. */
+    AMARK_TREE_VIOLATION_CONTENT
 } amark_tree_violation_t;
 
 /* The first violation found by amark_tree_check. */
