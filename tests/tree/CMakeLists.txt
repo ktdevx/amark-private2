@@ -49,7 +49,8 @@ amark_add_test(label_index_test SOURCES label_index_test.c INTERNAL)
 amark_add_test(copy_import_test SOURCES copy_import_test.c INTERNAL)
 
 # Position: the source ranges.
-amark_add_test(position_test SOURCES position_test.c INTERNAL)
+amark_add_test(position_test SOURCES position_test.c INTERNAL
+  LIBRARIES amark_test_tree)
 
 # LosslessCheck: the lossless verification.
 amark_add_test(lossless_test SOURCES lossless_test.c INTERNAL)

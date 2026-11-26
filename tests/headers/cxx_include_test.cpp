@@ -268,6 +268,13 @@ NAOS_TEST(source_and_line_functions_link)
     NAOS_CHECK_UINT_EQ(2, tab_offset);
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_byte_to_column(document, 2, 1, &column));
     NAOS_CHECK_UINT_EQ(4, column);
+    amark_source_range_t range;
+    bool has_position = true;
+    range.struct_size = sizeof(range);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_source_range(amark_document_root(document), &range,
+                                              &has_position));
+    NAOS_CHECK_FALSE(has_position);
     amark_document_destroy(document);
 }
 

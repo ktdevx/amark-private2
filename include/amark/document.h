@@ -213,6 +213,60 @@ AMARK_API amark_error_t amark_document_byte_to_column(const amark_document_t *do
  */
 AMARK_API amark_eol_t amark_document_default_eol(const amark_document_t *document);
 
+/* ---- Positions --------------------------------------------------------------- */
+
+/*
+ * The range of a node in a source (2.9-2.11):
+ *   - source: the source of the range;
+ *   - start_offset, end_offset: the positions of its bytes in the source (the
+ *     BOM included, as for amark_line_info_t.offset); end_offset is excluded;
+ *   - start_line, start_column: the line of its first byte (its number in the
+ *     source, from 1) and the position of that byte in the line + 1;
+ *   - end_line, end_column: the same for its last byte, so that end_column is
+ *     the position in the line of the end of the range (excluded); an empty
+ *     range ends on its start line with end_column = start_column - 1.
+ * A line ending in the range belongs to the line it ends.
+ */
+typedef struct amark_source_range
+{
+    size_t struct_size; /* sizeof(amark_source_range_t), set by the caller */
+    amark_source_id_t source;
+    size_t start_offset, end_offset;
+    uint32_t start_line, start_column;
+    uint32_t end_line, end_column;
+} amark_source_range_t;
+
+/*
+ * Finds the range of node in its source: *has_position tells whether node has
+ * one, and *out receives it when it has (out is not written otherwise).
+ *   - A block (2.9): from its line range. The range starts on the first line
+ *     of the line range, at the leftmost column of the records (margins, blank
+ *     lines, layout tokens and content pieces) of the block and its descendants
+ *     on that line, and ends on the last line at the rightmost column of the
+ *     records on that line; a line without such a record starts at its column 0
+ *     or ends at its width. The columns become bytes through the line table (a
+ *     column inside a tab is that tab). A block without a line range has no
+ *     position.
+ *   - An inline node (2.10): from the content tokens of the node and its
+ *     descendants on the base of its first token (in document order): the
+ *     earliest start and the latest end, mapped to their lines and columns
+ *     through the pieces of that laid content. A byte of a tab expanded to
+ *     spaces is that tab; a virtual LF between the lines is the line ending of
+ *     the earlier line. An inline node without a token on itself and on its
+ *     descendants, or whose base is free content, has no position.
+ * When the range would span several sources, it is cut to the source of its
+ * start: its end moves back to the last line (or piece) of that source.
+ * The time is proportional to the nodes of the subtree, plus the logarithm of
+ * the records for each block and of the pieces for an inline node.
+ * AMARK_ERROR_INVALID_ARGUMENT for NULL and a struct_size smaller than
+ * sizeof(amark_source_range_t); AMARK_ERROR_OUT_OF_MEMORY when the index of
+ * the tabs of a line cannot be built (amark_document_column_to_byte). On
+ * failure the outputs are unchanged. The tree is never changed.
+ */
+AMARK_API amark_error_t amark_node_source_range(const amark_node_t *node,
+                                                amark_source_range_t *out,
+                                                bool *has_position);
+
 /* ---- Labels ------------------------------------------------------------------ */
 
 /*
