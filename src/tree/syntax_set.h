@@ -32,6 +32,9 @@ typedef struct amark_syntax_slot_entry
 {
     const amark_slot_t *slot;
     const amark_extension_t *extension;
+    /* The position of the slot in the set (in the order of the set, then of the
+     * slots of the extension), the second key of the sort. */
+    size_t order;
 } amark_syntax_slot_entry_t;
 
 /*
