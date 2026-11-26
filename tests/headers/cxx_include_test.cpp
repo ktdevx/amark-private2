@@ -100,13 +100,64 @@ NAOS_TEST(entity_functions_link)
     NAOS_CHECK_UINT_EQ(0x0338u, codepoints[1]);
 }
 
+static const amark_facet_desc_t cxx_facets[] = {
+    {sizeof(amark_facet_desc_t), "title", AMARK_FACET_VALUE, AMARK_FACET_STRING, 0, 0, 0, NULL, 0,
+     0, NULL, NULL, NULL, NULL}};
+static const amark_node_type_desc_t cxx_type = {
+    sizeof(amark_node_type_desc_t), "cxx.box", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK,
+    AMARK_CONTENT_BLOCK, AMARK_NODE_TYPE_MARGINS, cxx_facets, 1, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static const amark_node_type_desc_t *const cxx_types[] = {&cxx_type};
+static const amark_slot_t cxx_slot = {sizeof(amark_slot_t), AMARK_SLOT_KIND_USER_FIRST};
+static const amark_slot_t *const cxx_slots[] = {&cxx_slot};
+static const amark_extension_t cxx_extension = {
+    sizeof(amark_extension_t), "cxx.ext", cxx_types, 1, cxx_slots, 1, NULL};
+static const amark_extension_t cxx_other = {
+    sizeof(amark_extension_t), "cxx.other", NULL, 0, NULL, 0, NULL};
+
+NAOS_TEST(registry_functions_link)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_syntax_set_t *copy = NULL;
+    amark_node_type_t type = AMARK_NODE_NONE;
+    const amark_extension_t *extension = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_create(&set));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_append(set, &cxx_extension));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_insert_before(set, "cxx.ext", &cxx_other));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_replace(set, "cxx.other", &cxx_other));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_remove(set, "cxx.other"));
+    NAOS_CHECK_UINT_EQ(2, amark_syntax_set_extension_count(set));
+    NAOS_CHECK_PTR_EQ(&cxx_extension, amark_syntax_set_extension_at(set, 1));
+    NAOS_CHECK_PTR_EQ(&cxx_extension, amark_syntax_set_find_extension(set, "cxx.ext"));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_freeze(set));
+    NAOS_CHECK_TRUE(amark_syntax_set_is_frozen(set));
+
+    NAOS_CHECK_TRUE(amark_syntax_set_find_node_type(set, "cxx.box", &type));
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_DYNAMIC_FIRST, type);
+    NAOS_CHECK_TRUE(amark_syntax_set_node_type_of(set, &cxx_type, &type));
+    NAOS_CHECK_PTR_EQ(&cxx_type, amark_syntax_set_node_type_desc(set, type));
+    NAOS_CHECK_UINT_EQ(1, amark_syntax_set_slot_count(set, AMARK_SLOT_KIND_USER_FIRST));
+    NAOS_CHECK_PTR_EQ(&cxx_slot,
+                      amark_syntax_set_slot_at(set, AMARK_SLOT_KIND_USER_FIRST, 0, &extension));
+    NAOS_CHECK_PTR_EQ(&cxx_extension, extension);
+    NAOS_CHECK_UINT_EQ(1, amark_node_type_find_facet(&cxx_type, "title"));
+    NAOS_CHECK_PTR_EQ(&cxx_facets[0], amark_node_type_facet(&cxx_type, 1));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_clone(set, &copy));
+    NAOS_CHECK_FALSE(amark_syntax_set_is_frozen(copy));
+    amark_syntax_set_destroy(copy);
+    amark_syntax_set_destroy(set);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
     NAOS_ADD_TEST(buffer_appends_and_detaches),
     NAOS_ADD_TEST(allocator_functions_link),
     NAOS_ADD_TEST(utf8_and_unicode_functions_link),
-    NAOS_ADD_TEST(entity_functions_link)
+    NAOS_ADD_TEST(entity_functions_link),
+    NAOS_ADD_TEST(registry_functions_link)
 )
 
 NAOS_MAIN(

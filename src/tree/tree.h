@@ -17,4 +17,64 @@
 #include <amark/dump.h>
 #include <amark/extension.h>
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/* ---- Registry (registry.c) ------------------------------------------------- */
+
+/* The name of the built-in extension, always first in a syntax set. */
+#define AMARK_TREE_CORE_EXTENSION_NAME "amark.core"
+
+/* A node type of a frozen syntax set: its descriptor and its extension. */
+typedef struct amark_registry_type
+{
+    const amark_node_type_desc_t *desc;
+    const amark_extension_t *extension;
+} amark_registry_type_t;
+
+/* An entry of the name index of a frozen syntax set. */
+typedef struct amark_registry_name
+{
+    const char *name;
+    amark_node_type_t type;
+} amark_registry_name_t;
+
+/* A slot of a frozen syntax set, in the slot index sorted by kind and then by the
+ * order of the set. */
+typedef struct amark_registry_slot
+{
+    uint32_t kind;
+    const amark_slot_t *slot;
+    const amark_extension_t *extension;
+} amark_registry_slot_t;
+
+struct amark_syntax_set
+{
+    /* The extensions in order; extensions[0] is the built-in extension. */
+    const amark_extension_t **extensions;
+    size_t extension_count;
+    size_t extension_capacity;
+    bool frozen;
+    /* The tables built by freezing (empty before): the types of the built-in
+     * extension (identifier i + 1 is builtin_types[i]), the types of the other
+     * extensions (identifier AMARK_NODE_DYNAMIC_FIRST + i is dynamic_types[i]),
+     * the names of all types sorted by name, and the slots sorted by kind. */
+    amark_registry_type_t *builtin_types;
+    size_t builtin_type_count;
+    amark_registry_type_t *dynamic_types;
+    size_t dynamic_type_count;
+    amark_registry_name_t *names;
+    size_t name_count;
+    amark_registry_slot_t *slots;
+    size_t slot_count;
+};
+
+/* The built-in extension "amark.core" (static; not freed). */
+const amark_extension_t *amark_tree_core_extension(void);
+
+/* Checks that set can be used by a document: AMARK_ERROR_INVALID_ARGUMENT for
+ * NULL, AMARK_ERROR_INVALID_STATE when it is not frozen (12.8). */
+amark_error_t amark_syntax_set_require_frozen(const amark_syntax_set_t *set);
+
 #endif /* AMARK_TREE_TREE_H */
