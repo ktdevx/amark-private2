@@ -11,7 +11,8 @@
  *      table;
  *   2. the walk visits each node of each tree once and runs the node checks
  *      (node_checks[]) on it: the relations, the containment rules, the link in
- *      link rule, the cache invariant and the storage of the facets.
+ *      link rule, the cache invariant, the storage of the facets and the
+ *      layout (the line range and the layout records).
  * A component that adds records or caches adds its invariant as a node check
  * (records of one node: facets, margins, tokens, content tokens) or as a
  * document check after the walk (whole-document counts: the owners of the
@@ -236,6 +237,129 @@ static bool check_facets(check_context_t *context, const amark_node_t *node)
     return true;
 }
 
+/* Whether line is in the line range of node. */
+static bool line_in_range(const amark_node_t *node, amark_line_id_t line)
+{
+    return (node->line_count > 0) && (line >= node->line_first) &&
+           ((line - node->line_first) < node->line_count);
+}
+
+/* The layout of a node (Layout): its line range is in the line table, its
+ * records are on the lines of its range, within their widths, in order, and
+ * allowed by its type; its dropped marks name facets it has. Linear in the
+ * records of the node. Runs before check_lines, so it only relies on the line
+ * count and the widths of the lines. */
+static bool check_layout(check_context_t *context, const amark_node_t *node)
+{
+    const amark_document_t *document = context->document;
+    const amark_tree_records_t *records = node->records;
+    size_t i;
+
+    if ((node->line_count > 0) &&
+        ((node->desc->level != AMARK_NODE_LEVEL_BLOCK) ||
+         (node->line_first >= document->line_count) ||
+         (node->line_count > (document->line_count - node->line_first))))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                    "a line range is outside the line table or on an inline node");
+    }
+    if ((node->desc->facet_count < 31u) &&
+        ((node->dropped >> (node->desc->facet_count + 1u)) != 0))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                    "a dropped mark names a facet the type does not have");
+    }
+    if (records == NULL)
+    {
+        return true;
+    }
+    if ((records->margin_count > records->margin_capacity) ||
+        (records->blank_line_count > records->blank_line_capacity) ||
+        (records->token_count > records->token_capacity) ||
+        ((records->margin_capacity > 0) && (records->margins == NULL)) ||
+        ((records->blank_line_capacity > 0) && (records->blank_lines == NULL)) ||
+        ((records->token_capacity > 0) && (records->tokens == NULL)))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                    "a record array exceeds its capacity");
+    }
+    if ((records->margin_count > 0) &&
+        ((node->desc->level != AMARK_NODE_LEVEL_BLOCK) ||
+         ((node->desc->flags & AMARK_NODE_TYPE_MARGINS) == 0)))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                    "a node that is not a container has margins");
+    }
+    if ((records->blank_line_count > 0) &&
+        ((node->desc->level != AMARK_NODE_LEVEL_BLOCK) ||
+         ((node->desc->accepts & (AMARK_CONTENT_BLOCK | AMARK_CONTENT_LIST_ITEM)) == 0)))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                    "a node that cannot have block children has blank lines");
+    }
+    if ((records->token_count > 0) && (node->desc->level != AMARK_NODE_LEVEL_BLOCK))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                    "an inline node has layout tokens");
+    }
+    for (i = 0; i < records->margin_count; i++)
+    {
+        const amark_tree_margin_t *margin = &records->margins[i];
+
+        if (!line_in_range(node, margin->line) ||
+            ((i > 0) && (margin->line <= records->margins[i - 1].line)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                        "a margin is outside the line range or out of order");
+        }
+        if ((margin->start > margin->end) ||
+            (margin->end > document->lines[margin->line].width) ||
+            ((margin->state != AMARK_MARGIN_PRESENT) && (margin->state != AMARK_MARGIN_LAZY)) ||
+            ((margin->flags & ~(unsigned)AMARK_MARGIN_FIRST) != 0) ||
+            ((margin->state == AMARK_MARGIN_LAZY) && (margin->start != margin->end)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node, "a margin is malformed");
+        }
+    }
+    for (i = 0; i < records->blank_line_count; i++)
+    {
+        const amark_tree_blank_line_t *blank = &records->blank_lines[i];
+
+        if (!line_in_range(node, blank->line) ||
+            ((i > 0) && (blank->line <= records->blank_lines[i - 1].line)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                        "a blank line is outside the line range or out of order");
+        }
+        if ((blank->start > blank->end) || (blank->end != document->lines[blank->line].width))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                        "a blank line does not end at the end of its line");
+        }
+    }
+    for (i = 0; i < records->token_count; i++)
+    {
+        const amark_tree_layout_token_t *token = &records->tokens[i];
+        const amark_tree_layout_token_t *last = (i > 0) ? &records->tokens[i - 1] : NULL;
+
+        if (!line_in_range(node, token->line) ||
+            ((last != NULL) && ((token->line < last->line) ||
+                                ((token->line == last->line) && (token->start < last->end)))))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                        "a layout token is outside the line range, out of order or overlapping");
+        }
+        if ((token->start >= token->end) || (token->end > document->lines[token->line].width) ||
+            (token->kind < AMARK_SPELL_TEXT) || (token->kind > AMARK_SPELL_REPLACED) ||
+            (token->facet > node->desc->facet_count))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LAYOUT, node,
+                        "a layout token is malformed");
+        }
+    }
+    return true;
+}
+
 /* The checks of one node, in order. Add the invariants of the records and the
  * caches of a node here. */
 static const node_check_t node_checks[] = {
@@ -244,6 +368,7 @@ static const node_check_t node_checks[] = {
     check_link_in_link,
     check_cache,
     check_facets,
+    check_layout,
 };
 
 /* ---- The walk of the trees ----------------------------------------------------- */
@@ -636,6 +761,8 @@ const char *amark_tree_violation_name(amark_tree_violation_t kind)
         return "lines";
     case AMARK_TREE_VIOLATION_FACETS:
         return "facets";
+    case AMARK_TREE_VIOLATION_LAYOUT:
+        return "layout";
     default:
         return "unknown";
     }

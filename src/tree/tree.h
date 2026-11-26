@@ -89,6 +89,65 @@ const amark_extension_t *amark_tree_core_extension(void);
  * NULL, AMARK_ERROR_INVALID_STATE when it is not frozen (12.8). */
 amark_error_t amark_syntax_set_require_frozen(const amark_syntax_set_t *set);
 
+/* ---- Layout (layout.c) ------------------------------------------------------ */
+
+/* A margin of a container (amark_margin_t without the size; 16 bytes). */
+typedef struct amark_tree_margin
+{
+    amark_line_id_t line;
+    uint32_t start;
+    uint32_t end;
+    uint8_t state; /* amark_margin_state_t */
+    uint8_t flags; /* AMARK_MARGIN_* */
+    uint16_t role;
+} amark_tree_margin_t;
+
+/* A blank line of a block (amark_blank_line_t without the size). */
+typedef struct amark_tree_blank_line
+{
+    amark_line_id_t line;
+    uint32_t start;
+    uint32_t end;
+} amark_tree_blank_line_t;
+
+/* A layout token of a block (amark_layout_token_t without the size; 16 bytes). */
+typedef struct amark_tree_layout_token
+{
+    amark_line_id_t line;
+    uint32_t start;
+    uint32_t end;
+    uint8_t kind;  /* amark_spell_kind_t */
+    uint8_t facet; /* amark_facet_t, at most AMARK_FACET_MAX */
+    uint16_t role;
+} amark_tree_layout_token_t;
+
+/*
+ * The layout records of a node, allocated by its first record (a new node has
+ * none). Each array is in the order of its records (margins and blank lines by
+ * line, one per line; tokens by line and column, without overlap), grows by
+ * doubling and is NULL while its capacity is 0.
+ */
+typedef struct amark_tree_records
+{
+    amark_tree_margin_t *margins;
+    size_t margin_count;
+    size_t margin_capacity;
+    amark_tree_blank_line_t *blank_lines;
+    size_t blank_line_count;
+    size_t blank_line_capacity;
+    amark_tree_layout_token_t *tokens;
+    size_t token_count;
+    size_t token_capacity;
+} amark_tree_records_t;
+
+/* Frees records and what it holds (NULL does nothing). */
+void amark_tree_records_free(amark_tree_records_t *records);
+
+/* The dropped-spelling marks of a node (amark_node_t.dropped): bit 0 is the
+ * structural spelling (the margins, the blank lines and the layout tokens),
+ * bit n (1 to 31) is the spelling of facet n. */
+#define AMARK_TREE_DROPPED_STRUCTURE 0x01u
+
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
 /* The states of the storage of a facet (amark_tree_facet_t.state). */
@@ -146,6 +205,14 @@ struct amark_node
     amark_tree_facet_t *facets;
     /* desc->data_size bytes of extension data (NULL when 0). */
     void *data;
+    /* The line range of a block (Layout): line_first and line_count lines; no
+     * range while line_count is 0 (line_first is then meaningless). */
+    amark_line_id_t line_first;
+    uint32_t line_count;
+    /* The layout records (Layout), NULL until the first record. */
+    amark_tree_records_t *records;
+    /* The dropped-spelling marks (AMARK_TREE_DROPPED_*). */
+    uint32_t dropped;
     /* The mark of the last internal check (amark_tree_check) that saw the
      * node; meaningless outside of it. */
     uint64_t check_mark;
@@ -317,6 +384,9 @@ typedef struct amark_tree_stats
     size_t structure_steps;
     /* The nodes visited by the change notification. */
     size_t invalidation_steps;
+    /* The steps of the layout records (Layout): one per record appended, plus
+     * the records moved by each growth of an array. */
+    size_t record_steps;
 } amark_tree_stats_t;
 
 struct amark_document
@@ -380,7 +450,18 @@ typedef enum amark_tree_violation
      * terminated at its length, holds NUL or invalid UTF-8, or is not
      * normalized for a LINES facet, a value is held by a facet of another
      * kind, or a cache length is set without a cache. */
-    AMARK_TREE_VIOLATION_FACETS
+    AMARK_TREE_VIOLATION_FACETS,
+    /* The layout of a node: a line range outside the line table, records on a
+     * node without a range or outside it, margins on a type that is not a
+     * container, blank lines on a type that cannot have block children, records
+     * out of order (margins and blank lines not one per line in the order of the
+     * lines, tokens not in the order of the lines and columns or overlapping), a
+     * column beyond the width of its line or a reversed range, an unknown state,
+     * flag, kind or facet, a lazy margin with columns, a blank line that does not
+     * end at the end of its line, an empty token, a record array whose count
+     * exceeds its capacity, or a dropped mark of a facet the type does not
+     * have. */
+    AMARK_TREE_VIOLATION_LAYOUT
 } amark_tree_violation_t;
 
 /* The first violation found by amark_tree_check. */
@@ -404,9 +485,9 @@ typedef struct amark_tree_check_report
  * The checks run in order and stop at the first violation, so that a later
  * check can rely on the invariants of the earlier ones: the document node, the
  * ring, then a walk of every tree that runs the node checks on each node
- * (relations, containment, link in link, cache, facets). A component that adds
- * records or caches adds its invariant as a node check or a document check in
- * tree_check.c.
+ * (relations, containment, link in link, cache, facets, layout). A component
+ * that adds records or caches adds its invariant as a node check or a document
+ * check in tree_check.c.
  */
 amark_tree_violation_t amark_tree_check(amark_document_t *document,
                                         amark_tree_check_report_t *report);

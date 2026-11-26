@@ -297,6 +297,73 @@ NAOS_TEST(facet_value_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(layout_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *quote = NULL;
+    amark_node_t *code = NULL;
+    amark_node_t *root = NULL;
+    amark_source_id_t source = 0;
+    amark_line_id_t first = 0;
+    uint32_t count = 0;
+    amark_margin_t margin;
+    amark_blank_line_t blank;
+    amark_layout_token_t token;
+    bool found = false;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, "> a\n>\n", 6,
+                                                  AMARK_SOURCE_FINISHED, &source));
+    root = amark_document_root(document);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_BLOCK_QUOTE, &quote));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_CODE_BLOCK, &code));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(root, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(quote, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(code, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines(quote, &first, &count));
+    NAOS_CHECK_UINT_EQ(2, count);
+    std::memset(&margin, 0, sizeof(margin));
+    margin.struct_size = sizeof(margin);
+    margin.state = AMARK_MARGIN_PRESENT;
+    margin.flags = AMARK_MARGIN_FIRST;
+    margin.column_end = 2;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_margin(quote, &margin));
+    margin.line = 1;
+    margin.state = AMARK_MARGIN_LAZY;
+    margin.flags = 0;
+    margin.column_end = 0;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_margin(quote, &margin));
+    std::memset(&blank, 0, sizeof(blank));
+    blank.struct_size = sizeof(blank);
+    blank.line = 1;
+    blank.column_start = 1;
+    blank.column_end = 1;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_blank_line(root, &blank));
+    std::memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.column_end = 1;
+    token.kind = AMARK_SPELL_MARKER;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_token(code, &token));
+    NAOS_CHECK_UINT_EQ(2, amark_block_margin_count(quote));
+    NAOS_CHECK_UINT_EQ(1, amark_block_blank_line_count(root));
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(code));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_margin_at(quote, 1, &margin));
+    NAOS_CHECK_INT_EQ(AMARK_MARGIN_LAZY, margin.state);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_blank_line_at(root, 0, &blank));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_token_at(code, 0, &token));
+    NAOS_CHECK_INT_EQ(AMARK_SPELL_MARKER, token.kind);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_find_margin(quote, 0, &margin, &found));
+    NAOS_CHECK_TRUE(found);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_discard_margin(quote, 0));
+    NAOS_CHECK_UINT_EQ(1, amark_block_margin_count(quote));
+    NAOS_CHECK_INT_EQ(AMARK_SPELL_TAB_REMAINDER, 9);
+    amark_node_destroy(code);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -309,7 +376,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(document_and_node_functions_link),
     NAOS_ADD_TEST(structural_edit_functions_link),
     NAOS_ADD_TEST(source_and_line_functions_link),
-    NAOS_ADD_TEST(facet_value_functions_link)
+    NAOS_ADD_TEST(facet_value_functions_link),
+    NAOS_ADD_TEST(layout_functions_link)
 )
 
 NAOS_MAIN(
