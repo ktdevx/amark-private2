@@ -257,6 +257,17 @@ NAOS_TEST(source_and_line_functions_link)
     NAOS_CHECK_INT_EQ(AMARK_EOL_NONE, info.eol);
     NAOS_CHECK_INT_EQ(AMARK_EOL_CRLF, amark_document_default_eol(document));
     NAOS_CHECK_UINT_EQ(AMARK_SOURCE_FINISHED, 1u);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_add_source(document, "\tx", 2, AMARK_SOURCE_FINISHED, &source));
+    size_t byte = 0;
+    uint32_t tab_offset = 0;
+    uint32_t column = 0;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_column_to_byte(document, 2, 2, &byte, &tab_offset));
+    NAOS_CHECK_UINT_EQ(0, byte);
+    NAOS_CHECK_UINT_EQ(2, tab_offset);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_byte_to_column(document, 2, 1, &column));
+    NAOS_CHECK_UINT_EQ(4, column);
     amark_document_destroy(document);
 }
 

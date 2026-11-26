@@ -6,8 +6,9 @@
  * division into lines (LF, CRLF, CR, no line ending), the widths, the BOM, the
  * incremental completion (the same line table for any split of the bytes), the
  * end of the input, the default line ending, the queries, the release, the
- * allocation failures and the line table invariant of the internal check
- * (1.4, 2.1, 2.2, 2.4-2.8).
+ * allocation failures, the conversions between columns and bytes and their lazy
+ * index of the tabs, the lines added without division (CopyImport), and the
+ * line table invariant of the internal check (1.4, 2.1-2.8).
  */
 #include "tree/tree.h"
 
@@ -717,6 +718,482 @@ NAOS_TEST(out_of_memory_leaves_the_line_table_unchanged)
     AMARK_CHECK_OOM_SWEEP(oom_scenario, NULL);
 }
 
+/* ---- Columns and bytes (2.3) ------------------------------------------------------- */
+
+/* Checks that column of line converts to byte and tab_offset. */
+static void check_column(const amark_document_t *document, amark_line_id_t line,
+                         uint32_t column, size_t byte, uint32_t tab_offset)
+{
+    size_t got_byte = 99;
+    uint32_t got_offset = 99;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_column_to_byte(document, line, column,
+                                                                      &got_byte, &got_offset));
+    NAOS_CHECK_UINT_EQ(byte, got_byte);
+    NAOS_CHECK_UINT_EQ(tab_offset, got_offset);
+}
+
+/* Checks that byte of line converts to column. */
+static void check_byte(const amark_document_t *document, amark_line_id_t line, size_t byte,
+                       uint32_t column)
+{
+    uint32_t got = 99;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_byte_to_column(document, line, byte, &got));
+    NAOS_CHECK_UINT_EQ(column, got);
+}
+
+NAOS_TEST(columns_inside_a_tab_map_to_the_tab)
+{
+    /* a: 0, tab: 1-3, b: 4, tab: 5-7, tab: 8-11, c: 12; width 13. */
+    static const size_t bytes[14] = {0, 1, 1, 1, 2, 3, 3, 3, 4, 4, 4, 4, 5, 6};
+    static const uint32_t offsets[14] = {0, 0, 1, 2, 0, 0, 1, 2, 0, 1, 2, 3, 0, 0};
+    static const uint32_t columns[7] = {0, 1, 4, 5, 8, 12, 13};
+    amark_document_t *document = new_document();
+    amark_source_id_t source;
+    uint32_t c;
+    size_t b;
+
+    ADD_FINISHED(document, "a\tb\t\tc\n\tx\nabc\tz", &source);
+    NAOS_REQUIRE_UINT_EQ(3, amark_document_line_count(document));
+    check_line(document, 0, 0, 1, 0, 6, AMARK_EOL_LF, 13);
+    for (c = 0; c <= 13; c++)
+    {
+        check_column(document, 0, c, bytes[c], offsets[c]);
+    }
+    for (b = 0; b <= 6; b++)
+    {
+        check_byte(document, 0, b, columns[b]);
+    }
+    /* A tab at the start of the line. */
+    check_column(document, 1, 0, 0, 0);
+    check_column(document, 1, 3, 0, 3);
+    check_column(document, 1, 4, 1, 0);
+    check_byte(document, 1, 1, 4);
+    /* A tab one column wide (at column 3). */
+    check_line(document, 2, 0, 3, 10, 5, AMARK_EOL_NONE, 5);
+    check_column(document, 2, 3, 3, 0);
+    check_column(document, 2, 4, 4, 0);
+    check_byte(document, 2, 3, 3);
+    check_byte(document, 2, 4, 4);
+    /* tab_offset may be NULL. */
+    b = 99;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_column_to_byte(document, 0, 10, &b, NULL));
+    NAOS_CHECK_UINT_EQ(4, b);
+    check_tree_ok(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_width_and_the_length_are_the_last_positions)
+{
+    amark_document_t *document = new_document();
+    amark_source_id_t source;
+    size_t byte = 77;
+    uint32_t offset = 77;
+    uint32_t column = 77;
+
+    ADD_FINISHED(document, "abc\n\n\t\nx\t", &source);
+    NAOS_REQUIRE_UINT_EQ(4, amark_document_line_count(document));
+    /* Without a tab, the columns are the bytes. */
+    check_column(document, 0, 3, 3, 0);
+    check_byte(document, 0, 3, 3);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(document, 0, 4, &byte, &offset));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(document, 0, 4, &column));
+    /* An empty line has only column 0 and byte 0. */
+    check_column(document, 1, 0, 0, 0);
+    check_byte(document, 1, 0, 0);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(document, 1, 1, &byte, &offset));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(document, 1, 1, &column));
+    /* A line that is one tab: width 4, length 1. */
+    check_column(document, 2, 3, 0, 3);
+    check_column(document, 2, 4, 1, 0);
+    check_byte(document, 2, 1, 4);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(document, 2, 5, &byte, &offset));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(document, 2, 2, &column));
+    /* The last line, without a line ending, ends with a tab. */
+    check_column(document, 3, 3, 1, 2);
+    check_column(document, 3, 4, 2, 0);
+    check_byte(document, 3, 2, 4);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(document, 3, UINT32_MAX, &byte, &offset));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(document, 3, SIZE_MAX, &column));
+    /* The failures keep the outputs. */
+    NAOS_CHECK_UINT_EQ(77, byte);
+    NAOS_CHECK_UINT_EQ(77, offset);
+    NAOS_CHECK_UINT_EQ(77, column);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(columns_start_after_the_bom_and_in_each_line)
+{
+    amark_document_t *document = new_document();
+    amark_source_id_t source;
+
+    /* The first line starts after the BOM: the tab is at column 0. */
+    ADD_FINISHED(document, "\xEF\xBB\xBF\tx", &source);
+    check_line(document, 0, 0, 1, 3, 2, AMARK_EOL_NONE, 5);
+    check_column(document, 0, 2, 0, 2);
+    check_column(document, 0, 4, 1, 0);
+    check_byte(document, 0, 1, 4);
+    /* The line after a line without a line ending (the next source) counts
+     * from column 0 too. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, "a\t", 2, 0, &source));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, source, "b", 1));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_finish_source(document, source));
+    check_line(document, 1, 1, 1, 0, 3, AMARK_EOL_NONE, 5);
+    check_column(document, 1, 1, 1, 0);
+    check_column(document, 1, 3, 1, 2);
+    check_column(document, 1, 4, 2, 0);
+    check_byte(document, 1, 2, 4);
+    check_tree_ok(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(invalid_lines_and_outputs_are_rejected)
+{
+    amark_document_t *document = new_document();
+    amark_source_id_t source;
+    size_t byte = 0;
+    uint32_t column = 0;
+
+    ADD_FINISHED(document, "a\tb", &source);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(NULL, 0, 0, &byte, &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(document, 0, 0, NULL, &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(document, 1, 0, &byte, &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_column_to_byte(document, AMARK_LINE_NONE, 0, &byte,
+                                                    &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(NULL, 0, 0, &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(document, 0, 0, NULL));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(document, 1, 0, &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_byte_to_column(document, AMARK_LINE_NONE, 0, &column));
+    /* The rejected calls build no index. */
+    NAOS_CHECK_NULL(document->lines[0].tab_index);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_tab_index_is_built_once_and_only_for_lines_with_tabs)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    amark_tree_tab_t *index;
+    size_t calls_first;
+    size_t calls_again;
+    size_t calls_plain;
+    size_t byte = 0;
+    uint32_t column = 0;
+    int ok = 1;
+
+    use_test_allocator();
+    ok &= amark_document_create(NULL, &document) == AMARK_ERROR_NONE;
+    ok &= amark_document_add_source(document, "a\tb\t\nplain", 10, AMARK_SOURCE_FINISHED,
+                                    &source) == AMARK_ERROR_NONE;
+    (void)amark_allocator_set(NULL);
+    NAOS_REQUIRE_TRUE(ok);
+    NAOS_CHECK_TRUE(document->lines[0].has_tab);
+    NAOS_CHECK_FALSE(document->lines[1].has_tab);
+    NAOS_CHECK_NULL(document->lines[0].tab_index);
+    NAOS_CHECK_NULL(document->lines[1].tab_index);
+
+    (void)amark_allocator_set(amark_test_allocator_activate(&test_allocator));
+    amark_test_allocator_reset_counters(&test_allocator);
+    ok &= amark_document_byte_to_column(document, 0, 2, &column) == AMARK_ERROR_NONE;
+    calls_first = test_allocator.calls;
+    index = document->lines[0].tab_index;
+    ok &= amark_document_column_to_byte(document, 0, 6, &byte, NULL) == AMARK_ERROR_NONE;
+    ok &= amark_document_byte_to_column(document, 0, 4, &column) == AMARK_ERROR_NONE;
+    calls_again = test_allocator.calls - calls_first;
+    ok &= amark_document_column_to_byte(document, 1, 5, &byte, NULL) == AMARK_ERROR_NONE;
+    ok &= amark_document_byte_to_column(document, 1, 2, &column) == AMARK_ERROR_NONE;
+    calls_plain = test_allocator.calls - calls_first - calls_again;
+    (void)amark_allocator_set(NULL);
+    NAOS_CHECK_TRUE(ok);
+    NAOS_CHECK_UINT_EQ(1, calls_first);
+    NAOS_CHECK_UINT_EQ(0, calls_again);
+    NAOS_CHECK_UINT_EQ(0, calls_plain);
+    NAOS_CHECK_NOT_NULL(index);
+    NAOS_CHECK_PTR_EQ(index, document->lines[0].tab_index);
+    NAOS_CHECK_UINT_EQ(2, document->lines[0].tab_count);
+    NAOS_CHECK_NULL(document->lines[1].tab_index);
+    NAOS_CHECK_UINT_EQ(2, column);
+    NAOS_CHECK_UINT_EQ(5, byte);
+    check_tree_ok(document);
+
+    /* The destruction frees the indexes. */
+    (void)amark_allocator_set(amark_test_allocator_activate(&test_allocator));
+    amark_document_destroy(document);
+    (void)amark_allocator_set(NULL);
+    NAOS_CHECK_UINT_EQ(0, test_allocator.live_blocks);
+    NAOS_CHECK_UINT_EQ(0, test_allocator.live_bytes);
+}
+
+/* The conversions on a line whose index cannot be allocated fail with
+ * AMARK_ERROR_OUT_OF_MEMORY and keep the outputs and the line; a later
+ * conversion builds the index. */
+static amark_error_t tab_index_oom_scenario(void *context)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    amark_error_t error;
+    size_t byte = 77;
+    uint32_t offset = 77;
+    uint32_t column = 77;
+
+    (void)context;
+    error = amark_document_create(NULL, &document);
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_document_add_source(document, "x\t\ty\n", 5, AMARK_SOURCE_FINISHED,
+                                          &source);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_document_column_to_byte(document, 0, 6, &byte, &offset);
+        if (error == AMARK_ERROR_NONE ? byte != 2 || offset != 2
+                                      : byte != 77 || offset != 77 ||
+                                            document->lines[0].tab_index != NULL)
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_document_byte_to_column(document, 0, 3, &column);
+        if (error == AMARK_ERROR_NONE && column != 8)
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE && amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE)
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    amark_document_destroy(document);
+    return error;
+}
+
+NAOS_TEST(out_of_memory_in_the_tab_index_changes_nothing)
+{
+    amark_document_t *document = new_document();
+    amark_source_id_t source;
+    size_t byte = 77;
+    uint32_t offset = 77;
+    uint32_t column = 77;
+    amark_error_t first;
+    amark_error_t second;
+
+    ADD_FINISHED(document, "\t\t", &source);
+    use_test_allocator();
+    test_allocator.fail_at = 1;
+    first = amark_document_column_to_byte(document, 0, 5, &byte, &offset);
+    amark_test_allocator_init(&test_allocator);
+    test_allocator.fail_at = 1;
+    second = amark_document_byte_to_column(document, 0, 1, &column);
+    (void)amark_allocator_set(NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY, first);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY, second);
+    NAOS_CHECK_UINT_EQ(77, byte);
+    NAOS_CHECK_UINT_EQ(77, offset);
+    NAOS_CHECK_UINT_EQ(77, column);
+    NAOS_CHECK_NULL(document->lines[0].tab_index);
+    check_tree_ok(document);
+    check_column(document, 0, 5, 1, 1);
+    check_byte(document, 0, 1, 4);
+    check_tree_ok(document);
+    amark_document_destroy(document);
+    AMARK_CHECK_OOM_SWEEP(tab_index_oom_scenario, NULL);
+}
+
+/* ---- Lines added without division (CopyImport) ------------------------------------- */
+
+NAOS_TEST(given_lines_keep_a_line_without_line_ending_before_another)
+{
+    static const amark_tree_line_range_t ranges[] = {
+        {0, 2, AMARK_EOL_NONE},
+        {2, 3, AMARK_EOL_LF},
+        {5, 1, AMARK_EOL_NONE},
+    };
+    amark_document_t *document = new_document();
+    amark_source_id_t source = 99;
+    const char *data = NULL;
+    size_t length = 0;
+    bool has_bom = true;
+
+    ADD_FINISHED(document, "first\r", &source);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_line_table_append_lines(document, "ab\tcdz", 6, ranges, 3,
+                                                      &source));
+    NAOS_CHECK_UINT_EQ(1, source);
+    NAOS_CHECK_UINT_EQ(2, amark_document_source_count(document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_source_data(document, 1, &data, &length, &has_bom));
+    NAOS_REQUIRE_UINT_EQ(7, length);
+    NAOS_CHECK_TRUE(memcmp(data, "ab\tcd\nz", 7) == 0);
+    NAOS_CHECK_FALSE(has_bom);
+    NAOS_REQUIRE_UINT_EQ(4, amark_document_line_count(document));
+    check_line(document, 1, 1, 1, 0, 2, AMARK_EOL_NONE, 2);
+    check_line(document, 2, 1, 2, 2, 3, AMARK_EOL_LF, 6);
+    check_line(document, 3, 1, 3, 6, 1, AMARK_EOL_NONE, 1);
+    /* The line after the line without a line ending counts its own columns. */
+    check_column(document, 2, 3, 0, 3);
+    check_column(document, 2, 5, 2, 0);
+    check_byte(document, 2, 1, 4);
+    NAOS_CHECK_INT_EQ(AMARK_EOL_CR, amark_document_default_eol(document));
+    /* The source is finished. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_STATE,
+                      amark_document_append_source(document, source, "x", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_STATE, amark_document_finish_source(document, source));
+    check_tree_ok(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(given_lines_keep_an_empty_lf_line_after_a_cr_line)
+{
+    /* The ranges need not cover the bytes, nor follow their order. */
+    static const amark_tree_line_range_t ranges[] = {
+        {4, 1, AMARK_EOL_CR},
+        {0, 0, AMARK_EOL_LF},
+        {1, 2, AMARK_EOL_CRLF},
+    };
+    amark_document_t *document = new_document();
+    amark_source_id_t source = 99;
+    const char *data = NULL;
+    size_t length = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_line_table_append_lines(document, "-bc-x", 5, ranges, 3, &source));
+    NAOS_CHECK_UINT_EQ(0, source);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_source_data(document, 0, &data, &length, NULL));
+    NAOS_REQUIRE_UINT_EQ(7, length);
+    /* Divided again, these bytes would make a CRLF line. */
+    NAOS_CHECK_TRUE(memcmp(data, "x\r\nbc\r\n", 7) == 0);
+    NAOS_REQUIRE_UINT_EQ(3, amark_document_line_count(document));
+    check_line(document, 0, 0, 1, 0, 1, AMARK_EOL_CR, 1);
+    check_line(document, 1, 0, 2, 2, 0, AMARK_EOL_LF, 0);
+    check_line(document, 2, 0, 3, 3, 2, AMARK_EOL_CRLF, 2);
+    NAOS_CHECK_INT_EQ(AMARK_EOL_CR, amark_document_default_eol(document));
+    check_column(document, 1, 0, 0, 0);
+    check_tree_ok(document);
+    /* No lines: an empty finished source. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_line_table_append_lines(document, NULL, 0, NULL, 0, &source));
+    NAOS_CHECK_UINT_EQ(1, source);
+    NAOS_CHECK_UINT_EQ(3, amark_document_line_count(document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_source_data(document, 1, &data, &length, NULL));
+    NAOS_CHECK_UINT_EQ(0, length);
+    check_tree_ok(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(invalid_given_lines_add_nothing)
+{
+    static const amark_tree_line_range_t good[] = {{0, 1, AMARK_EOL_LF}};
+    static const amark_tree_line_range_t outside[] = {{0, 1, AMARK_EOL_LF}, {3, 2, AMARK_EOL_LF}};
+    static const amark_tree_line_range_t past[] = {{5, 0, AMARK_EOL_LF}};
+    static const amark_tree_line_range_t huge[] = {{1, SIZE_MAX, AMARK_EOL_LF}};
+    static const amark_tree_line_range_t no_eol[] = {{0, 1, 0}};
+    static const amark_tree_line_range_t bad_eol[] = {{0, 1, AMARK_EOL_CR + 1}};
+    static const amark_tree_line_range_t holds_lf[] = {{0, 1, AMARK_EOL_NONE}, {0, 3, AMARK_EOL_NONE}};
+    static const amark_tree_line_range_t holds_cr[] = {{3, 2, AMARK_EOL_LF}};
+    amark_document_t *document = new_document();
+    amark_source_id_t source = 99;
+
+    ADD_FINISHED(document, "keep\n", &source);
+    source = 99;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(NULL, "ab\ncd", 4, good, 1, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, good, 1, NULL));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, NULL, 4, good, 1, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, NULL, 1, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, outside, 2, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, past, 1, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, huge, 1, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, no_eol, 1, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, bad_eol, 1, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\ncd", 4, holds_lf, 2, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_line_table_append_lines(document, "ab\nc\rd", 6, holds_cr, 1,
+                                                    &source));
+    NAOS_CHECK_UINT_EQ(99, source);
+    NAOS_CHECK_UINT_EQ(1, amark_document_source_count(document));
+    NAOS_CHECK_UINT_EQ(1, amark_document_line_count(document));
+    check_tree_ok(document);
+    amark_document_destroy(document);
+}
+
+/* Every allocation of the internal addition fails in turn: each failure adds
+ * no source and no line, and leaks nothing. */
+static amark_error_t given_lines_oom_scenario(void *context)
+{
+    static const amark_tree_line_range_t ranges[] = {
+        {0, 2, AMARK_EOL_NONE}, {2, 2, AMARK_EOL_CR}, {4, 0, AMARK_EOL_LF},
+        {4, 3, AMARK_EOL_CRLF}, {0, 7, AMARK_EOL_LF}, {1, 1, AMARK_EOL_NONE},
+        {2, 0, AMARK_EOL_LF}, {3, 1, AMARK_EOL_CR}, {5, 2, AMARK_EOL_LF},
+        {6, 1, AMARK_EOL_LF},
+    };
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    amark_error_t error;
+    state_t before;
+    size_t i;
+
+    (void)context;
+    error = amark_document_create(NULL, &document);
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_document_add_source(document, "a\tb\n", 4, AMARK_SOURCE_FINISHED, &source);
+    }
+    for (i = 0; i < 4 && error == AMARK_ERROR_NONE; i++)
+    {
+        before = state_of(document, 0);
+        error = amark_line_table_append_lines(document, "ab\tcdef", 7, ranges,
+                                              sizeof(ranges) / sizeof(ranges[0]) - i, &source);
+        if (error != AMARK_ERROR_NONE && !same_state(document, 0, before))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE && (document->source_count != 5 || document->line_count != 35))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    amark_document_destroy(document);
+    return error;
+}
+
+NAOS_TEST(out_of_memory_in_given_lines_adds_nothing)
+{
+    AMARK_CHECK_OOM_SWEEP(given_lines_oom_scenario, NULL);
+}
+
 /* ---- The internal check of the line table ---------------------------------------- */
 
 static void check_lines_violation(amark_document_t *document)
@@ -786,6 +1263,74 @@ NAOS_TEST(the_check_detects_a_broken_line_table)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(the_check_detects_a_broken_tab_index_or_given_lines)
+{
+    static const amark_tree_line_range_t ranges[] = {
+        {0, 1, AMARK_EOL_NONE}, {1, 1, AMARK_EOL_CR}, {2, 0, AMARK_EOL_LF},
+    };
+    amark_document_t *document = new_document();
+    amark_source_id_t source;
+    amark_tree_tab_t saved_tab;
+    amark_tree_tab_t *saved_index;
+    uint32_t column;
+
+    ADD_FINISHED(document, "a\tb\t\nc", &source);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_byte_to_column(document, 0, 1, &column));
+    NAOS_REQUIRE_NOT_NULL(document->lines[0].tab_index);
+    check_tree_ok(document);
+
+    /* A tab with a wrong position or column, a wrong count of tabs. */
+    saved_tab = document->lines[0].tab_index[1];
+    document->lines[0].tab_index[1].byte = 2;
+    check_lines_violation(document);
+    document->lines[0].tab_index[1] = saved_tab;
+    document->lines[0].tab_index[1].column = 3;
+    check_lines_violation(document);
+    document->lines[0].tab_index[1] = saved_tab;
+    document->lines[0].tab_count = 1;
+    check_lines_violation(document);
+    document->lines[0].tab_count = 2;
+    /* The mark of the tabs does not match the bytes. */
+    document->lines[1].has_tab = true;
+    check_lines_violation(document);
+    document->lines[1].has_tab = false;
+    saved_index = document->lines[0].tab_index;
+    document->lines[0].tab_index = NULL;
+    document->lines[0].has_tab = false;
+    check_lines_violation(document);
+    document->lines[0].has_tab = true;
+    /* An index on a line without a tab. */
+    document->lines[1].tab_index = saved_index;
+    document->lines[1].tab_count = 2;
+    check_lines_violation(document);
+    document->lines[1].tab_index = NULL;
+    document->lines[1].tab_count = 0;
+    document->lines[0].tab_index = saved_index;
+    check_tree_ok(document);
+
+    /* Given lines: a line without a line ending and an LF line after a CR line
+     * are valid only there. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_line_table_append_lines(document, "xy", 2, ranges, 3, &source));
+    check_tree_ok(document);
+    document->sources[source].given_lines = false;
+    check_lines_violation(document);
+    document->sources[source].given_lines = true;
+    /* Given lines are finished and have no BOM. */
+    document->sources[source].finished = false;
+    check_lines_violation(document);
+    document->sources[source].finished = true;
+    document->sources[source].has_bom = true;
+    check_lines_violation(document);
+    document->sources[source].has_bom = false;
+    /* The bytes of the line endings still match. */
+    document->lines[3].eol = AMARK_EOL_LF;
+    check_lines_violation(document);
+    document->lines[3].eol = AMARK_EOL_CR;
+    check_tree_ok(document);
+    amark_document_destroy(document);
+}
+
 NAOS_TEARDOWN(restore_allocator)
 {
     (void)amark_allocator_set(NULL);
@@ -808,7 +1353,18 @@ NAOS_SUITE(line_table,
     NAOS_ADD_TEST(invalid_arguments_change_nothing),
     NAOS_ADD_TEST(destroy_frees_the_sources_and_the_lines),
     NAOS_ADD_TEST(out_of_memory_leaves_the_line_table_unchanged),
-    NAOS_ADD_TEST(the_check_detects_a_broken_line_table)
+    NAOS_ADD_TEST(columns_inside_a_tab_map_to_the_tab),
+    NAOS_ADD_TEST(the_width_and_the_length_are_the_last_positions),
+    NAOS_ADD_TEST(columns_start_after_the_bom_and_in_each_line),
+    NAOS_ADD_TEST(invalid_lines_and_outputs_are_rejected),
+    NAOS_ADD_TEST(the_tab_index_is_built_once_and_only_for_lines_with_tabs),
+    NAOS_ADD_TEST(out_of_memory_in_the_tab_index_changes_nothing),
+    NAOS_ADD_TEST(given_lines_keep_a_line_without_line_ending_before_another),
+    NAOS_ADD_TEST(given_lines_keep_an_empty_lf_line_after_a_cr_line),
+    NAOS_ADD_TEST(invalid_given_lines_add_nothing),
+    NAOS_ADD_TEST(out_of_memory_in_given_lines_adds_nothing),
+    NAOS_ADD_TEST(the_check_detects_a_broken_line_table),
+    NAOS_ADD_TEST(the_check_detects_a_broken_tab_index_or_given_lines)
 )
 
 NAOS_MAIN(

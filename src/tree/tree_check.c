@@ -355,7 +355,8 @@ static bool check_lines(check_context_t *context)
         if (source->length > source->capacity || source->line_count > source->line_capacity ||
             (!source->bom_known && (source->has_bom || source->line_count > 0)) ||
             (source->has_bom && (source->length < 3 ||
-                                 memcmp(source->data, "\xEF\xBB\xBF", 3) != 0)))
+                                 memcmp(source->data, "\xEF\xBB\xBF", 3) != 0)) ||
+            (source->given_lines && (!source->finished || !source->bom_known || source->has_bom)))
         {
             return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
                         "a source has an inconsistent size or BOM");
@@ -366,6 +367,7 @@ static bool check_lines(check_context_t *context)
             const amark_tree_line_t *line;
             uint64_t width = 0;
             size_t eol_length;
+            uint32_t tabs = 0;
             size_t b;
 
             if (id >= document->line_count || (k > 0 && id <= source->lines[k - 1]))
@@ -396,19 +398,41 @@ static bool check_lines(check_context_t *context)
                     return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
                                 "a line holds a line ending");
                 }
+                if (c == '\t')
+                {
+                    /* The index, when built, lists every tab in order. */
+                    if (line->tab_index != NULL &&
+                        (tabs >= line->tab_count || line->tab_index[tabs].byte != b ||
+                         line->tab_index[tabs].column != width))
+                    {
+                        return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                                    "the index of the tabs of a line does not list its tabs");
+                    }
+                    tabs++;
+                }
                 width += c == '\t' ? 4 - width % 4 : 1;
             }
+            if (line->has_tab != (tabs > 0) ||
+                (line->tab_index != NULL ? line->tab_count != tabs : line->tab_count != 0))
+            {
+                return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                            "the index of the tabs of a line does not list its tabs");
+            }
             offset += line->length;
+            /* Given lines (amark_line_table_append_lines) are not the
+             * division of their bytes: a line without a line ending may come
+             * before another, and a CR line before a line that starts with
+             * LF. */
             if (width != line->width ||
-                (line->eol == AMARK_EOL_NONE &&
+                (line->eol == AMARK_EOL_NONE && !source->given_lines &&
                  (!source->finished || k + 1 != source->line_count ||
                   offset != source->length)) ||
                 (line->eol == AMARK_EOL_LF && source->data[offset] != '\n') ||
                 (line->eol != AMARK_EOL_NONE && line->eol != AMARK_EOL_LF &&
                  source->data[offset] != '\r') ||
                 (line->eol == AMARK_EOL_CRLF && source->data[offset + 1] != '\n') ||
-                (line->eol == AMARK_EOL_CR && offset + 1 < source->length &&
-                 source->data[offset + 1] == '\n'))
+                (line->eol == AMARK_EOL_CR && !source->given_lines &&
+                 offset + 1 < source->length && source->data[offset + 1] == '\n'))
             {
                 return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
                             "a line has a wrong width or line ending");

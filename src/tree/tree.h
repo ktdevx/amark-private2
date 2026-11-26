@@ -182,6 +182,14 @@ void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind);
  * AMARK_LINE_NONE). */
 #define AMARK_TREE_MAX_LINES ((size_t)UINT32_MAX - 1u)
 
+/* A tab of a line, in the index of the tabs of the line: its position in the
+ * line and its first column. */
+typedef struct amark_tree_tab
+{
+    uint32_t byte;
+    uint32_t column;
+} amark_tree_tab_t;
+
 /* A completed line of the line table (amark_line_info_t without the size). */
 typedef struct amark_tree_line
 {
@@ -190,7 +198,15 @@ typedef struct amark_tree_line
     size_t offset;
     size_t length;
     uint8_t eol; /* amark_eol_t */
+    /* Whether the line holds a tab (set when the line is completed). */
+    bool has_tab;
     uint32_t width;
+    /* The index of the tabs of the line, in order (tab_count entries), built by
+     * the first conversion between columns and bytes on a line that has a tab;
+     * NULL before, and always for a line without a tab. A line is shorter than
+     * 4 GiB (its width is at most UINT32_MAX), so the positions fit in 32 bits. */
+    amark_tree_tab_t *tab_index;
+    uint32_t tab_count;
 } amark_tree_line_t;
 
 /*
@@ -210,12 +226,19 @@ typedef struct amark_tree_source
     bool has_bom;
     /* The input has ended (AMARK_SOURCE_FINISHED, amark_document_finish_source). */
     bool finished;
+    /* The lines were given with the bytes (amark_line_table_append_lines), not
+     * found by dividing them: a line without a line ending may be followed by
+     * another line, and a CR line by a line whose bytes start with LF. Such a
+     * source is finished and has no BOM. */
+    bool given_lines;
     /* The unfinished line: its first byte, the end of the bytes already looked
      * at (a CR at the end of data waits there for the next byte), and the width
      * of the bytes before that end. */
     size_t line_start;
     size_t scanned;
     uint64_t width;
+    /* Whether the bytes before that end hold a tab. */
+    bool has_tab;
     /* The identifiers of the lines of the source, in order (lines[k] has the
      * number k + 1). */
     amark_line_id_t *lines;
@@ -228,6 +251,34 @@ void amark_line_table_deinit(amark_document_t *document);
 
 /* The number of bytes of a line ending (0 for AMARK_EOL_NONE). */
 size_t amark_line_table_eol_length(uint8_t eol);
+
+/* A line given to amark_line_table_append_lines: the range of its bytes in the
+ * given bytes (without the line ending) and its line ending. */
+typedef struct amark_tree_line_range
+{
+    size_t offset;
+    size_t length;
+    uint8_t eol; /* amark_eol_t */
+} amark_tree_line_range_t;
+
+/*
+ * Adds to document one new finished source made of the count given lines, in
+ * order, without dividing its bytes again (CopyImport): line k is the bytes
+ * bytes[ranges[k].offset, + ranges[k].length) followed by the bytes of its line
+ * ending ranges[k].eol (none, LF, CRLF or CR), and gets the next identifier of
+ * the line table and the number k + 1 in the source. So a line without a line
+ * ending may be followed by another line, and a CR line by an empty LF line;
+ * the new source has no BOM. The identifier of the source goes to *out; its
+ * first line is the line count of the table before the call.
+ * AMARK_ERROR_INVALID_ARGUMENT for a NULL document or out, NULL bytes with a
+ * length, NULL ranges with a count, a range outside the bytes, an unknown line
+ * ending and a range that holds a CR or an LF; AMARK_ERROR_LIMIT_EXCEEDED and
+ * AMARK_ERROR_OVERFLOW as for amark_document_add_source;
+ * AMARK_ERROR_OUT_OF_MEMORY. On failure nothing is added.
+ */
+amark_error_t amark_line_table_append_lines(amark_document_t *document, const char *bytes,
+                                            size_t length, const amark_tree_line_range_t *ranges,
+                                            size_t count, amark_source_id_t *out);
 
 /* ---- Document (document.c) ------------------------------------------------- */
 
@@ -302,8 +353,9 @@ typedef enum amark_tree_violation
     AMARK_TREE_VIOLATION_CACHE,
     /* The sources and the line table: the lines of a source are not the
      * division of its bytes in order (offsets, ranges, line endings, widths,
-     * numbers, identifiers), or the default line ending is not the one of the
-     * first line that has one. */
+     * numbers, identifiers; for given lines, their sequence), the index of the
+     * tabs of a line does not list its tabs, or the default line ending is not
+     * the one of the first line that has one. */
     AMARK_TREE_VIOLATION_LINES
 } amark_tree_violation_t;
 

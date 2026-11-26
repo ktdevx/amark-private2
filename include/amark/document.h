@@ -67,7 +67,7 @@ AMARK_API amark_error_t amark_document_take_syntax_set(amark_document_t *documen
 /* ---- Sources and lines ------------------------------------------------------- */
 
 /*
- * The sources and the line table (2.1, 2.2, 2.4-2.8):
+ * The sources and the line table (2.1-2.8):
  *   - A document copies the bytes of each source it is given and keeps them for
  *     its whole life (1.4). The sources get the identifiers 0, 1, ... in the
  *     order of registration.
@@ -173,6 +173,38 @@ AMARK_API size_t amark_document_line_count(const amark_document_t *document);
  */
 AMARK_API amark_error_t amark_document_line(const amark_document_t *document,
                                             amark_line_id_t line, amark_line_info_t *out);
+
+/*
+ * Columns and bytes (2.3): the columns of a line count from 0 at its first byte
+ * (after the BOM for the first line of a source); a tab advances to the next
+ * multiple of 4, every other byte is one column. The bytes are positions in the
+ * line, from 0 at its first byte. The column and the byte at the end of the line
+ * (the width and the length) are valid positions.
+ *
+ * Converts column of line to the byte that holds it in *byte: the position of
+ * the byte whose columns contain column (the length of the line for the width).
+ * When column is inside a tab, *byte is the position of that tab and
+ * *tab_offset the columns of the tab before column; otherwise *tab_offset is
+ * 0. tab_offset may be NULL. AMARK_ERROR_INVALID_ARGUMENT for a NULL document
+ * or byte, a line not in the table and a column past the width of the line;
+ * AMARK_ERROR_OUT_OF_MEMORY when the index of the tabs of the line, built by
+ * the first conversion on a line that has a tab, cannot be allocated. On
+ * failure the outputs are unchanged.
+ */
+AMARK_API amark_error_t amark_document_column_to_byte(const amark_document_t *document,
+                                                      amark_line_id_t line, uint32_t column,
+                                                      size_t *byte, uint32_t *tab_offset);
+
+/*
+ * Converts byte of line to its first column in *column (the width of the line
+ * for its length; the first column of the tab for a tab).
+ * AMARK_ERROR_INVALID_ARGUMENT for a NULL document or column, a line not in the
+ * table and a byte past the length of the line; AMARK_ERROR_OUT_OF_MEMORY as
+ * for amark_document_column_to_byte. On failure *column is unchanged.
+ */
+AMARK_API amark_error_t amark_document_byte_to_column(const amark_document_t *document,
+                                                      amark_line_id_t line, size_t byte,
+                                                      uint32_t *column);
 
 /*
  * The default line ending of document: the line ending of the first line of the

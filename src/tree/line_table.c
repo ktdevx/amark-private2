@@ -11,6 +11,11 @@
  * copy of the state counts the lines the bytes complete, so that all the
  * memory is reserved before anything changes (1.7); then the same scan on the
  * real state records them. Both passes run the same code, so they agree.
+ *
+ * The conversions between columns and bytes use, on a line that has a tab, an
+ * index of its tabs (position and first column) built by the first conversion
+ * and searched by bisection; a line without a tab needs none (its columns are
+ * its bytes).
  */
 #include "tree/tree.h"
 
@@ -71,6 +76,7 @@ typedef struct scan_state
     size_t line_start;
     size_t scanned;
     uint64_t width;
+    bool has_tab;
 } scan_state_t;
 
 /* Where the completed lines go: counted (dry scan) or recorded (commit). */
@@ -108,7 +114,10 @@ static void emit(line_sink_t *sink, const scan_state_t *state, size_t end, amark
     line->offset = state->line_start;
     line->length = end - state->line_start;
     line->eol = (uint8_t)eol;
+    line->has_tab = state->has_tab;
     line->width = (uint32_t)state->width;
+    line->tab_index = NULL;
+    line->tab_count = 0;
     sink->source->lines[sink->source->line_count++] = id;
     if (document->default_eol == 0 && eol != AMARK_EOL_NONE)
     {
@@ -140,6 +149,7 @@ static void scan(const char *data, size_t length, bool finish, scan_state_t *sta
         state->line_start = state->has_bom ? sizeof(bom) : 0;
         state->scanned = state->line_start;
         state->width = 0;
+        state->has_tab = false;
     }
     while (state->scanned < length)
     {
@@ -168,7 +178,12 @@ static void scan(const char *data, size_t length, bool finish, scan_state_t *sta
             state->line_start = next;
             state->scanned = next;
             state->width = 0;
+            state->has_tab = false;
             continue;
+        }
+        if (c == '\t')
+        {
+            state->has_tab = true;
         }
         state->width += c == '\t' ? 4 - state->width % 4 : 1;
         state->scanned++;
@@ -178,6 +193,7 @@ static void scan(const char *data, size_t length, bool finish, scan_state_t *sta
         emit(sink, state, length, AMARK_EOL_NONE);
         state->line_start = length;
         state->width = 0;
+        state->has_tab = false;
     }
 }
 
@@ -190,6 +206,7 @@ static scan_state_t state_of(const amark_tree_source_t *source)
     state.line_start = source->line_start;
     state.scanned = source->scanned;
     state.width = source->width;
+    state.has_tab = source->has_tab;
     return state;
 }
 
@@ -261,6 +278,7 @@ static amark_error_t feed(amark_document_t *document, amark_tree_source_t *sourc
     source->line_start = state.line_start;
     source->scanned = state.scanned;
     source->width = state.width;
+    source->has_tab = state.has_tab;
     source->finished = finish;
     return AMARK_ERROR_NONE;
 }
@@ -295,6 +313,10 @@ void amark_line_table_deinit(amark_document_t *document)
     {
         source_deinit(&document->sources[i]);
     }
+    for (i = 0; i < document->line_count; i++)
+    {
+        amark_free(document->lines[i].tab_index);
+    }
     amark_free(document->sources);
     amark_free(document->lines);
     document->sources = NULL;
@@ -318,6 +340,224 @@ size_t amark_line_table_eol_length(uint8_t eol)
     default:
         return 0;
     }
+}
+
+amark_error_t amark_line_table_append_lines(amark_document_t *document, const char *bytes,
+                                            size_t length, const amark_tree_line_range_t *ranges,
+                                            size_t count, amark_source_id_t *out)
+{
+    static const char eol_bytes[] = "\r\n";
+    amark_tree_source_t source;
+    amark_source_id_t id;
+    amark_error_t error;
+    void *block;
+    size_t total = 0;
+    size_t k;
+
+    if (document == NULL || out == NULL || (bytes == NULL && length > 0) ||
+        (ranges == NULL && count > 0))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    /* The checks, and the size of the new source. */
+    for (k = 0; k < count; k++)
+    {
+        const amark_tree_line_range_t *range = &ranges[k];
+        size_t eol_length = amark_line_table_eol_length(range->eol);
+        uint64_t width = 0;
+        size_t b;
+
+        if (range->eol < AMARK_EOL_NONE || range->eol > AMARK_EOL_CR ||
+            range->offset > length || range->length > length - range->offset)
+        {
+            return AMARK_ERROR_INVALID_ARGUMENT;
+        }
+        for (b = range->offset; b < range->offset + range->length; b++)
+        {
+            if (bytes[b] == '\n' || bytes[b] == '\r')
+            {
+                return AMARK_ERROR_INVALID_ARGUMENT;
+            }
+            width += bytes[b] == '\t' ? 4 - width % 4 : 1;
+        }
+        if (width > UINT32_MAX)
+        {
+            return AMARK_ERROR_LIMIT_EXCEEDED;
+        }
+        if (range->length > SIZE_MAX - total || eol_length > SIZE_MAX - total - range->length)
+        {
+            return AMARK_ERROR_OVERFLOW;
+        }
+        total += range->length + eol_length;
+    }
+    if (document->source_count >= UINT32_MAX ||
+        count > AMARK_TREE_MAX_LINES - document->line_count)
+    {
+        return AMARK_ERROR_LIMIT_EXCEEDED;
+    }
+
+    /* All the memory, before any change. */
+    memset(&source, 0, sizeof(source));
+    error = reserve(document->sources, &document->source_capacity, document->source_count + 1,
+                    sizeof(amark_tree_source_t), &block);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    document->sources = (amark_tree_source_t *)block;
+    error = reserve(document->lines, &document->line_capacity, document->line_count + count,
+                    sizeof(amark_tree_line_t), &block);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    document->lines = (amark_tree_line_t *)block;
+    error = reserve(NULL, &source.capacity, total, 1, &block);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    source.data = (char *)block;
+    error = reserve(NULL, &source.line_capacity, count, sizeof(amark_line_id_t), &block);
+    if (error != AMARK_ERROR_NONE)
+    {
+        source_deinit(&source);
+        return error;
+    }
+    source.lines = (amark_line_id_t *)block;
+
+    /* The commit. */
+    id = (amark_source_id_t)document->source_count;
+    for (k = 0; k < count; k++)
+    {
+        const amark_tree_line_range_t *range = &ranges[k];
+        amark_tree_line_t *line = &document->lines[document->line_count];
+        size_t eol_length = amark_line_table_eol_length(range->eol);
+        uint64_t width = 0;
+        bool has_tab = false;
+        size_t b;
+
+        for (b = range->offset; b < range->offset + range->length; b++)
+        {
+            has_tab = has_tab || bytes[b] == '\t';
+            width += bytes[b] == '\t' ? 4 - width % 4 : 1;
+        }
+        if (range->length > 0)
+        {
+            memcpy(source.data + source.length, bytes + range->offset, range->length);
+        }
+        line->source = id;
+        line->number = (uint32_t)(k + 1);
+        line->offset = source.length;
+        line->length = range->length;
+        line->eol = range->eol;
+        line->has_tab = has_tab;
+        line->width = (uint32_t)width;
+        line->tab_index = NULL;
+        line->tab_count = 0;
+        source.length += range->length;
+        if (eol_length > 0)
+        {
+            /* CR, LF or CR LF. */
+            memcpy(source.data + source.length, eol_bytes + (range->eol == AMARK_EOL_LF),
+                   eol_length);
+        }
+        source.length += eol_length;
+        source.lines[source.line_count++] = (amark_line_id_t)document->line_count;
+        document->line_count++;
+        if (document->default_eol == 0 && range->eol != AMARK_EOL_NONE)
+        {
+            document->default_eol = range->eol;
+        }
+    }
+    source.bom_known = true;
+    source.finished = true;
+    source.given_lines = true;
+    source.line_start = source.length;
+    source.scanned = source.length;
+    document->sources[document->source_count++] = source;
+    *out = id;
+    return AMARK_ERROR_NONE;
+}
+
+/* ---- Columns and bytes ------------------------------------------------------------- */
+
+/*
+ * The index of the tabs of line (identifier id) of document, built on the first
+ * call: NULL for a line without a tab. AMARK_ERROR_OUT_OF_MEMORY leaves the line
+ * without an index.
+ */
+static amark_error_t tab_index_of(amark_document_t *document, amark_line_id_t id,
+                                  const amark_tree_line_t **out)
+{
+    amark_tree_line_t *line = &document->lines[id];
+    const char *data;
+    amark_tree_tab_t *index;
+    uint32_t count = 0;
+    uint32_t width = 0;
+    size_t b;
+
+    *out = line;
+    if (!line->has_tab || line->tab_index != NULL)
+    {
+        return AMARK_ERROR_NONE;
+    }
+    data = document->sources[line->source].data + line->offset;
+    for (b = 0; b < line->length; b++)
+    {
+        if (data[b] == '\t')
+        {
+            count++;
+        }
+    }
+    /* amark_calloc fails when the size overflows (a 32-bit size_t). */
+    index = (amark_tree_tab_t *)amark_calloc(count, sizeof(amark_tree_tab_t));
+    if (index == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    count = 0;
+    for (b = 0; b < line->length; b++)
+    {
+        if (data[b] == '\t')
+        {
+            index[count].byte = (uint32_t)b;
+            index[count].column = width;
+            count++;
+            width += 4 - width % 4;
+        }
+        else
+        {
+            width++;
+        }
+    }
+    line->tab_index = index;
+    line->tab_count = count;
+    return AMARK_ERROR_NONE;
+}
+
+/* The number of tabs of line whose key (the column when by_column, otherwise
+ * the byte) is at most value. */
+static uint32_t tabs_up_to(const amark_tree_line_t *line, uint64_t value, bool by_column)
+{
+    uint32_t low = 0;
+    uint32_t high = line->tab_count;
+
+    while (low < high)
+    {
+        uint32_t middle = low + (high - low) / 2;
+        const amark_tree_tab_t *tab = &line->tab_index[middle];
+
+        if ((by_column ? tab->column : tab->byte) <= value)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    return low;
 }
 
 /* ---- Public functions ------------------------------------------------------------- */
@@ -439,6 +679,91 @@ amark_error_t amark_document_line(const amark_document_t *document, amark_line_i
     out->length = entry->length;
     out->eol = (amark_eol_t)entry->eol;
     out->width = entry->width;
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_document_column_to_byte(const amark_document_t *document,
+                                           amark_line_id_t line, uint32_t column, size_t *byte,
+                                           uint32_t *tab_offset)
+{
+    const amark_tree_line_t *entry;
+    const amark_tree_tab_t *tab;
+    amark_error_t error;
+    uint32_t n;
+    uint32_t tab_end;
+
+    if (document == NULL || byte == NULL || line >= document->line_count ||
+        column > document->lines[line].width)
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    /* The index is an internal cache: the document is not changed. */
+    error = tab_index_of((amark_document_t *)document, line, &entry);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    n = tabs_up_to(entry, column, true);
+    if (n == 0)
+    {
+        /* Before the first tab, the columns are the bytes. */
+        *byte = column;
+        if (tab_offset != NULL)
+        {
+            *tab_offset = 0;
+        }
+        return AMARK_ERROR_NONE;
+    }
+    tab = &entry->tab_index[n - 1];
+    tab_end = tab->column + 4 - tab->column % 4;
+    if (column < tab_end)
+    {
+        *byte = tab->byte;
+        if (tab_offset != NULL)
+        {
+            *tab_offset = column - tab->column;
+        }
+        return AMARK_ERROR_NONE;
+    }
+    *byte = (size_t)tab->byte + 1 + (column - tab_end);
+    if (tab_offset != NULL)
+    {
+        *tab_offset = 0;
+    }
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_document_byte_to_column(const amark_document_t *document,
+                                           amark_line_id_t line, size_t byte, uint32_t *column)
+{
+    const amark_tree_line_t *entry;
+    const amark_tree_tab_t *tab;
+    amark_error_t error;
+    uint32_t n;
+
+    if (document == NULL || column == NULL || line >= document->line_count ||
+        byte > document->lines[line].length)
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    error = tab_index_of((amark_document_t *)document, line, &entry);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    n = tabs_up_to(entry, byte, false);
+    if (n == 0)
+    {
+        *column = (uint32_t)byte;
+        return AMARK_ERROR_NONE;
+    }
+    tab = &entry->tab_index[n - 1];
+    if (tab->byte == byte)
+    {
+        *column = tab->column;
+        return AMARK_ERROR_NONE;
+    }
+    *column = tab->column + 4 - tab->column % 4 + (uint32_t)(byte - tab->byte - 1);
     return AMARK_ERROR_NONE;
 }
 
