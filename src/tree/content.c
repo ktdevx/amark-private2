@@ -3,7 +3,8 @@
 
 /*
  * Content: the content objects, the materialization of placed content, the
- * content tokens, moving and splitting, and the replacement of the content.
+ * content tokens, moving and splitting, the edits of the lines at the block
+ * stage (moving, removing, trimming) and the copy of shared content.
  *
  * A leaf owns its content object (amark_node_t.content); the object counts its
  * owners and its bases separately and is freed when both reach 0. Laid content
@@ -18,6 +19,16 @@
  * on. Tokens are appended in the order of the content and checked against its
  * bytes; moving and splitting keep that order. The tokens of a node keep their
  * base when the leaf gets another content or the node moves to another leaf.
+ *
+ * Copy on write: an object is copied before a leaf changes it only when it is
+ * shared. Appending keeps the bytes already there, so it copies only for
+ * another owner; moving, removing and trimming lines move the existing bytes,
+ * so they copy for another owner or for any base (at the block stage the leaf
+ * and its descendants have no tokens, so a base is another node). The copy
+ * becomes the content of the leaf, the tokens of the leaf and its descendants on
+ * the old object move to it, and the other nodes keep the old object
+ * unchanged. Unshared content is changed in place, so recording line by line
+ * stays linear in the records (14.6).
  */
 #include "tree/tree.h"
 
@@ -184,14 +195,168 @@ static amark_error_t shape_piece(const amark_document_t *document, amark_line_id
     return AMARK_ERROR_NONE;
 }
 
+/* The number of bytes of a piece of that shape. A line is shorter than 4 GiB, so
+ * the sum cannot overflow. */
+static size_t shape_length(const piece_shape_t *shape)
+{
+    return (size_t)shape->lead + shape->body_length + (size_t)shape->trail;
+}
+
+/* Writes the bytes of the piece of line of that shape at out and returns the end
+ * of what it wrote (no NUL). */
+static char *write_piece(const amark_document_t *document, amark_line_id_t line,
+                         const piece_shape_t *shape, char *out)
+{
+    const amark_tree_line_t *entry = &document->lines[line];
+    const char *data = document->sources[entry->source].data;
+
+    memset(out, ' ', shape->lead);
+    out += shape->lead;
+    if (shape->body_length > 0)
+    {
+        memcpy(out, data + entry->offset + shape->body, shape->body_length);
+        out += shape->body_length;
+    }
+    memset(out, ' ', shape->trail);
+    return out + shape->trail;
+}
+
+/* ---- Copy on write ---------------------------------------------------------------------- */
+
+/* Whether content must be copied before an edit that moves or changes its
+ * existing bytes (moving, removing, trimming): another leaf owns it, or a node
+ * has tokens on it. (Appending only needs a copy when another leaf owns it.) */
+static bool shared_for_change(const amark_tree_content_t *content)
+{
+    return (content->owners >= 2) || (content->bases >= 1);
+}
+
+/*
+ * Makes the laid content dst the count pieces of src from first on (count >= 1):
+ * their bytes as they are in src (the virtual LFs between them included),
+ * shifted to start at 0, and their line count. dst has the room for them; dst
+ * may be src itself (the bytes and the pieces only move toward the start).
+ */
+static void keep_pieces(amark_tree_content_t *dst, const amark_tree_content_t *src, size_t first,
+                        size_t count)
+{
+    size_t start = src->pieces[first].content_start;
+    size_t end = src->pieces[first + count - 1].content_start +
+                 src->pieces[first + count - 1].content_length;
+    size_t lines = 0;
+    size_t i;
+
+    memmove(dst->bytes, src->bytes + start, end - start);
+    memmove(dst->pieces, src->pieces + first, count * sizeof(*dst->pieces));
+    for (i = 0; i < count; i++)
+    {
+        dst->pieces[i].content_start -= start;
+        if ((i == 0) || (dst->pieces[i].line != dst->pieces[i - 1].line))
+        {
+            lines++;
+        }
+    }
+    dst->length = end - start;
+    dst->bytes[dst->length] = '\0';
+    dst->piece_count = count;
+    dst->line_count = lines;
+    dst->state = AMARK_CONTENT_LAID;
+}
+
+/*
+ * Allocates in *out a new laid object (no owner, no base yet) that holds the
+ * count pieces of the laid content src from first on (count >= 1), with room for
+ * extra_bytes more bytes and extra_pieces more pieces. The caller has checked
+ * that the bytes stay below the limit of a content. Counts the pieces copied in
+ * the record steps. On failure nothing is left allocated.
+ */
+static amark_error_t copy_pieces(amark_document_t *document, const amark_tree_content_t *src,
+                                 size_t first, size_t count, size_t extra_bytes,
+                                 size_t extra_pieces, amark_tree_content_t **out)
+{
+    amark_tree_content_t *copy;
+    size_t start = src->pieces[first].content_start;
+    size_t end = src->pieces[first + count - 1].content_start +
+                 src->pieces[first + count - 1].content_length;
+    size_t pieces;
+
+    *out = NULL;
+    if ((extra_pieces > (SIZE_MAX - count)) ||
+        ((count + extra_pieces) > (SIZE_MAX / sizeof(*copy->pieces))))
+    {
+        return AMARK_ERROR_OVERFLOW;
+    }
+    pieces = count + extra_pieces;
+    copy = (amark_tree_content_t *)amark_calloc(1, sizeof(*copy));
+    if (copy == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    copy->capacity = (end - start) + extra_bytes + 1;
+    copy->bytes = (char *)amark_malloc(copy->capacity);
+    copy->pieces = (amark_tree_piece_t *)amark_malloc(pieces * sizeof(*copy->pieces));
+    if ((copy->bytes == NULL) || (copy->pieces == NULL))
+    {
+        content_free(copy);
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    copy->piece_capacity = pieces;
+    keep_pieces(copy, src, first, count);
+    document->stats.record_steps += count;
+    *out = copy;
+    return AMARK_ERROR_NONE;
+}
+
+/*
+ * Makes copy (a new object from copy_pieces) the content of leaf in place of
+ * its old content: the tokens of the leaf and of its descendants on the old
+ * content move to the copy, and the leaf releases the old content as an owner
+ * (the other nodes keep it). Walks the subtree of the leaf without recursion.
+ */
+static void adopt_copy(amark_node_t *leaf, amark_tree_content_t *copy)
+{
+    amark_tree_content_t *old = leaf->content;
+    amark_node_t *node = leaf;
+
+    for (;;)
+    {
+        amark_tree_content_tokens_t *tokens = node->content_tokens;
+
+        if ((tokens != NULL) && (tokens->base == old))
+        {
+            tokens->base = copy;
+            copy->bases++;
+            old->bases--;
+        }
+        if (node->first_child != NULL)
+        {
+            node = node->first_child;
+            continue;
+        }
+        while ((node != leaf) && (node->next == NULL))
+        {
+            node = node->parent;
+        }
+        if (node == leaf)
+        {
+            break;
+        }
+        node = node->next;
+    }
+    copy->owners = 1;
+    leaf->content = copy;
+    amark_tree_content_release(old, true);
+    leaf->document->stats.content_copies++;
+}
+
 amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
                                       uint32_t column_start, uint32_t column_end)
 {
     amark_document_t *document;
     amark_tree_content_t *content;
+    amark_tree_content_t *target;
+    amark_tree_content_t *copy = NULL;
     amark_tree_piece_t *piece;
-    const amark_tree_line_t *entry;
-    const char *data;
     piece_shape_t shape;
     bool created = false;
     bool new_line;
@@ -213,9 +378,12 @@ amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
     {
         const amark_tree_piece_t *last = &content->pieces[content->piece_count - 1];
 
+        /* On the line of the last piece: after it, with columns, and only when
+         * the last piece is not empty (an empty piece is the whole line). */
         if ((line < last->line) ||
             ((line == last->line) &&
-             ((column_start < last->end) || (column_start == column_end))))
+             ((column_start < last->end) || (column_start == column_end) ||
+              (last->start == last->end))))
         {
             return AMARK_ERROR_INVALID_ARGUMENT;
         }
@@ -233,9 +401,9 @@ amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
         return error;
     }
     /* The bytes to append: the virtual LF of a new line after the first, then
-     * the piece. A line is shorter than 4 GiB, so the sum cannot overflow. */
+     * the piece. */
     added = (((content != NULL) && (content->piece_count > 0) && new_line) ? 1u : 0u) +
-            (size_t)shape.lead + shape.body_length + (size_t)shape.trail;
+            shape_length(&shape);
     if (added > (AMARK_TREE_MAX_CONTENT - ((content != NULL) ? content->length : 0)))
     {
         return AMARK_ERROR_LIMIT_EXCEEDED;
@@ -251,10 +419,21 @@ amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
         content->state = AMARK_CONTENT_LAID;
         created = true;
     }
-    error = reserve_bytes(content, content->length + added + 1);
+    else if (content->owners >= 2)
+    {
+        /* Appending keeps the bytes already there, so tokens on them do not
+         * need a copy; another owner does. */
+        error = copy_pieces(document, content, 0, content->piece_count, added, 1, &copy);
+        if (error != AMARK_ERROR_NONE)
+        {
+            return error;
+        }
+    }
+    target = (copy != NULL) ? copy : content;
+    error = reserve_bytes(target, target->length + added + 1);
     if (error == AMARK_ERROR_NONE)
     {
-        error = reserve_piece(document, content);
+        error = reserve_piece(document, target);
     }
     if (error != AMARK_ERROR_NONE)
     {
@@ -262,43 +441,41 @@ amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
         {
             content_free(content);
         }
+        if (copy != NULL)
+        {
+            content_free(copy);
+        }
         return error;
     }
 
     /* Commit. */
-    out = content->bytes + content->length;
-    if (content->piece_count > 0 && new_line)
+    out = target->bytes + target->length;
+    if ((target->piece_count > 0) && new_line)
     {
         *out++ = '\n';
     }
-    piece = &content->pieces[content->piece_count];
+    piece = &target->pieces[target->piece_count];
     piece->line = line;
     piece->start = column_start;
     piece->end = column_end;
-    piece->content_start = (size_t)(out - content->bytes);
-    memset(out, ' ', shape.lead);
-    out += shape.lead;
-    entry = &document->lines[line];
-    data = document->sources[entry->source].data;
-    if (shape.body_length > 0)
-    {
-        memcpy(out, data + entry->offset + shape.body, shape.body_length);
-        out += shape.body_length;
-    }
-    memset(out, ' ', shape.trail);
-    out += shape.trail;
+    piece->content_start = (size_t)(out - target->bytes);
+    out = write_piece(document, line, &shape, out);
     *out = '\0';
-    piece->content_length = (size_t)(out - content->bytes) - piece->content_start;
-    content->length = (size_t)(out - content->bytes);
+    piece->content_length = (size_t)(out - target->bytes) - piece->content_start;
+    target->length = (size_t)(out - target->bytes);
     if (new_line)
     {
-        content->line_count++;
+        target->line_count++;
     }
-    content->piece_count++;
+    target->piece_count++;
     if (created)
     {
         content->owners = 1;
         leaf->content = content;
+    }
+    if (copy != NULL)
+    {
+        adopt_copy(leaf, copy);
     }
     document->stats.record_steps++;
     amark_tree_changed(leaf, AMARK_TREE_CHANGE_RECORD);
@@ -972,5 +1149,441 @@ amark_error_t amark_node_content_base(const amark_node_t *node, const char **byt
         }
         *is_own_leaf_content = (base != NULL) && (leaf != NULL) && (leaf->content == base);
     }
+    return AMARK_ERROR_NONE;
+}
+
+/* ---- Moving, removing and trimming lines (the block stage) ----------------------------- */
+
+/* Whether leaf is at the block stage: a block with content that is not free,
+ * without content tokens and without inline children (so neither it nor its
+ * descendants have tokens on its content). */
+static bool block_stage(const amark_node_t *leaf)
+{
+    const amark_node_t *child;
+
+    if (!is_content_leaf(leaf) ||
+        ((leaf->content != NULL) && (leaf->content->state != AMARK_CONTENT_LAID)) ||
+        ((leaf->content_tokens != NULL) && (leaf->content_tokens->count > 0)))
+    {
+        return false;
+    }
+    for (child = leaf->first_child; child != NULL; child = child->next)
+    {
+        if (child->desc->level == AMARK_NODE_LEVEL_INLINE)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Whether the count lines from first are at the start or at the end of the line
+ * range of leaf (count >= 1), and no margin or blank line of the leaf is on
+ * them. */
+static bool edge_lines(const amark_node_t *leaf, amark_line_id_t first, uint32_t count)
+{
+    const amark_tree_records_t *records = leaf->records;
+    size_t offset;
+    size_t i;
+
+    if ((count == 0) || (leaf->line_count == 0) || (first < leaf->line_first))
+    {
+        return false;
+    }
+    offset = (size_t)(first - leaf->line_first);
+    if ((offset > leaf->line_count) || (count > (leaf->line_count - offset)) ||
+        ((offset != 0) && ((offset + count) != leaf->line_count)))
+    {
+        return false;
+    }
+    if (records != NULL)
+    {
+        for (i = 0; i < records->margin_count; i++)
+        {
+            if ((records->margins[i].line - first) < count)
+            {
+                return false;
+            }
+        }
+        for (i = 0; i < records->blank_line_count; i++)
+        {
+            if ((records->blank_lines[i].line - first) < count)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* The index of the first piece of content on line or after it (binary search
+ * over the pieces, which are in the order of the lines). */
+static size_t first_piece_from(const amark_tree_content_t *content, size_t line)
+{
+    size_t low = 0;
+    size_t high = content->piece_count;
+
+    while (low < high)
+    {
+        size_t middle = low + ((high - low) / 2);
+
+        if (content->pieces[middle].line < line)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    return low;
+}
+
+/* The index of the first layout token of records on line or after it. */
+static size_t first_token_from(const amark_tree_records_t *records, size_t line)
+{
+    size_t low = 0;
+    size_t high = records->token_count;
+
+    while (low < high)
+    {
+        size_t middle = low + ((high - low) / 2);
+
+        if (records->tokens[middle].line < line)
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    return low;
+}
+
+/*
+ * Takes the count lines from first (checked by edge_lines) out of the leaf from
+ * at the block stage: their layout tokens and content pieces go to to (a leaf
+ * checked by the caller), or away when to is NULL. The content of from keeps
+ * the other pieces, in place, or in a copy when it is shared (or it is released
+ * when no piece is left); the content of to is a new object of the moved
+ * pieces. Every allocation is made before anything changes.
+ */
+static amark_error_t take_lines(amark_node_t *from, amark_node_t *to, amark_line_id_t first,
+                                uint32_t count)
+{
+    amark_document_t *document = from->document;
+    amark_tree_content_t *content = from->content;
+    amark_tree_records_t *records = from->records;
+    amark_tree_records_t *to_records = NULL;
+    amark_tree_content_t *to_content = NULL;
+    amark_tree_content_t *copy = NULL;
+    bool to_records_created = false;
+    size_t end = (size_t)first + count;
+    size_t piece_low = 0;
+    size_t piece_high = 0;
+    size_t piece_count = 0;
+    size_t token_low = 0;
+    size_t token_high = 0;
+    size_t token_count = 0;
+    size_t kept_first;
+    size_t kept_count;
+    size_t i;
+    amark_error_t error = AMARK_ERROR_NONE;
+
+    if (content != NULL)
+    {
+        piece_count = content->piece_count;
+        piece_low = first_piece_from(content, first);
+        piece_high = first_piece_from(content, end);
+    }
+    if (records != NULL)
+    {
+        token_count = records->token_count;
+        token_low = first_token_from(records, first);
+        token_high = first_token_from(records, end);
+    }
+    if (to != NULL)
+    {
+        for (i = token_low; i < token_high; i++)
+        {
+            if (records->tokens[i].facet > to->desc->facet_count)
+            {
+                return AMARK_ERROR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    /* The pieces left: those before the lines, or those after them. */
+    kept_first = (piece_low == 0) ? piece_high : 0;
+    kept_count = piece_count - (piece_high - piece_low);
+
+    if ((to != NULL) && (token_high > token_low))
+    {
+        error = amark_tree_reserve_layout_tokens(to, token_high - token_low, &to_records,
+                                                 &to_records_created);
+    }
+    if ((error == AMARK_ERROR_NONE) && (to != NULL) && (piece_high > piece_low))
+    {
+        error = copy_pieces(document, content, piece_low, piece_high - piece_low, 0, 0,
+                            &to_content);
+    }
+    if ((error == AMARK_ERROR_NONE) && (piece_high > piece_low) && (kept_count > 0) &&
+        shared_for_change(content))
+    {
+        error = copy_pieces(document, content, kept_first, kept_count, 0, 0, &copy);
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        if (to_records_created)
+        {
+            amark_tree_records_free(to_records);
+        }
+        if (to_content != NULL)
+        {
+            content_free(to_content);
+        }
+        return error;
+    }
+
+    /* Commit: to. */
+    if (to != NULL)
+    {
+        if (to_records != NULL)
+        {
+            memcpy(to_records->tokens, &records->tokens[token_low],
+                   (token_high - token_low) * sizeof(*to_records->tokens));
+            to_records->token_count = token_high - token_low;
+            to->records = to_records;
+        }
+        if (to_content != NULL)
+        {
+            to_content->owners = 1;
+            to->content = to_content;
+        }
+        to->line_first = first;
+        to->line_count = count;
+    }
+    /* from: its tokens, its content, its line range. */
+    if (token_high > token_low)
+    {
+        memmove(&records->tokens[token_low], &records->tokens[token_high],
+                (token_count - token_high) * sizeof(*records->tokens));
+        records->token_count = token_count - (token_high - token_low);
+    }
+    if (piece_high > piece_low)
+    {
+        if (kept_count == 0)
+        {
+            from->content = NULL;
+            amark_tree_content_release(content, true);
+        }
+        else if (copy != NULL)
+        {
+            adopt_copy(from, copy);
+        }
+        else
+        {
+            keep_pieces(content, content, kept_first, kept_count);
+        }
+    }
+    if (first == from->line_first)
+    {
+        from->line_first += count;
+    }
+    from->line_count -= count;
+    if (from->line_count == 0)
+    {
+        from->line_first = 0;
+    }
+    document->stats.record_steps += (token_high - token_low) + (piece_high - piece_low);
+    amark_tree_changed(from, AMARK_TREE_CHANGE_RECORD);
+    if (to != NULL)
+    {
+        amark_tree_changed(to, AMARK_TREE_CHANGE_RECORD);
+    }
+    return AMARK_ERROR_NONE;
+}
+
+/* Whether node has no record at all: no line range, no content, no layout
+ * records and no content tokens. */
+static bool unrecorded(const amark_node_t *node)
+{
+    const amark_tree_records_t *records = node->records;
+
+    return (node->line_count == 0) && (node->content == NULL) &&
+           ((node->content_tokens == NULL) || (node->content_tokens->count == 0)) &&
+           ((records == NULL) || ((records->margin_count == 0) &&
+                                  (records->blank_line_count == 0) &&
+                                  (records->token_count == 0)));
+}
+
+amark_error_t amark_block_move_lines(amark_node_t *from, amark_node_t *to, amark_line_id_t first,
+                                     uint32_t count)
+{
+    if (!block_stage(from) || !is_content_leaf(to) || (from == to) ||
+        (from->document != to->document) || !unrecorded(to) || !edge_lines(from, first, count))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    return take_lines(from, to, first, count);
+}
+
+amark_error_t amark_block_remove_lines(amark_node_t *leaf, amark_line_id_t first, uint32_t count)
+{
+    if (!block_stage(leaf) || !edge_lines(leaf, first, count))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    return take_lines(leaf, NULL, first, count);
+}
+
+amark_error_t amark_block_trim_content_start(amark_node_t *leaf, uint32_t columns,
+                                             amark_spell_kind_t kind, amark_facet_t facet,
+                                             uint16_t role)
+{
+    amark_document_t *document;
+    amark_tree_content_t *content;
+    amark_tree_content_t *copy = NULL;
+    amark_tree_content_t *target;
+    const amark_tree_records_t *records;
+    amark_tree_records_t *tokens = NULL;
+    amark_tree_layout_token_t *slot;
+    amark_tree_piece_t *piece;
+    piece_shape_t shape;
+    bool created = false;
+    amark_line_id_t line;
+    uint32_t start;
+    uint32_t new_start;
+    size_t old_length;
+    size_t new_length;
+    size_t index;
+    size_t low;
+    size_t high;
+    size_t i;
+    amark_error_t error;
+
+    if (!block_stage(leaf) || (leaf->content == NULL) || (columns == 0) ||
+        (kind < AMARK_SPELL_TEXT) || (kind > AMARK_SPELL_REPLACED) ||
+        (facet > leaf->desc->facet_count))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    document = leaf->document;
+    content = leaf->content;
+    piece = &content->pieces[0];
+    line = piece->line;
+    start = piece->start;
+    if (columns > (piece->end - start))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    new_start = start + columns;
+    /* An empty piece is the whole of its line. */
+    if ((new_start == piece->end) && (content->piece_count > 1) &&
+        (content->pieces[1].line == line))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    error = amark_tree_check_record_columns(leaf, line, start, new_start);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    /* The place of the token among the layout tokens (in the order of the lines
+     * and the columns), without overlapping its neighbours. */
+    records = leaf->records;
+    low = 0;
+    high = (records != NULL) ? records->token_count : 0;
+    while (low < high)
+    {
+        size_t middle = low + ((high - low) / 2);
+        const amark_tree_layout_token_t *other = &records->tokens[middle];
+
+        if ((other->line < line) || ((other->line == line) && (other->start < start)))
+        {
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle;
+        }
+    }
+    index = low;
+    if (((index > 0) && (records->tokens[index - 1].line == line) &&
+         (records->tokens[index - 1].end > start)) ||
+        ((records != NULL) && (index < records->token_count) &&
+         (records->tokens[index].line == line) && (records->tokens[index].start < new_start)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    error = shape_piece(document, line, new_start, piece->end, &shape);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    /* The first piece starts the content. The new bytes of the piece are at
+     * most 3 more than the old ones (the rest of a tab, for the tab itself). */
+    old_length = piece->content_length;
+    new_length = shape_length(&shape);
+    if ((new_length > old_length) &&
+        ((new_length - old_length) > (AMARK_TREE_MAX_CONTENT - content->length)))
+    {
+        return AMARK_ERROR_LIMIT_EXCEEDED;
+    }
+
+    error = amark_tree_reserve_layout_tokens(leaf, 1, &tokens, &created);
+    if (error == AMARK_ERROR_NONE)
+    {
+        if (shared_for_change(content))
+        {
+            error = copy_pieces(document, content, 0, content->piece_count,
+                                (new_length > old_length) ? new_length - old_length : 0, 0,
+                                &copy);
+        }
+        else
+        {
+            error = reserve_bytes(content, content->length - old_length + new_length + 1);
+        }
+        if ((error != AMARK_ERROR_NONE) && created)
+        {
+            amark_tree_records_free(tokens);
+        }
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+
+    /* Commit: the bytes after the piece shift, the piece is written again. */
+    target = (copy != NULL) ? copy : content;
+    memmove(target->bytes + new_length, target->bytes + old_length,
+            target->length - old_length);
+    (void)write_piece(document, line, &shape, target->bytes);
+    target->length = target->length - old_length + new_length;
+    target->bytes[target->length] = '\0';
+    target->pieces[0].start = new_start;
+    target->pieces[0].content_length = new_length;
+    for (i = 1; i < target->piece_count; i++)
+    {
+        target->pieces[i].content_start =
+            target->pieces[i].content_start - old_length + new_length;
+    }
+    memmove(&tokens->tokens[index + 1], &tokens->tokens[index],
+            (tokens->token_count - index) * sizeof(*tokens->tokens));
+    slot = &tokens->tokens[index];
+    slot->line = line;
+    slot->start = start;
+    slot->end = new_start;
+    slot->kind = (uint8_t)kind;
+    slot->facet = (uint8_t)facet;
+    slot->role = role;
+    tokens->token_count++;
+    leaf->records = tokens;
+    if (copy != NULL)
+    {
+        adopt_copy(leaf, copy);
+    }
+    document->stats.record_steps++;
+    amark_tree_changed(leaf, AMARK_TREE_CHANGE_RECORD);
     return AMARK_ERROR_NONE;
 }

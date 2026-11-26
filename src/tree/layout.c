@@ -2,8 +2,9 @@
  * Copyright (c) The Amark Authors */
 
 /*
- * Layout: the line ranges, the margins, the blank lines, the leaf spellings,
- * the transfer of lines and the checks of the records.
+ * Layout: the line ranges, the margins, the blank lines, the leaf spellings
+ * and the checks of the records. (Moving, removing and trimming the lines of a
+ * leaf rebuild its content: they are in content.c.)
  *
  * Each record array is kept in its order (margins and blank lines by line, one
  * per line; tokens by line and column without overlap) by refusing an append
@@ -96,6 +97,54 @@ static amark_error_t grow(amark_document_t *document, void *items, size_t count,
     }
     *capacity = new_capacity;
     document->stats.record_steps += count;
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_tree_reserve_layout_tokens(amark_node_t *node, size_t extra,
+                                               amark_tree_records_t **out, bool *created)
+{
+    amark_tree_records_t *records = NULL;
+    amark_tree_layout_token_t *grown;
+    size_t needed;
+    size_t capacity;
+    amark_error_t error;
+
+    error = open_records(node, &records, created);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    if (extra > (SIZE_MAX - records->token_count))
+    {
+        forget_records(records, *created);
+        return AMARK_ERROR_OVERFLOW;
+    }
+    needed = records->token_count + extra;
+    if (needed > records->token_capacity)
+    {
+        capacity = (records->token_capacity < RECORDS_FIRST_CAPACITY) ? RECORDS_FIRST_CAPACITY
+                                                                      : records->token_capacity;
+        while (capacity < needed)
+        {
+            capacity = (capacity > (SIZE_MAX / 2)) ? needed : capacity * 2;
+        }
+        if (capacity > (SIZE_MAX / sizeof(*grown)))
+        {
+            forget_records(records, *created);
+            return AMARK_ERROR_OVERFLOW;
+        }
+        grown = (amark_tree_layout_token_t *)amark_realloc(records->tokens,
+                                                           capacity * sizeof(*grown));
+        if (grown == NULL)
+        {
+            forget_records(records, *created);
+            return AMARK_ERROR_OUT_OF_MEMORY;
+        }
+        records->tokens = grown;
+        records->token_capacity = capacity;
+        node->document->stats.record_steps += records->token_count;
+    }
+    *out = records;
     return AMARK_ERROR_NONE;
 }
 

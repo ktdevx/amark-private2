@@ -405,7 +405,8 @@ static bool check_content(check_context_t *context, const amark_node_t *node)
             ((last != NULL) &&
              ((piece->line < last->line) ||
               ((piece->line == last->line) &&
-               ((piece->start < last->end) || (piece->start == piece->end))))))
+               ((piece->start < last->end) || (piece->start == piece->end) ||
+                (last->start == last->end))))))
         {
             return fail(context, AMARK_TREE_VIOLATION_CONTENT, node,
                         "a content piece is outside the line range, beyond its line or out of "
@@ -920,8 +921,10 @@ static bool content_object_ok(const amark_document_t *document,
 
         if ((piece->line >= document->line_count) || (piece->start > piece->end) ||
             (piece->end > document->lines[piece->line].width) ||
-            ((last != NULL) && ((piece->line < last->line) ||
-                                ((piece->line == last->line) && (piece->start < last->end)))))
+            ((last != NULL) &&
+             ((piece->line < last->line) ||
+              ((piece->line == last->line) &&
+               ((piece->start < last->end) || (last->start == last->end))))))
         {
             return false;
         }

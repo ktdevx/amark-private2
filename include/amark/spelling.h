@@ -185,6 +185,56 @@ AMARK_API amark_error_t amark_block_add_token(amark_node_t *block,
                                               const amark_layout_token_t *token);
 
 /*
+ * The edits of the block stage (before the inlines of a leaf are parsed): a
+ * leaf whose lines are read again as another block gives them up. Each needs a
+ * block with content (AMARK_NODE_TYPE_CONTENT) without content tokens, without
+ * inline children and without free content; the lines are the count lines from
+ * first, at the start or at the end of its line range (every line of the range
+ * too). The content of the leaf is built again from the pieces that are left,
+ * with the same correspondence to the columns of the lines; when no piece is
+ * left, the leaf has no content. Content shared with another node is copied
+ * first and the copy becomes the content of the leaf, so that the other node
+ * keeps its bytes. The changes are notified. AMARK_ERROR_INVALID_ARGUMENT, with
+ * the nodes unchanged, for the arguments outside of these rules;
+ * AMARK_ERROR_OUT_OF_MEMORY and AMARK_ERROR_OVERFLOW leave the nodes unchanged.
+ */
+
+/*
+ * Moves the lines from the leaf from to the leaf to (7.10): to gets them as its
+ * line range, with the layout tokens of from on them and their content pieces
+ * as its content; from keeps the rest of its range, its tokens and its pieces.
+ * The margins belong to the containers and are not moved (a leaf with a margin
+ * or a blank line on the lines is refused). to is another block with content of
+ * the same document, with no line range, no content, no records and no content
+ * tokens yet; each moved layout token must spell a facet of the type of to (or
+ * none).
+ */
+AMARK_API amark_error_t amark_block_move_lines(amark_node_t *from, amark_node_t *to,
+                                               amark_line_id_t first, uint32_t count);
+
+/* Removes the lines from leaf (7.11): their layout tokens and content pieces go
+ * away and the line range shrinks (a leaf with a margin or a blank line on the
+ * lines is refused). */
+AMARK_API amark_error_t amark_block_remove_lines(amark_node_t *leaf, amark_line_id_t first,
+                                                 uint32_t count);
+
+/*
+ * Turns the first columns of the laid content of leaf into its own spelling
+ * (7.11), such as the marker of a task list item: the columns from the start of
+ * the first piece become a layout token of kind, facet and role (the rules of
+ * amark_block_add_token; it may come before other tokens, without overlapping
+ * them), and the piece starts after them (a tab cut by the new start is left as
+ * spaces). columns is at least 1 and at most the columns of the first piece; the
+ * piece may become empty only when no other piece is on its line. The other
+ * nodes keep their values: the parser records them with their own functions.
+ * The preconditions and the errors are those of the block stage above, except
+ * that the leaf needs laid content and keeps its line range.
+ */
+AMARK_API amark_error_t amark_block_trim_content_start(amark_node_t *leaf, uint32_t columns,
+                                                       amark_spell_kind_t kind,
+                                                       amark_facet_t facet, uint16_t role);
+
+/*
  * Removes the margin of container on line and marks the structural spelling of
  * the container as dropped; the change is notified. Used by the on_change hook
  * of the built-in list and by the hooks of extensions.
@@ -262,14 +312,18 @@ typedef struct amark_content_piece
  * Appends the columns [column_start, column_end) of line to the laid content of
  * leaf (the content becomes laid when it was none). Pieces are added in order:
  * on a later line than the last piece (an empty range stands for an empty
- * line), or on the same line from the end of the last piece on, with columns.
+ * line), or on the same line from the end of the last piece on, with columns,
+ * when the last piece is not empty.
  * AMARK_ERROR_INVALID_ARGUMENT, with the leaf unchanged, for NULL, a node that is
  * not a block with content, free content, a line outside the line table or the
  * line range of the leaf, a piece out of order, column_start after column_end,
  * a column beyond the width of the line or inside a character other than a
  * tab. AMARK_ERROR_LIMIT_EXCEEDED when the content would reach 4 GiB,
- * AMARK_ERROR_OUT_OF_MEMORY; both leave the leaf unchanged. The change is
- * notified.
+ * AMARK_ERROR_OUT_OF_MEMORY; both leave the leaf unchanged. Content shared
+ * with another leaf is copied first, and the copy becomes the content of the
+ * leaf (the tokens of the leaf and its descendants on the old content move to
+ * the copy); content with tokens of other nodes on it is not copied, as the
+ * bytes already there do not change. The change is notified.
  */
 AMARK_API amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
                                                 uint32_t column_start, uint32_t column_end);

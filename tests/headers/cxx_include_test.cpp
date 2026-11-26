@@ -441,6 +441,39 @@ NAOS_TEST(content_token_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(block_stage_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *definition = NULL;
+    amark_source_id_t source = 0;
+    const char *bytes = NULL;
+    size_t length = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, "[a]: /u\n- [ ] b\nc\n", 18,
+                                                  AMARK_SOURCE_FINISHED, &source));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(paragraph, 0, 3));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 7));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 1, 2, 7));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 2, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(paragraph, definition, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(paragraph, 2, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 4, AMARK_SPELL_MARKER,
+                                                     AMARK_FACET_NONE, 0));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(paragraph, &bytes, &length));
+    NAOS_CHECK_UINT_EQ(1, length);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(definition, &bytes, &length));
+    NAOS_CHECK_UINT_EQ(7, length);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -456,7 +489,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(facet_value_functions_link),
     NAOS_ADD_TEST(layout_functions_link),
     NAOS_ADD_TEST(content_functions_link),
-    NAOS_ADD_TEST(content_token_functions_link)
+    NAOS_ADD_TEST(content_token_functions_link),
+    NAOS_ADD_TEST(block_stage_functions_link)
 )
 
 NAOS_MAIN(

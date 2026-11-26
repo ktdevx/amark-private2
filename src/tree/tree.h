@@ -144,6 +144,17 @@ typedef struct amark_tree_records
 void amark_tree_records_free(amark_tree_records_t *records);
 
 /*
+ * Makes room for extra more layout tokens in the records of node: *out receives
+ * the record structure of node, allocated when node has none (*created tells),
+ * which the caller stores in node once it commits, or frees with
+ * amark_tree_records_free when it was created and the caller fails. The tokens
+ * array grows by doubling (the tokens moved count in the record steps). On
+ * failure node is unchanged and nothing is left allocated.
+ */
+amark_error_t amark_tree_reserve_layout_tokens(amark_node_t *node, size_t extra,
+                                               amark_tree_records_t **out, bool *created);
+
+/*
  * Checks a record of node on line with the columns [start, end): the line is in
  * the line table and in the line range of node, start <= end <= the width of
  * the line, and both boundaries are boundaries of characters or inside tabs.
@@ -495,6 +506,9 @@ typedef struct amark_tree_stats
     /* The steps of the layout records (Layout): one per record appended, plus
      * the records moved by each growth of an array. */
     size_t record_steps;
+    /* The content objects copied because they were shared when a leaf changed
+     * its content (Content, copy on write). */
+    size_t content_copies;
 } amark_tree_stats_t;
 
 struct amark_document
@@ -573,7 +587,8 @@ typedef enum amark_tree_violation
     /* The content of a leaf: content on a node that is not a block with
      * content, an unknown state, an array whose count exceeds its capacity, a
      * length of 4 GiB or more, bytes not terminated, pieces on free content or
-     * out of order or outside the line range or the width of their lines, bytes
+     * out of order (an empty piece is alone on its line) or outside the line
+     * range or the width of their lines, bytes
      * that are not the pieces joined as laid content (or free content that holds
      * a CR), a wrong line count, or an owner or base count that differs from
      * the nodes that refer to the object; content tokens on a node that is

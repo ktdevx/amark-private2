@@ -13,6 +13,10 @@
  * the checks of their range and kind, moving and splitting (INPUT.md 3.1 built
  * by the steps of the delimiter processing), the base and its count, the
  * internal check and the allocation failures (8.3, 8.4, 8.5, 8.8).
+ * The block-stage edits of the lines: moving the first or last lines of a leaf
+ * to another leaf, removing them, trimming the start of the content into the
+ * own spelling of the leaf, and the copy of shared content before it changes
+ * (7.10, 7.11, 14.6).
  */
 #include "tree/tree.h"
 
@@ -542,6 +546,24 @@ NAOS_TEST(the_check_detects_broken_content)
     content->line_count = 1;
     NAOS_CHECK_INT_EQ(AMARK_TREE_VIOLATION_CONTENT, amark_tree_check(document, NULL));
     content->line_count = 2;
+    CHECK_TREE_OK(document);
+
+    /* A piece after an empty piece on its line (the bytes match the pieces). */
+    amark_node_destroy(paragraph);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 1, 2));
+    CHECK_TREE_OK(document);
+    content = paragraph->content;
+    NAOS_REQUIRE_TRUE(content->piece_capacity >= 2);
+    content->pieces[1] = content->pieces[0];
+    content->pieces[0].end = 1;
+    content->pieces[0].content_length = 0;
+    content->piece_count = 2;
+    NAOS_CHECK_INT_EQ(AMARK_TREE_VIOLATION_CONTENT, amark_tree_check(document, &report));
+    NAOS_CHECK_TRUE(report.node == paragraph);
+    content->pieces[0] = content->pieces[1];
+    content->piece_count = 1;
     CHECK_TREE_OK(document);
     amark_document_destroy(document);
 }
@@ -1557,6 +1579,872 @@ NAOS_TEST(out_of_memory_leaves_the_content_unchanged)
     AMARK_CHECK_OOM_SWEEP(oom_scenario, NULL);
 }
 
+/* ---- Moving, removing and trimming lines --------------------------------------------- */
+
+/* Appends a layout token of kind on the columns [start, end) of line to block. */
+static amark_error_t add_layout_token(amark_node_t *block, amark_line_id_t line, uint32_t start,
+                                      uint32_t end, amark_spell_kind_t kind)
+{
+    amark_layout_token_t token;
+
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.line = line;
+    token.column_start = start;
+    token.column_end = end;
+    token.kind = kind;
+    return amark_block_add_token(block, &token);
+}
+
+/* Checks layout token index of block. */
+#define CHECK_LAYOUT_TOKEN(block, index, line_, start_, end_, kind_) \
+    do { \
+        amark_layout_token_t t_; \
+        memset(&t_, 0, sizeof(t_)); \
+        t_.struct_size = sizeof(t_); \
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_token_at((block), (index), &t_)); \
+        NAOS_CHECK_UINT_EQ((line_), t_.line); \
+        NAOS_CHECK_UINT_EQ((start_), t_.column_start); \
+        NAOS_CHECK_UINT_EQ((end_), t_.column_end); \
+        NAOS_CHECK_INT_EQ((kind_), t_.kind); \
+    } while (0)
+
+/* Checks the line range of block. */
+#define CHECK_LINES(block, first_, count_) \
+    do { \
+        amark_line_id_t f_ = 999; \
+        uint32_t c_ = 999; \
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines((block), &f_, &c_)); \
+        NAOS_CHECK_UINT_EQ((first_), f_); \
+        NAOS_CHECK_UINT_EQ((count_), c_); \
+    } while (0)
+
+/* A paragraph of the four lines of the text of the link reference definition
+ * test, with the indent of lines 0 and 3 as its own spelling. */
+static const char link_definition_text[] = " [foo]: /url\n\"the\ntitle\"\n bar\n";
+
+static amark_node_t *new_link_definition_paragraph(amark_document_t *document)
+{
+    amark_node_t *paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 4);
+
+    if ((paragraph == NULL) ||
+        (add_layout_token(paragraph, 0, 0, 1, AMARK_SPELL_SPACE) != AMARK_ERROR_NONE) ||
+        (amark_block_add_content(paragraph, 0, 1, 12) != AMARK_ERROR_NONE) ||
+        (amark_block_add_content(paragraph, 1, 0, 4) != AMARK_ERROR_NONE) ||
+        (amark_block_add_content(paragraph, 2, 0, 6) != AMARK_ERROR_NONE) ||
+        (add_layout_token(paragraph, 3, 0, 1, AMARK_SPELL_SPACE) != AMARK_ERROR_NONE) ||
+        (amark_block_add_content(paragraph, 3, 1, 4) != AMARK_ERROR_NONE))
+    {
+        return NULL;
+    }
+    return paragraph;
+}
+
+/* A paragraph's first three lines (the title on two of them) are a link
+ * reference definition (7.10). */
+NAOS_TEST(the_first_lines_of_a_paragraph_move_to_a_link_reference_definition)
+{
+    amark_document_t *document = new_document(link_definition_text);
+    amark_node_t *paragraph;
+    amark_node_t *definition = NULL;
+    amark_tree_content_t *before;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_link_definition_paragraph(document);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition));
+    CHECK_CONTENT(paragraph, "[foo]: /url\n\"the\ntitle\"\nbar", 27);
+    before = paragraph->content;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(paragraph, definition, 0, 3));
+
+    CHECK_LINES(definition, 0, 3);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_LAID, amark_block_content_state(definition));
+    CHECK_CONTENT(definition, "[foo]: /url\n\"the\ntitle\"", 23);
+    NAOS_CHECK_UINT_EQ(3, amark_block_content_piece_count(definition));
+    CHECK_PIECE(definition, 0, 0, 1, 12, 0, 11);
+    CHECK_PIECE(definition, 1, 1, 0, 4, 12, 4);
+    CHECK_PIECE(definition, 2, 2, 0, 6, 17, 6);
+    NAOS_CHECK_UINT_EQ(3, definition->content->line_count);
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(definition));
+    CHECK_LAYOUT_TOKEN(definition, 0, 0, 0, 1, AMARK_SPELL_SPACE);
+
+    CHECK_LINES(paragraph, 3, 1);
+    CHECK_CONTENT(paragraph, "bar", 3);
+    NAOS_CHECK_UINT_EQ(1, amark_block_content_piece_count(paragraph));
+    CHECK_PIECE(paragraph, 0, 3, 1, 4, 0, 3);
+    NAOS_CHECK_UINT_EQ(1, paragraph->content->line_count);
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(paragraph));
+    CHECK_LAYOUT_TOKEN(paragraph, 0, 3, 0, 1, AMARK_SPELL_SPACE);
+    /* Not shared: changed in place. */
+    NAOS_CHECK_TRUE(paragraph->content == before);
+    NAOS_CHECK_UINT_EQ(0, document->stats.content_copies);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* The last lines move too (a setext heading takes the lines before its
+ * underline), and every line may move. */
+NAOS_TEST(the_last_lines_of_a_paragraph_move_to_another_leaf)
+{
+    amark_document_t *document = new_document(link_definition_text);
+    amark_node_t *paragraph;
+    amark_node_t *heading = NULL;
+    amark_node_t *other = NULL;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_link_definition_paragraph(document);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_HEADING, &heading));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &other));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(paragraph, heading, 2, 2));
+    CHECK_LINES(heading, 2, 2);
+    CHECK_CONTENT(heading, "title\"\nbar", 10);
+    CHECK_PIECE(heading, 0, 2, 0, 6, 0, 6);
+    CHECK_PIECE(heading, 1, 3, 1, 4, 7, 3);
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(heading));
+    CHECK_LAYOUT_TOKEN(heading, 0, 3, 0, 1, AMARK_SPELL_SPACE);
+    CHECK_LINES(paragraph, 0, 2);
+    CHECK_CONTENT(paragraph, "[foo]: /url\n\"the", 16);
+    NAOS_CHECK_UINT_EQ(2, amark_block_content_piece_count(paragraph));
+    NAOS_CHECK_UINT_EQ(2, paragraph->content->line_count);
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(paragraph));
+    CHECK_TREE_OK(document);
+
+    /* Every line: the paragraph is left without lines and content. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(paragraph, other, 0, 2));
+    CHECK_LINES(paragraph, AMARK_LINE_NONE, 0);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_NONE, amark_block_content_state(paragraph));
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(paragraph));
+    CHECK_LINES(other, 0, 2);
+    CHECK_CONTENT(other, "[foo]: /url\n\"the", 16);
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(other));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* The preconditions of a move: leaves with content, the block stage (no content
+ * tokens, no inline child) on from, a to without anything recorded, lines at
+ * the start or the end of the range of from. A refused move changes nothing. */
+NAOS_TEST(a_move_out_of_its_preconditions_is_refused)
+{
+    amark_document_t *document = new_document(link_definition_text);
+    amark_document_t *elsewhere = new_document("x\n");
+    amark_node_t *paragraph;
+    amark_node_t *definition = NULL;
+    amark_node_t *quote = NULL;
+    amark_node_t *foreign = NULL;
+    amark_node_t *text;
+    amark_node_t *heading = NULL;
+    amark_node_t *empty = NULL;
+    amark_node_t *code;
+    amark_layout_token_t token;
+
+    NAOS_REQUIRE_TRUE((document != NULL) && (elsewhere != NULL));
+    paragraph = new_link_definition_paragraph(document);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_BLOCK_QUOTE, &quote));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(elsewhere, AMARK_NODE_PARAGRAPH, &foreign));
+
+#define REFUSED(call) \
+    do { \
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, (call)); \
+        CHECK_LINES(paragraph, 0, 4); \
+        CHECK_CONTENT(paragraph, "[foo]: /url\n\"the\ntitle\"\nbar", 27); \
+        NAOS_CHECK_UINT_EQ(2, amark_block_token_count(paragraph)); \
+        CHECK_LINES(definition, AMARK_LINE_NONE, 0); \
+        NAOS_CHECK_INT_EQ(AMARK_CONTENT_NONE, amark_block_content_state(definition)); \
+        NAOS_CHECK_UINT_EQ(0, amark_block_token_count(definition)); \
+    } while (0)
+
+    REFUSED(amark_block_move_lines(NULL, definition, 0, 1));
+    REFUSED(amark_block_move_lines(paragraph, NULL, 0, 1));
+    REFUSED(amark_block_move_lines(paragraph, paragraph, 0, 1));
+    REFUSED(amark_block_move_lines(paragraph, quote, 0, 1));
+    REFUSED(amark_block_move_lines(quote, definition, 0, 1));
+    REFUSED(amark_block_move_lines(paragraph, foreign, 0, 1));
+    /* The lines: none, outside the range, or in the middle. */
+    REFUSED(amark_block_move_lines(paragraph, definition, 0, 0));
+    REFUSED(amark_block_move_lines(paragraph, definition, 0, 5));
+    REFUSED(amark_block_move_lines(paragraph, definition, 3, 2));
+    REFUSED(amark_block_move_lines(paragraph, definition, 4, 1));
+    REFUSED(amark_block_move_lines(paragraph, definition, 1, 2));
+    REFUSED(amark_block_move_lines(paragraph, definition, AMARK_LINE_NONE, 2));
+    /* to has a line range, content or records. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(definition, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_move_lines(paragraph, definition, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(definition, 0, 1, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_move_lines(paragraph, definition, 0, 1));
+    amark_node_destroy(definition);
+    definition = NULL;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition));
+    /* A layout token of a facet the type of to does not have. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_HEADING, &heading));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(heading, 0, 1));
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.line = 0;
+    token.column_start = 0;
+    token.column_end = 1;
+    token.kind = AMARK_SPELL_MARKER;
+    token.facet = 3;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_token(heading, &token));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_PARAGRAPH, &empty));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_move_lines(heading, empty, 0, 1));
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(heading));
+    CHECK_LINES(heading, 0, 1);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(heading, definition, 0, 1));
+    CHECK_LINES(definition, 0, 1);
+    amark_node_destroy(definition);
+    definition = NULL;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition));
+    /* A content token on from, then an inline child. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(paragraph, paragraph, 0, 1, AMARK_SPELL_TEXT));
+    REFUSED(amark_block_move_lines(paragraph, definition, 0, 1));
+    amark_tree_content_tokens_free(paragraph->content_tokens);
+    paragraph->content_tokens = NULL;
+    text = new_inline(document, AMARK_NODE_TEXT, paragraph);
+    NAOS_REQUIRE_TRUE(text != NULL);
+    REFUSED(amark_block_move_lines(paragraph, definition, 0, 1));
+    amark_node_destroy(text);
+    /* Free content on from. */
+    code = new_block(document, AMARK_NODE_CODE_BLOCK, 0, 1);
+    NAOS_REQUIRE_TRUE(code != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_free_content(code, "x", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_move_lines(code, definition, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_remove_lines(code, 0, 1));
+    CHECK_LINES(code, 0, 1);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(paragraph, definition, 0, 1));
+#undef REFUSED
+    CHECK_TREE_OK(document);
+    amark_document_destroy(elsewhere);
+    amark_document_destroy(document);
+}
+
+/* A paragraph's line becomes the header row of a table: it is removed from the
+ * paragraph, at either end of its range (7.11). */
+NAOS_TEST(lines_of_a_paragraph_are_removed_for_a_table)
+{
+    amark_document_t *document = new_document("foo\n  | a |\n| - |\nbar\n");
+    amark_node_t *paragraph;
+    amark_node_t *other;
+    amark_tree_content_t *before;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 2);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 3));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_layout_token(paragraph, 1, 0, 2, AMARK_SPELL_SPACE));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 1, 2, 7));
+    CHECK_CONTENT(paragraph, "foo\n| a |", 9);
+    before = paragraph->content;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_remove_lines(NULL, 1, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_remove_lines(paragraph, 1, 0));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_remove_lines(paragraph, 2, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_remove_lines(amark_document_root(document), 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(paragraph, 1, 1));
+    CHECK_LINES(paragraph, 0, 1);
+    CHECK_CONTENT(paragraph, "foo", 3);
+    NAOS_CHECK_UINT_EQ(1, amark_block_content_piece_count(paragraph));
+    NAOS_CHECK_UINT_EQ(1, paragraph->content->line_count);
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(paragraph));
+    NAOS_CHECK_TRUE(paragraph->content == before);
+    CHECK_TREE_OK(document);
+
+    /* The first lines. */
+    other = new_block(document, AMARK_NODE_PARAGRAPH, 0, 4);
+    NAOS_REQUIRE_TRUE(other != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(other, 0, 0, 3));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_layout_token(other, 1, 0, 2, AMARK_SPELL_SPACE));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(other, 1, 2, 7));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(other, 2, 0, 5));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(other, 3, 0, 3));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(other, 0, 2));
+    CHECK_LINES(other, 2, 2);
+    CHECK_CONTENT(other, "| - |\nbar", 9);
+    CHECK_PIECE(other, 0, 2, 0, 5, 0, 5);
+    CHECK_PIECE(other, 1, 3, 0, 3, 6, 3);
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(other));
+    CHECK_TREE_OK(document);
+    /* Every line. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(other, 2, 2));
+    CHECK_LINES(other, AMARK_LINE_NONE, 0);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_NONE, amark_block_content_state(other));
+    NAOS_CHECK_UINT_EQ(0, document->stats.content_copies);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* The marker of a task list item becomes the own spelling of the paragraph
+ * (7.11); the rest of the content shifts. */
+NAOS_TEST(a_task_list_marker_becomes_the_spelling_of_the_paragraph)
+{
+    amark_document_t *document = new_document("- [ ] task  \n  more\n");
+    amark_node_t *paragraph;
+    amark_layout_token_t token;
+    amark_tree_content_t *before;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 2);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 2, 10));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_layout_token(paragraph, 0, 10, 12, AMARK_SPELL_SPACE));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 1, 2, 6));
+    CHECK_CONTENT(paragraph, "[ ] task\nmore", 13);
+    before = paragraph->content;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 4, AMARK_SPELL_MARKER,
+                                                     AMARK_FACET_NONE, 7));
+    CHECK_CONTENT(paragraph, "task\nmore", 9);
+    CHECK_PIECE(paragraph, 0, 0, 6, 10, 0, 4);
+    CHECK_PIECE(paragraph, 1, 1, 2, 6, 5, 4);
+    NAOS_CHECK_UINT_EQ(2, amark_block_token_count(paragraph));
+    CHECK_LAYOUT_TOKEN(paragraph, 0, 0, 2, 6, AMARK_SPELL_MARKER);
+    CHECK_LAYOUT_TOKEN(paragraph, 1, 0, 10, 12, AMARK_SPELL_SPACE);
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_token_at(paragraph, 0, &token));
+    NAOS_CHECK_UINT_EQ(7, token.role);
+    NAOS_CHECK_UINT_EQ(AMARK_FACET_NONE, token.facet);
+    NAOS_CHECK_TRUE(paragraph->content == before);
+    NAOS_CHECK_UINT_EQ(0, document->stats.content_copies);
+    CHECK_TREE_OK(document);
+    /* The whole piece: an empty piece stands for the line. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 4, AMARK_SPELL_TEXT,
+                                                     AMARK_FACET_NONE, 0));
+    CHECK_CONTENT(paragraph, "\nmore", 5);
+    CHECK_PIECE(paragraph, 0, 0, 10, 10, 0, 0);
+    CHECK_PIECE(paragraph, 1, 1, 2, 6, 1, 4);
+    NAOS_CHECK_UINT_EQ(2, paragraph->content->line_count);
+    NAOS_CHECK_UINT_EQ(3, amark_block_token_count(paragraph));
+    CHECK_LAYOUT_TOKEN(paragraph, 1, 0, 6, 10, AMARK_SPELL_TEXT);
+    /* Nothing is left on the line to trim. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_TEXT,
+                                                     AMARK_FACET_NONE, 0));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* Trimming into a tab: the rest of the tab becomes spaces, so the content may
+ * grow; the following lines shift. */
+NAOS_TEST(trimming_into_a_tab_leaves_its_rest_as_spaces)
+{
+    amark_document_t *document = new_document("[ ]\t\tx\nyz\n");
+    amark_node_t *paragraph;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 2);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 9));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 1, 0, 2));
+    CHECK_CONTENT(paragraph, "[ ]\t\tx\nyz", 9);
+    /* Column 5 is inside the second tab (columns 4 to 8). */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 5, AMARK_SPELL_MARKER,
+                                                     AMARK_FACET_NONE, 0));
+    CHECK_CONTENT(paragraph, "   x\nyz", 7);
+    CHECK_PIECE(paragraph, 0, 0, 5, 9, 0, 4);
+    CHECK_PIECE(paragraph, 1, 1, 0, 2, 5, 2);
+    CHECK_LAYOUT_TOKEN(paragraph, 0, 0, 0, 5, AMARK_SPELL_MARKER);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(paragraph, paragraph, 0, 3,
+                                                  AMARK_SPELL_TAB_REMAINDER));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+
+    /* A piece that starts inside a tab, trimmed to the next character, then
+     * into the next tab. */
+    document = new_document("\t \tx\n");
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 3, 9));
+    CHECK_CONTENT(paragraph, "  \tx", 4);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_SPACE,
+                                                     AMARK_FACET_NONE, 0));
+    CHECK_CONTENT(paragraph, " \tx", 3);
+    CHECK_PIECE(paragraph, 0, 0, 4, 9, 0, 3);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 2, AMARK_SPELL_SPACE,
+                                                     AMARK_FACET_NONE, 0));
+    CHECK_CONTENT(paragraph, "  x", 3);
+    CHECK_PIECE(paragraph, 0, 0, 6, 9, 0, 3);
+    NAOS_CHECK_UINT_EQ(2, amark_block_token_count(paragraph));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* The arguments and the preconditions of trimming; a refused trim changes
+ * nothing. */
+NAOS_TEST(a_trim_out_of_its_preconditions_is_refused)
+{
+    amark_document_t *document = new_document("ab|cd\nef\n");
+    amark_node_t *paragraph;
+    amark_node_t *heading;
+    amark_node_t *text;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 2);
+    heading = new_block(document, AMARK_NODE_HEADING, 0, 1);
+    NAOS_REQUIRE_TRUE((paragraph != NULL) && (heading != NULL));
+    /* No content. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_MARKER,
+                                                     AMARK_FACET_NONE, 0));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_layout_token(paragraph, 0, 2, 3, AMARK_SPELL_MARKER));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 3, 5));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 1, 0, 2));
+    CHECK_CONTENT(paragraph, "abcd\nef", 7);
+
+#define REFUSED(call) \
+    do { \
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, (call)); \
+        CHECK_CONTENT(paragraph, "abcd\nef", 7); \
+        NAOS_CHECK_UINT_EQ(3, amark_block_content_piece_count(paragraph)); \
+        NAOS_CHECK_UINT_EQ(1, amark_block_token_count(paragraph)); \
+    } while (0)
+
+    REFUSED(amark_block_trim_content_start(NULL, 1, AMARK_SPELL_MARKER, AMARK_FACET_NONE, 0));
+    REFUSED(amark_block_trim_content_start(paragraph, 0, AMARK_SPELL_MARKER, AMARK_FACET_NONE, 0));
+    REFUSED(amark_block_trim_content_start(paragraph, 3, AMARK_SPELL_MARKER, AMARK_FACET_NONE, 0));
+    REFUSED(amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_LINE_BREAK,
+                                           AMARK_FACET_NONE, 0));
+    REFUSED(amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_TAB_REMAINDER,
+                                           AMARK_FACET_NONE, 0));
+    REFUSED(amark_block_trim_content_start(paragraph, 1, (amark_spell_kind_t)0,
+                                           AMARK_FACET_NONE, 0));
+    REFUSED(amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_MARKER, 1, 0));
+    /* The whole first piece, with another piece on its line after it: an
+     * empty piece cannot come before it. */
+    REFUSED(amark_block_trim_content_start(paragraph, 2, AMARK_SPELL_MARKER, AMARK_FACET_NONE, 0));
+    /* The block stage: no content token, no inline child. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(paragraph, paragraph, 0, 1, AMARK_SPELL_TEXT));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_MARKER,
+                                                     AMARK_FACET_NONE, 0));
+    amark_tree_content_tokens_free(paragraph->content_tokens);
+    paragraph->content_tokens = NULL;
+    text = new_inline(document, AMARK_NODE_TEXT, paragraph);
+    NAOS_REQUIRE_TRUE(text != NULL);
+    REFUSED(amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_MARKER, AMARK_FACET_NONE, 0));
+    amark_node_destroy(text);
+    /* Free content. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_free_content(heading, "ab", 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_trim_content_start(heading, 1, AMARK_SPELL_MARKER,
+                                                     AMARK_FACET_NONE, 0));
+    /* A facet of the type, and a token that overlaps an existing one. */
+    amark_node_destroy(heading);
+    heading = new_block(document, AMARK_NODE_HEADING, 0, 1);
+    NAOS_REQUIRE_TRUE(heading != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_layout_token(heading, 0, 0, 1, AMARK_SPELL_MARKER));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(heading, 0, 0, 5));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_trim_content_start(heading, 1, AMARK_SPELL_MARKER, 3, 0));
+    CHECK_CONTENT(heading, "ab|cd", 5);
+    amark_node_destroy(heading);
+    heading = new_block(document, AMARK_NODE_HEADING, 0, 1);
+    NAOS_REQUIRE_TRUE(heading != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(heading, 0, 1, 5));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(heading, 1, AMARK_SPELL_MARKER, 3, 2));
+    CHECK_CONTENT(heading, "|cd", 3);
+#undef REFUSED
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* An empty piece is the whole of its line: no piece comes after it on the
+ * same line. */
+NAOS_TEST(no_piece_follows_an_empty_piece_on_its_line)
+{
+    amark_document_t *document = new_document("abc\n");
+    amark_node_t *paragraph;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 1, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_add_content(paragraph, 0, 1, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_add_content(paragraph, 0, 2, 3));
+    NAOS_CHECK_UINT_EQ(1, amark_block_content_piece_count(paragraph));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* Appending line by line to content that is not shared copies nothing, even
+ * with tokens on it (bases): linear in the records (14.6). */
+NAOS_TEST(appending_to_unshared_content_with_tokens_does_not_copy)
+{
+    enum { LINES = 2000 };
+    amark_document_t *document;
+    amark_node_t *paragraph;
+    amark_node_t *text;
+    amark_tree_content_t *object;
+    char *source;
+    size_t i;
+    size_t steps;
+
+    source = (char *)malloc((LINES * 3) + 1);
+    NAOS_REQUIRE_TRUE(source != NULL);
+    for (i = 0; i < LINES; i++)
+    {
+        memcpy(source + (i * 3), "ab\n", 3);
+    }
+    source[LINES * 3] = '\0';
+    document = new_document(source);
+    free(source);
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, LINES);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    text = new_inline(document, AMARK_NODE_TEXT, paragraph);
+    NAOS_REQUIRE_TRUE(text != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 2));
+    object = paragraph->content;
+    steps = document->stats.record_steps;
+    for (i = 0; i < LINES; i++)
+    {
+        if (i > 0)
+        {
+            NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                              amark_block_add_content(paragraph, (amark_line_id_t)i, 0, 2));
+        }
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                          add_token((i % 2 == 0) ? text : paragraph, paragraph, i * 3,
+                                    (i * 3) + 2, AMARK_SPELL_TEXT));
+    }
+    NAOS_CHECK_TRUE(paragraph->content == object);
+    NAOS_CHECK_UINT_EQ(2, object->bases);
+    NAOS_CHECK_UINT_EQ(0, document->stats.content_copies);
+    /* Each record is one step, plus the records moved by the growths. */
+    NAOS_CHECK_TRUE((document->stats.record_steps - steps) <= (8u * LINES));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* Content with a base outside the leaf (tokens moved to a node of another leaf)
+ * is copied before its existing bytes change; the base keeps the old bytes. */
+NAOS_TEST(content_with_an_outside_base_is_copied_before_it_changes)
+{
+    amark_document_t *document = new_document("- [ ] a\nbb\ncc\ndd\n");
+    amark_node_t *paragraph;
+    amark_node_t *definition = NULL;
+    amark_node_t *holder;
+    amark_tree_content_t *old;
+    const char *bytes = NULL;
+    size_t length = 0;
+    bool own = true;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 4);
+    holder = new_inline(document, AMARK_NODE_TEXT, NULL);
+    NAOS_REQUIRE_TRUE((paragraph != NULL) && (holder != NULL));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &definition));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 2, 7));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 1, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 2, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 3, 0, 2));
+    /* A token recorded on the paragraph, then moved to a node outside it. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(paragraph, paragraph, 0, 5, AMARK_SPELL_TEXT));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_move_content_tokens(paragraph, holder, 0, 1));
+    old = paragraph->content;
+    NAOS_CHECK_UINT_EQ(1, old->owners);
+    NAOS_CHECK_UINT_EQ(1, old->bases);
+
+    /* Trimming moves the existing bytes: a copy. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_trim_content_start(paragraph, 4,
+                                                                       AMARK_SPELL_MARKER,
+                                                                       AMARK_FACET_NONE, 0));
+    NAOS_CHECK_TRUE(paragraph->content != old);
+    NAOS_CHECK_UINT_EQ(1, document->stats.content_copies);
+    CHECK_CONTENT(paragraph, "a\nbb\ncc\ndd", 10);
+    NAOS_CHECK_UINT_EQ(0, old->owners);
+    NAOS_CHECK_UINT_EQ(1, old->bases);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_content_base(holder, &bytes, &length, NULL, &own));
+    NAOS_CHECK_UINT_EQ(14, length);
+    NAOS_CHECK_TRUE(memcmp(bytes, "[ ] a\nbb\ncc\ndd", 14) == 0);
+    CHECK_TREE_OK(document);
+
+    /* The new content is not shared: the next edits change it in place. */
+    old = paragraph->content;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(paragraph, 3, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(paragraph, definition, 0, 1));
+    NAOS_CHECK_TRUE(paragraph->content == old);
+    NAOS_CHECK_UINT_EQ(1, document->stats.content_copies);
+    CHECK_CONTENT(paragraph, "bb\ncc", 5);
+    CHECK_CONTENT(definition, "a", 1);
+
+    /* A base again: removing and moving copy. */
+    amark_node_destroy(holder);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(paragraph, paragraph, 0, 2, AMARK_SPELL_TEXT));
+    holder = new_inline(document, AMARK_NODE_TEXT, NULL);
+    NAOS_REQUIRE_TRUE(holder != NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_move_content_tokens(paragraph, holder, 0, 1));
+    old = paragraph->content;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(paragraph, 2, 1));
+    NAOS_CHECK_TRUE(paragraph->content != old);
+    NAOS_CHECK_UINT_EQ(2, document->stats.content_copies);
+    CHECK_CONTENT(paragraph, "bb", 2);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_content_base(holder, &bytes, &length, NULL, &own));
+    NAOS_CHECK_UINT_EQ(5, length);
+    NAOS_CHECK_TRUE(memcmp(bytes, "bb\ncc", 5) == 0);
+    NAOS_CHECK_FALSE(own);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* Shares the content of leaf with other (as a copy of the node will): other
+ * gets the same line range and becomes a second owner. */
+static void share_content(amark_node_t *leaf, amark_node_t *other)
+{
+    other->line_first = leaf->line_first;
+    other->line_count = leaf->line_count;
+    other->content = leaf->content;
+    other->content->owners++;
+}
+
+/* Content with two owners is copied before any change, appending included;
+ * the tokens of the leaf and its descendants move to the copy, and the other
+ * owner keeps the old bytes (5.6). */
+NAOS_TEST(content_with_two_owners_is_copied_before_it_changes)
+{
+    amark_document_t *document = new_document("ab\ncd\nef\n");
+    amark_node_t *paragraph;
+    amark_node_t *twin = NULL;
+    amark_node_t *text;
+    amark_node_t *definition = NULL;
+    amark_tree_content_t *old;
+    const char *bytes = NULL;
+    size_t length = 0;
+    bool own = false;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 3);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    text = new_inline(document, AMARK_NODE_TEXT, paragraph);
+    NAOS_REQUIRE_TRUE(text != NULL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &twin));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(text, paragraph, 0, 2, AMARK_SPELL_TEXT));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(paragraph, paragraph, 0, 1, AMARK_SPELL_TEXT));
+    share_content(paragraph, twin);
+    old = paragraph->content;
+    CHECK_TREE_OK(document);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 1, 0, 2));
+    NAOS_CHECK_TRUE(paragraph->content != old);
+    NAOS_CHECK_UINT_EQ(1, document->stats.content_copies);
+    CHECK_CONTENT(paragraph, "ab\ncd", 5);
+    CHECK_CONTENT(twin, "ab", 2);
+    NAOS_CHECK_UINT_EQ(1, old->owners);
+    NAOS_CHECK_UINT_EQ(0, old->bases);
+    NAOS_CHECK_UINT_EQ(1, paragraph->content->owners);
+    NAOS_CHECK_UINT_EQ(2, paragraph->content->bases);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_content_base(text, &bytes, &length, NULL, &own));
+    NAOS_CHECK_TRUE(own);
+    NAOS_CHECK_UINT_EQ(5, length);
+    NAOS_CHECK_TRUE(paragraph->content_tokens->base == paragraph->content);
+    CHECK_TREE_OK(document);
+    /* Now unshared: appending again does not copy. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 2, 0, 2));
+    NAOS_CHECK_UINT_EQ(1, document->stats.content_copies);
+    CHECK_TREE_OK(document);
+
+    /* Two owners again, at the block stage: trimming, removing and moving copy. */
+    amark_node_destroy(text);
+    amark_tree_content_tokens_free(paragraph->content_tokens);
+    paragraph->content_tokens = NULL;
+    amark_node_destroy(twin);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &twin));
+    share_content(paragraph, twin);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_MARKER,
+                                                     AMARK_FACET_NONE, 0));
+    NAOS_CHECK_UINT_EQ(2, document->stats.content_copies);
+    CHECK_CONTENT(paragraph, "b\ncd\nef", 7);
+    CHECK_CONTENT(twin, "ab\ncd\nef", 8);
+    amark_node_destroy(twin);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &twin));
+    share_content(paragraph, twin);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(paragraph, 2, 1));
+    NAOS_CHECK_UINT_EQ(3, document->stats.content_copies);
+    CHECK_CONTENT(paragraph, "b\ncd", 4);
+    CHECK_CONTENT(twin, "b\ncd\nef", 7);
+    amark_node_destroy(twin);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &twin));
+    share_content(paragraph, twin);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &definition));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_move_lines(paragraph, definition, 0, 1));
+    NAOS_CHECK_UINT_EQ(4, document->stats.content_copies);
+    CHECK_CONTENT(paragraph, "cd", 2);
+    CHECK_CONTENT(definition, "b", 1);
+    CHECK_CONTENT(twin, "b\ncd", 4);
+    /* Every line moved from shared content: the leaf just lets it go. */
+    amark_node_destroy(twin);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &twin));
+    share_content(paragraph, twin);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_remove_lines(paragraph, 1, 1));
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_NONE, amark_block_content_state(paragraph));
+    CHECK_CONTENT(twin, "cd", 2);
+    NAOS_CHECK_UINT_EQ(1, twin->content->owners);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* Moving, removing, trimming and copying under allocation failures: each
+ * failed operation leaves the nodes as they were. */
+static amark_error_t lines_oom_scenario(void *context)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *definition = NULL;
+    amark_node_t *extra = NULL;
+    amark_node_t *twin = NULL;
+    amark_node_t *text = NULL;
+    amark_source_id_t source = 0;
+    amark_content_token_t content_token;
+    amark_tree_content_t *old;
+    amark_error_t error;
+    const char *bytes = NULL;
+    size_t length = 0;
+
+    (void)context;
+    error = amark_document_create(NULL, &document);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    error = amark_document_add_source(document, link_definition_text,
+                                      strlen(link_definition_text), AMARK_SOURCE_FINISHED,
+                                      &source);
+    if (error == AMARK_ERROR_NONE)
+    {
+        paragraph = new_link_definition_paragraph(document);
+        error = (paragraph != NULL) ? AMARK_ERROR_NONE : AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_block_move_lines(paragraph, definition, 0, 3);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((amark_block_content_piece_count(paragraph) != 4) ||
+             (amark_block_token_count(paragraph) != 2) || (definition->line_count != 0) ||
+             (definition->content != NULL) || (amark_block_token_count(definition) != 0)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    /* An outside base on the content of the definition: trimming copies. */
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_create(document, AMARK_NODE_TEXT, &text);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        memset(&content_token, 0, sizeof(content_token));
+        content_token.struct_size = sizeof(content_token);
+        content_token.start = 0;
+        content_token.end = 1;
+        content_token.kind = AMARK_SPELL_TEXT;
+        error = amark_node_add_content_token(definition, definition, &content_token);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_move_content_tokens(definition, text, 0, 1);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        old = definition->content;
+        error = amark_block_trim_content_start(definition, 1, AMARK_SPELL_MARKER,
+                                               AMARK_FACET_NONE, 0);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((definition->content != old) || (amark_block_token_count(definition) != 1) ||
+             (old->length != 23) || (old->owners != 1)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_block_remove_lines(definition, 2, 1);
+        if ((error != AMARK_ERROR_NONE) && (amark_block_content_piece_count(definition) != 3))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    /* Two owners: appending copies. */
+    if (error == AMARK_ERROR_NONE)
+    {
+        extra = new_block(document, AMARK_NODE_PARAGRAPH, 0, 3);
+        error = (extra != NULL) ? AMARK_ERROR_NONE : AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_block_add_content(extra, 0, 1, 12);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_create(document, AMARK_NODE_PARAGRAPH, &twin);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        share_content(extra, twin);
+        old = extra->content;
+        error = amark_block_add_content(extra, 1, 0, 4);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((extra->content != old) || (old->owners != 2) || (old->piece_count != 1)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if ((error == AMARK_ERROR_NONE) &&
+        (amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    if ((error == AMARK_ERROR_NONE) &&
+        ((amark_block_content_bytes(definition, &bytes, &length) != AMARK_ERROR_NONE) ||
+         (length != 15) || (memcmp(bytes, "foo]: /url\n\"the", 15) != 0) ||
+         (twin->content->length != 11) || (extra->content->length != 16)))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    amark_document_destroy(document);
+    return error;
+}
+
+NAOS_TEST(out_of_memory_leaves_moved_removed_and_trimmed_lines_unchanged)
+{
+    AMARK_CHECK_OOM_SWEEP(lines_oom_scenario, NULL);
+}
+
 NAOS_SUITE(content,
     NAOS_ADD_TEST(a_new_leaf_has_no_content),
     NAOS_ADD_TEST(input_3_1_laid_content_joins_lines_with_a_virtual_line_break),
@@ -1579,7 +2467,19 @@ NAOS_SUITE(content,
     NAOS_ADD_TEST(moving_and_splitting_drop_the_derived_values_and_notify),
     NAOS_ADD_TEST(the_base_of_moved_tokens_is_their_original_content),
     NAOS_ADD_TEST(the_check_detects_broken_content_tokens),
-    NAOS_ADD_TEST(out_of_memory_leaves_the_content_tokens_unchanged)
+    NAOS_ADD_TEST(out_of_memory_leaves_the_content_tokens_unchanged),
+    NAOS_ADD_TEST(the_first_lines_of_a_paragraph_move_to_a_link_reference_definition),
+    NAOS_ADD_TEST(the_last_lines_of_a_paragraph_move_to_another_leaf),
+    NAOS_ADD_TEST(a_move_out_of_its_preconditions_is_refused),
+    NAOS_ADD_TEST(lines_of_a_paragraph_are_removed_for_a_table),
+    NAOS_ADD_TEST(a_task_list_marker_becomes_the_spelling_of_the_paragraph),
+    NAOS_ADD_TEST(trimming_into_a_tab_leaves_its_rest_as_spaces),
+    NAOS_ADD_TEST(a_trim_out_of_its_preconditions_is_refused),
+    NAOS_ADD_TEST(no_piece_follows_an_empty_piece_on_its_line),
+    NAOS_ADD_TEST(appending_to_unshared_content_with_tokens_does_not_copy),
+    NAOS_ADD_TEST(content_with_an_outside_base_is_copied_before_it_changes),
+    NAOS_ADD_TEST(content_with_two_owners_is_copied_before_it_changes),
+    NAOS_ADD_TEST(out_of_memory_leaves_moved_removed_and_trimmed_lines_unchanged)
 )
 
 NAOS_MAIN(
