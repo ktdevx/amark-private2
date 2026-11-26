@@ -33,4 +33,12 @@
 #include <amark/utf8.h>
 #include <amark/unicode.h>
 
+/* 2. Syntax tree */
+#include <amark/node.h>
+#include <amark/document.h>
+#include <amark/token.h>
+#include <amark/iterator.h>
+#include <amark/dump.h>
+#include <amark/extension.h>
+
 #endif /* AMARK_AMARK_H */

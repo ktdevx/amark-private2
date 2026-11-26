@@ -87,6 +87,7 @@ if(AMARK_BUILD_TESTS)
 endif()
 
 add_subdirectory(base)
+add_subdirectory(tree)
 add_subdirectory(testgen)
 
 # The checks of the public headers (amark_header_check, cxx_include_test,

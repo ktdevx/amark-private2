@@ -29,6 +29,24 @@ target_sources(amark_objects PRIVATE
   base/utf8.c
   base/unicode.c
   base/buffer.c
+  # syntax-tree, in the dependency order of its design (a file calls no function
+  # of the files after it).
+  tree/builtin_types.c
+  tree/syntax_set.c
+  tree/edit_tracking.c
+  tree/node.c
+  tree/document.c
+  tree/token.c
+  tree/structure_edit.c
+  tree/literal.c
+  tree/attr.c
+  tree/copy_import.c
+  tree/token_check.c
+  tree/span.c
+  tree/iterator.c
+  tree/equal.c
+  tree/dump.c
+  tree/tree_check.c
 )
 amark_target_defaults(amark_objects)
 target_include_directories(amark_objects PRIVATE
