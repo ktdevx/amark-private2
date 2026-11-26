@@ -1378,9 +1378,7 @@ NAOS_TEST(invalid_attribute_names_fail_the_dump)
         out = dump_of(s.box, 0);
         NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, dump_results[0]);
         NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, dump_results[1]);
-        strcpy(expected, "(x.box :");
-        strcat(expected, good_names[i]);
-        strcat(expected, " 1 :after 2)\n");
+        (void)snprintf(expected, sizeof(expected), "(x.box :%s 1 :after 2)\n", good_names[i]);
         NAOS_CHECK_STR_EQ(expected, amark_buffer_data(out));
         amark_buffer_destroy(out);
     }
@@ -1468,8 +1466,9 @@ NAOS_TEST(the_writer_formats_each_value_kind)
      * literal. */
     amark_document_set_edit_tracking(document, true);
     amark_node_mark_edited(node);
-    sprintf(expected, "(y.limits :min %lld :max %lld :zero 0 :no false :edits (content) \"v\")\n",
-            LLONG_MIN, LLONG_MAX);
+    (void)snprintf(expected, sizeof(expected),
+                   "(y.limits :min %lld :max %lld :zero 0 :no false :edits (content) \"v\")\n",
+                   LLONG_MIN, LLONG_MAX);
     CHECK_DUMP(node, AMARK_DUMP_EDITS, expected);
     amark_document_destroy(document);
     amark_syntax_set_destroy(set);

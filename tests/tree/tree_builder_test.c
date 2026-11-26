@@ -403,7 +403,7 @@ static amark_error_t record_attr(amark_node_t *node, const char *name, const cha
     if ((i < 8) && (strlen(name) < 16) && (length < 32))
     {
         r->nodes[i] = node;
-        strcpy(r->names[i], name);
+        memcpy(r->names[i], name, strlen(name) + 1);
         memcpy(r->values[i], value, length + 1);
         r->lengths[i] = length;
     }
