@@ -98,6 +98,79 @@ typedef uint32_t amark_line_id_t;
 /* No line. */
 #define AMARK_LINE_NONE UINT32_MAX
 
+/* ---- Creation and release ---------------------------------------------------- */
+
+/*
+ * Creates in *out a node of type type that belongs to document: it is not in the
+ * tree (no parent, no sibling, no child), has no line range and no spelling, and
+ * its facets have the defaults of the type. When the type has extension data
+ * (data_size), the data is zero-filled and then given to the init function of
+ * the type, if any; when init fails, the node is freed (without deinit) and its
+ * error is returned. AMARK_ERROR_INVALID_ARGUMENT for NULL and for a type the
+ * syntax set of document does not hold. On failure *out is NULL and document is
+ * unchanged.
+ */
+AMARK_API amark_error_t amark_node_create(amark_document_t *document, amark_node_type_t type,
+                                          amark_node_t **out);
+
+/*
+ * Frees node and its descendants: when node is in a tree, it is first removed
+ * from it. The deinit function of the type is called for each node that has
+ * one. The walk uses neither recursion nor a stack, so a subtree of any depth
+ * can be freed. Does nothing for NULL and for the root of a document (it is
+ * freed with its document).
+ */
+AMARK_API void amark_node_destroy(amark_node_t *node);
+
+/* ---- Relations (4.1) ----------------------------------------------------------- */
+
+/* The type of node (AMARK_NODE_NONE for NULL). */
+AMARK_API amark_node_type_t amark_node_get_type(const amark_node_t *node);
+
+/* The descriptor of the type of node (NULL for NULL). */
+AMARK_API const amark_node_type_desc_t *amark_node_type_desc(const amark_node_t *node);
+
+/* The document node belongs to (NULL for NULL). */
+AMARK_API amark_document_t *amark_node_document(const amark_node_t *node);
+
+/* The parent, the first and the last child, and the next and the previous
+ * sibling of node; NULL when there is none or node is NULL. */
+AMARK_API amark_node_t *amark_node_parent(const amark_node_t *node);
+AMARK_API amark_node_t *amark_node_first_child(const amark_node_t *node);
+AMARK_API amark_node_t *amark_node_last_child(const amark_node_t *node);
+AMARK_API amark_node_t *amark_node_next(const amark_node_t *node);
+AMARK_API amark_node_t *amark_node_previous(const amark_node_t *node);
+
+/*
+ * The classification of the type of node (false for NULL):
+ *   - is_block, is_inline: the level of the type.
+ *   - is_container: a block with a margin on each line it covers
+ *     (AMARK_NODE_TYPE_MARGINS: block_quote, item, the containers of extensions);
+ *     document and list hold blocks but are not containers.
+ *   - has_content: a leaf block with content (AMARK_NODE_TYPE_CONTENT).
+ */
+AMARK_API bool amark_node_is_block(const amark_node_t *node);
+AMARK_API bool amark_node_is_inline(const amark_node_t *node);
+AMARK_API bool amark_node_is_container(const amark_node_t *node);
+AMARK_API bool amark_node_has_content(const amark_node_t *node);
+
+/* Whether parent can have a child of type child under the containment rules of
+ * the syntax set of its document (false for NULL and for an unknown type). */
+AMARK_API bool amark_node_can_contain(const amark_node_t *parent, amark_node_type_t child);
+
+/* ---- User pointers and extension data (4.5) ------------------------------------ */
+
+/* The pointer the application associated with node (NULL until set, and for a
+ * NULL node). Amark never uses nor frees it. */
+AMARK_API void *amark_node_user_data(const amark_node_t *node);
+
+/* Associates user_data with node. Does nothing for a NULL node. */
+AMARK_API void amark_node_set_user_data(amark_node_t *node, void *user_data);
+
+/* The extension data of node (data_size bytes of its type), or NULL when the type
+ * has none or node is NULL. */
+AMARK_API void *amark_node_data(amark_node_t *node);
+
 AMARK_END_DECLS
 
 #endif /* AMARK_NODE_H */

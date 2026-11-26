@@ -167,6 +167,46 @@ NAOS_TEST(builtin_types_link)
                                     ->enum_names[AMARK_HEADING_FORM_SETEXT - 1]);
 }
 
+NAOS_TEST(document_and_node_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *root;
+    amark_node_t *node = NULL;
+    amark_syntax_set_t *set = NULL;
+    int value = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_CHECK_PTR_EQ(amark_syntax_set_core(), amark_document_syntax_set(document));
+    root = amark_document_root(document);
+    NAOS_REQUIRE_NOT_NULL(root);
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_DOCUMENT, amark_node_get_type(root));
+    NAOS_CHECK_NOT_NULL(amark_node_type_desc(root));
+    NAOS_CHECK_PTR_EQ(document, amark_node_document(root));
+    NAOS_CHECK_TRUE(amark_node_is_block(root));
+    NAOS_CHECK_FALSE(amark_node_is_inline(root));
+    NAOS_CHECK_FALSE(amark_node_is_container(root));
+    NAOS_CHECK_FALSE(amark_node_has_content(root));
+    NAOS_CHECK_TRUE(amark_node_can_contain(root, AMARK_NODE_PARAGRAPH));
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &node));
+    NAOS_CHECK_NULL(amark_node_parent(node));
+    NAOS_CHECK_NULL(amark_node_first_child(node));
+    NAOS_CHECK_NULL(amark_node_last_child(node));
+    NAOS_CHECK_NULL(amark_node_next(node));
+    NAOS_CHECK_NULL(amark_node_previous(node));
+    NAOS_CHECK_NULL(amark_node_data(node));
+    amark_node_set_user_data(node, &value);
+    NAOS_CHECK_PTR_EQ(&value, amark_node_user_data(node));
+    amark_node_destroy(node);
+    amark_document_destroy(document);
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_create(&set));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_freeze(set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &document));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_take_syntax_set(document, set));
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -175,7 +215,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(utf8_and_unicode_functions_link),
     NAOS_ADD_TEST(entity_functions_link),
     NAOS_ADD_TEST(registry_functions_link),
-    NAOS_ADD_TEST(builtin_types_link)
+    NAOS_ADD_TEST(builtin_types_link),
+    NAOS_ADD_TEST(document_and_node_functions_link)
 )
 
 NAOS_MAIN(
