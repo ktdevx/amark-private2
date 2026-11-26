@@ -57,3 +57,9 @@ amark_add_test(copy_import_test SOURCES copy_import_test.c INTERNAL)
 # left, the edits during the traversal, the resets and their rejections, a deep
 # chain and the out-of-memory sweep of the creation (public API only).
 amark_add_test(iterator_span_test SOURCES iterator_span_test.c)
+
+# The semantic comparison: the tokens, records and associated pointers ignored, each
+# attribute, literal, type and child difference, the type data of extension types,
+# other syntax sets, the text normalization, a deep chain and no allocation (public
+# API only; 6.2 adds the dump to the same file).
+amark_add_test(equal_dump_test SOURCES equal_dump_test.c)

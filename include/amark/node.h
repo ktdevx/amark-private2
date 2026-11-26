@@ -311,15 +311,24 @@ AMARK_API amark_error_t amark_node_import_children(amark_node_t *parent, amark_n
 
 /* --- Comparison --------------------------------------------------------------- */
 
-/* Compares adjacent text nodes as one string and ignores empty text nodes. */
+/*
+ * Compares each run of adjacent text siblings as one string (the concatenation of
+ * their literals; a run never joins text across another node or across levels)
+ * and ignores empty text nodes, so that a node whose children are all empty text
+ * nodes equals a node without children. a and b themselves, when they are text
+ * nodes, are compared by their own literals.
+ */
 #define AMARK_EQUAL_NORMALIZE_TEXT 0x01u
 
 /*
  * Whether the subtrees of a and b have the same meaning: the same type
- * descriptors, type data (the equal function, or else the bytes), literals and
- * children. The tokens, the positions, the edit records and the associated
- * pointers are ignored. a and b may belong to different documents. Allocates
- * nothing.
+ * descriptors (the same descriptor is the same type in every syntax set), type
+ * data (the equal function of the type when it has one, otherwise the data_size
+ * bytes), literals and children, in order. The tokens, the positions, the edit
+ * records and the associated pointers are ignored. a and b may belong to
+ * different documents and syntax sets. false when a or b is NULL (also both).
+ * Unknown bits of flags are ignored. Walks both subtrees without recursion and
+ * allocates nothing.
  */
 AMARK_API bool amark_node_equal(const amark_node_t *a, const amark_node_t *b, uint32_t flags);
 
