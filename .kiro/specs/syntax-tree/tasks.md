@@ -98,7 +98,7 @@
   - _Depends: 4.2_
   - _Requirements: 6.9_
 
-- [ ] 5.2 (P) 複製と別の文書からの取り込みを実装する
+- [x] 5.2 (P) 複製と別の文書からの取り込みを実装する
   - 部分木を反復で複製し（型のデータは複製の関数、なければバイトの複製）、リテラル・トークン・編集の記録を保ち、関連付けたポインタは複製しない
   - 取り込みでは、取り込み先の構文セットで記述子を対応付け、参照されるソースを取り込み先に複製してトークンのソースの識別子を付け替える。同じ文書なら複製と同じにする
   - 失敗時は作りかけのノードと追加したソースを取り除き、取り込み先を変えない。根の複製と取り込みは拒否する
@@ -201,3 +201,5 @@
 - 4.3: tree.h の内部関数 `amark_text_check` / `amark_text_has_line_ending` / `amark_text_has_blank_line` / `amark_text_normalize`（空は NULL、CR がなければそのまま複製）/ `amark_text_equal` を attr.c（4.4）で使う。一括設定は各改行（LF、CR、CRLF）を 1 つの softbreak にし、空の text を作らない。空文字列は子をすべて取り除き、子がなく空なら何も記録しない（子の構成が変わらないため）。text の子のリテラルは直接設定し CONTENT を付けない。改行を含むときは softbreak も包含の規則で検査する（この経路と、子を持つノードへの空文字列の CHILDREN の記録は、7.1 の拡張の型のテストで確かめるとよい）
 - 4.4: title と label は SPAN のリテラルと同じく LF に揃える（末尾の LF は足さない）。label の「空白」は空白、タブ、LF、CR。符号位置の数は CRLF を 1 つ、エスケープを 2 つと数える。エスケープは ASCII の句読点の前の `\`。末尾の対にならない `\` は拒否する（閉じ括弧をエスケープしてしまうため）。空の label の設定は拒否する。list の start は種類によらず保持・比較し、変われば CONTENT を記録する
 - 5.1: ロスレス性の検証の列はバイト単位で数える（`amark_document_position` と同じ。CommonMark では部分的なタブの前に来るのは ASCII のコンテナの接頭辞だけ）。長さ 0 のトークンは集めない。部分的なタブのバイトを通常のトークンが覆うと TAB_COLUMNS。`struct_size` が v1 未満の報告には何も書かない。テストは公開 API だけで書ける（`token_check_test` は INTERNAL でない）
+- 5.2: 内部関数 `amark_node_create_copy`（node.c。0 で埋めて `init` を呼ばず、`copy` かバイトの複製でデータを作る。`copy` の失敗では `deinit` を呼ばない）と `amark_document_truncate_sources`（document.c）を tree.h に加えた。複製は記録をそのまま写し、複製自体には `CREATED` を付けない。取り込みは使われるソースだけを識別子の増える順に複製する（トークンの順が保たれる）。copy_import.c の context_init / check_types / mark_sources / copy_sources / copy_subtree / context_rollback は 5.5 で再利用する
+- 5.2: 公開の extension.h に、`init` と `copy` は失敗時に自分で確保したものを解放すること、所有するデータを持つ型は `copy` を用意すること（ないとバイトの複製になる）を 7.1 か 7.5 で書き足す。`amark_node_create_copy` は `data_size` が 0 のとき `copy` を呼ばない（init/deinit とは非対称。必要なら直す）

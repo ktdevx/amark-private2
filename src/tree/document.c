@@ -382,6 +382,19 @@ amark_error_t amark_document_add_source(amark_document_t *document, const char *
     return AMARK_ERROR_NONE;
 }
 
+void amark_document_truncate_sources(amark_document_t *document, size_t count)
+{
+    /* The array keeps its capacity. */
+    while (document->source_count > count)
+    {
+        amark_source_t *source = &document->sources[document->source_count - 1];
+
+        amark_buffer_deinit(&source->bytes);
+        amark_free(source->line_starts);
+        document->source_count--;
+    }
+}
+
 amark_error_t amark_document_append_source(amark_document_t *document,
                                            amark_source_id_t source, const char *data,
                                            size_t length)

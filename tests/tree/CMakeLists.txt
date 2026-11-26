@@ -46,3 +46,9 @@ amark_add_test(literal_attr_test SOURCES literal_attr_test.c INTERNAL)
 # each kind of problem with its offset and owner, the detached nodes left out and
 # the out-of-memory sweep (public API only).
 amark_add_test(token_check_test SOURCES token_check_test.c)
+
+# Copies and imports: the copy compared with the original by a reference function,
+# the records, the import into another syntax set with the sources renumbered,
+# the rejections, deep chains and the out-of-memory sweeps (reads the ring and
+# checks the invariants).
+amark_add_test(copy_import_test SOURCES copy_import_test.c INTERNAL)

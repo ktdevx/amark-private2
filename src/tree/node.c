@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* The types with the strictest alignment C99 has (it has no max_align_t). */
 typedef union node_max_align
@@ -159,6 +160,56 @@ amark_error_t amark_node_create_with_desc(amark_document_t *document, amark_node
 
     ring_add(node);
     amark_edit_mark(node, AMARK_EDIT_CREATED);
+
+    *out_node = node;
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_node_create_copy(amark_document_t *document, amark_node_type_t type,
+                                     const amark_node_t *src, amark_node_t **out_node)
+{
+    const amark_node_type_desc_t *desc = src->desc;
+    amark_node_t *node;
+    size_t size;
+
+    *out_node = NULL;
+    if (!amark_size_add(DATA_OFFSET, desc->data_size, &size))
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+
+    /* Zero-filled like a new node, but the type data is the copy of the one of src
+     * (the copy function, or else its bytes) instead of what init would make. */
+    node = amark_calloc(1, size);
+    if (node == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+
+    node->document = document;
+    node->desc = desc;
+    node->type = type;
+
+    if (desc->data_size != 0)
+    {
+        if (desc->copy != NULL)
+        {
+            amark_error_t err = desc->copy(node, node_data(node), src, node_data(src));
+
+            /* Like a failed init: the data was never made, so no deinit. */
+            if (err != AMARK_ERROR_NONE)
+            {
+                amark_free(node);
+                return err;
+            }
+        }
+        else
+        {
+            memcpy(node_data(node), node_data(src), desc->data_size);
+        }
+    }
+
+    ring_add(node);
 
     *out_node = node;
     return AMARK_ERROR_NONE;

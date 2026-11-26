@@ -122,11 +122,31 @@ amark_error_t amark_node_create_with_desc(amark_document_t *document, amark_node
                                           amark_node_t **out_node);
 
 /*
+ * Creates a detached node of type in document whose descriptor and type data are
+ * copies of those of src (a node of document or of another document whose syntax
+ * set holds the descriptor of src as type): the copy function of the type, or
+ * else the bytes, instead of init. A type data the copy function failed on is not
+ * deinitialized, as one whose init failed (the copy function frees what it
+ * allocated). Sets no link, literal, token or record, and records nothing.
+ */
+amark_error_t amark_node_create_copy(amark_document_t *document, amark_node_type_t type,
+                                     const amark_node_t *src, amark_node_t **out_node);
+
+/*
  * Destroys the subtree of node, which is detached, in postorder and without
  * recursion: for each node, the deinit function of its type, its literal,
  * its tokens, and its removal from the ring of the document.
  */
 void amark_node_destroy_subtree(amark_node_t *node);
+
+/* --- document.c --------------------------------------------------------------- */
+
+/*
+ * Removes the sources of document from the identifier count up (count at most the
+ * number of sources), freeing their bytes and line index: undoes the sources added
+ * since the number of sources was count. No token may refer to them any more.
+ */
+void amark_document_truncate_sources(amark_document_t *document, size_t count);
 
 /* --- structure_edit.c --------------------------------------------------------- */
 
