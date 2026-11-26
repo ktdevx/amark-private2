@@ -85,3 +85,11 @@ amark_add_test(tree_builder_internal_test SOURCES tree_builder_test.c LIBRARIES 
 # each function counted and no block left, and the round trip of the dump through
 # amark_test_tree_build with an attribute function (public API only).
 amark_add_test(extension_type_test SOURCES extension_type_test.c LIBRARIES amark_test_tree)
+
+# The out-of-memory sweep of every operation that allocates, in one place: the
+# creation of documents, sources and nodes, literals, attributes, inline text,
+# tokens, copies, imports, imports of children, syntax sets, the iterator, the dump
+# and the lossless check; on each failure the documents (dump with tokens and
+# records, sources, ring, invariants), the syntax sets and the outputs are as
+# before (reads the ring and checks the invariants).
+amark_add_test(oom_test SOURCES oom_test.c LIBRARIES amark_test_tree INTERNAL)
