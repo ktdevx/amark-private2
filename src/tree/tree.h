@@ -124,10 +124,11 @@ amark_error_t amark_node_create_with_desc(amark_document_t *document, amark_node
 /*
  * Creates a detached node of type in document whose descriptor and type data are
  * copies of those of src (a node of document or of another document whose syntax
- * set holds the descriptor of src as type): the copy function of the type, or
- * else the bytes, instead of init. A type data the copy function failed on is not
- * deinitialized, as one whose init failed (the copy function frees what it
- * allocated). Sets no link, literal, token or record, and records nothing.
+ * set holds the descriptor of src as type): the copy function of the type (also
+ * when data_size is 0, with NULL data), or else the bytes, instead of init. A type
+ * data the copy function failed on is not deinitialized, as one whose init failed
+ * (the copy function frees what it allocated). Sets no link, literal, token or
+ * record, and records nothing.
  */
 amark_error_t amark_node_create_copy(amark_document_t *document, amark_node_type_t type,
                                      const amark_node_t *src, amark_node_t **out_node);

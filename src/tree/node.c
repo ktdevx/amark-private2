@@ -190,23 +190,22 @@ amark_error_t amark_node_create_copy(amark_document_t *document, amark_node_type
     node->desc = desc;
     node->type = type;
 
-    if (desc->data_size != 0)
+    /* The copy function is called also without type data (NULL pointers), as init
+     * and deinit are. */
+    if (desc->copy != NULL)
     {
-        if (desc->copy != NULL)
-        {
-            amark_error_t err = desc->copy(node, node_data(node), src, node_data(src));
+        amark_error_t err = desc->copy(node, node_data(node), src, node_data(src));
 
-            /* Like a failed init: the data was never made, so no deinit. */
-            if (err != AMARK_ERROR_NONE)
-            {
-                amark_free(node);
-                return err;
-            }
-        }
-        else
+        /* Like a failed init: the data was never made, so no deinit. */
+        if (err != AMARK_ERROR_NONE)
         {
-            memcpy(node_data(node), node_data(src), desc->data_size);
+            amark_free(node);
+            return err;
         }
+    }
+    else if (desc->data_size != 0)
+    {
+        memcpy(node_data(node), node_data(src), desc->data_size);
     }
 
     ring_add(node);

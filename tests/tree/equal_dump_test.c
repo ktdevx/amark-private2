@@ -18,7 +18,8 @@
  * Suite equal_text (9.2): text split differently is equal only with
  * AMARK_EQUAL_NORMALIZE_TEXT, which compares each run of adjacent text siblings as
  * one string (not across other nodes, with the nodes after the runs compared in
- * order) and ignores empty text nodes.
+ * order) and ignores empty text nodes; a code with the literal of a text is not
+ * text.
  * Suite dump (9.3, 9.4, 9.5, 7.10, 4.9): the example of the design, every built-in
  * attribute in order with the extension attributes, the same text for the same
  * tree (appended after the content of the buffer), each string escape (valid UTF-8
@@ -898,11 +899,56 @@ NAOS_TEST(empty_text_is_ignored_when_normalized)
     amark_document_destroy(e);
 }
 
+/* Creates a code node with literal and appends it to parent. */
+static amark_node_t *add_code(amark_document_t *document, amark_node_t *parent,
+                              const char *literal)
+{
+    amark_node_t *node = add(document, parent, AMARK_NODE_CODE);
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_literal(node, literal, strlen(literal)));
+
+    return node;
+}
+
+NAOS_TEST(a_code_with_the_literal_of_a_text_is_not_text)
+{
+    amark_document_t *d = NULL;
+    amark_document_t *e = NULL;
+    amark_node_t *a;
+    amark_node_t *b;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &d));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &e));
+
+    /* As roots, and as the only child. */
+    CHECK_TEXT(add_text(d, NULL, "ab"), add_code(e, NULL, "ab"), false, false);
+    a = PARAGRAPH(d, "ab");
+    b = add(e, NULL, AMARK_NODE_PARAGRAPH);
+    (void)add_code(e, b, "ab");
+    CHECK_TEXT(a, b, false, false);
+
+    /* A code is not part of a run of text: "a" + code "b" is not the run "ab". */
+    a = PARAGRAPH(d, "ab");
+    b = PARAGRAPH(e, "a");
+    (void)add_code(e, b, "b");
+    CHECK_TEXT(a, b, false, false);
+
+    /* Nor between two texts. */
+    a = PARAGRAPH(d, "a", "b", "c");
+    b = PARAGRAPH(e, "a");
+    (void)add_code(e, b, "b");
+    (void)add_text(e, b, "c");
+    CHECK_TEXT(a, b, false, false);
+    amark_document_destroy(d);
+    amark_document_destroy(e);
+}
+
 NAOS_SUITE(equal_text,
     NAOS_SET_TEARDOWN(restore),
     NAOS_ADD_TEST(text_split_differently_is_equal_only_when_normalized),
     NAOS_ADD_TEST(runs_do_not_join_across_other_nodes),
-    NAOS_ADD_TEST(empty_text_is_ignored_when_normalized))
+    NAOS_ADD_TEST(empty_text_is_ignored_when_normalized),
+    NAOS_ADD_TEST(a_code_with_the_literal_of_a_text_is_not_text))
 
 /* --- Suites dump and dump_writer ----------------------------------------------- */
 

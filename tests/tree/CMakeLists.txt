@@ -76,3 +76,12 @@ amark_add_test(equal_dump_test SOURCES equal_dump_test.c INTERNAL)
 amark_add_test(tree_builder_test SOURCES tree_builder_test.c LIBRARIES amark_test_tree)
 amark_add_test(tree_builder_internal_test SOURCES tree_builder_test.c LIBRARIES amark_test_tree
   INTERNAL)
+
+# The extension types of the tests through the whole public API: the identifiers
+# and the slots of a user kind in the order of the set, the containment overrides,
+# the literal check, the inline text of a type that rejects soft breaks, the
+# records of amark_node_mark_edited, the copy, the import into sets with and
+# without the types, the comparison, the dump and the destruction with the calls of
+# each function counted and no block left, and the round trip of the dump through
+# amark_test_tree_build with an attribute function (public API only).
+amark_add_test(extension_type_test SOURCES extension_type_test.c LIBRARIES amark_test_tree)

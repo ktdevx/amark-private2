@@ -81,17 +81,27 @@ struct amark_node_type_desc
     amark_literal_mode_t literal_mode;
     /* The size of the type data of each node, zero-filled at creation; may be 0. */
     size_t data_size;
-    /* The rest is optional (NULL allowed). */
+    /*
+     * The rest is optional (NULL allowed). The functions of the type data are
+     * called also when data_size is 0, with NULL data pointers. A type whose data
+     * owns memory (a string allocated with amark_malloc, ...) provides deinit to
+     * free it and copy to duplicate it: without copy, the bytes are copied and the
+     * copy would share (and free again) what the original owns.
+     */
     /* Overrides the containment rule for the children of this type. */
     bool (*can_contain)(const struct amark_node_type_desc *self,
                         const struct amark_node_type_desc *child);
     /* Checks a literal after the rules of literal_mode. */
     amark_error_t (*validate_literal)(const amark_node_t *node, const char *text, size_t length);
-    /* Initializes the zero-filled type data of a new node. */
+    /* Initializes the zero-filled type data of a new node. On failure it frees what
+     * it allocated: deinit is not called and the node is not created. */
     amark_error_t (*init)(amark_node_t *node, void *data);
-    /* Frees what the type data owns. */
+    /* Frees what the type data owns; called once for each node that init or copy
+     * made. */
     void (*deinit)(amark_node_t *node, void *data);
-    /* Copies the type data (otherwise its bytes are copied). */
+    /* Copies the type data of src into the zero-filled dst_data of a new node,
+     * instead of init (otherwise the data_size bytes are copied). On failure it
+     * frees what it allocated: deinit is not called and the copy fails. */
     amark_error_t (*copy)(amark_node_t *dst, void *dst_data, const amark_node_t *src,
                           const void *src_data);
     /* Compares the type data (otherwise its bytes are compared). */
