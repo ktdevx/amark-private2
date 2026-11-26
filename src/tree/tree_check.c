@@ -12,8 +12,8 @@
  *   2. the walk visits each node of each tree once and runs the node checks
  *      (node_checks[]) on it: the relations, the containment rules, the link in
  *      link rule, the cache invariant, the storage of the facets, the
- *      layout (the line range and the layout records), the content of a leaf
- *      and the content tokens.
+ *      layout (the line range and the layout records), the verbatim results
+ *      of the cache, the content of a leaf and the content tokens.
  * A component that adds records or caches adds its invariant as a node check
  * (records of one node: facets, margins, tokens, content tokens) or as a
  * document check after the walk (whole-document counts: the owners of the
@@ -505,6 +505,105 @@ static bool check_derived(check_context_t *context, const amark_node_t *node)
     return true;
 }
 
+/* The verbatim results of a node (Verbatim): its remembered leaf, while current,
+ * is its leaf; and while its cache is valid, the flags fit the node, the
+ * remembered columns are there exactly when the flags need them, and each is
+ * within the width of its line. Runs after check_layout, so the line range of
+ * the node is in the line table. */
+static bool check_verbatim_cache(check_context_t *context, const amark_node_t *node)
+{
+    const uint32_t known = AMARK_TREE_CACHE_VALID | AMARK_TREE_CACHE_VERBATIM |
+                           AMARK_TREE_CACHE_FULL_LINES | AMARK_TREE_CACHE_STARTS |
+                           AMARK_TREE_CACHE_ENDS;
+    uint32_t flags = node->cache_flags;
+    bool verbatim = (flags & AMARK_TREE_CACHE_VERBATIM) != 0;
+    bool full = (flags & AMARK_TREE_CACHE_FULL_LINES) != 0;
+    bool starts = (flags & AMARK_TREE_CACHE_STARTS) != 0;
+    bool ends = (flags & AMARK_TREE_CACHE_ENDS) != 0;
+    bool block = node->desc->level == AMARK_NODE_LEVEL_BLOCK;
+    bool container = block && ((node->desc->flags & AMARK_NODE_TYPE_MARGINS) != 0);
+    uint32_t count = node->line_count;
+    uint64_t current = context->document->structure_generation + 1;
+    uint32_t i;
+
+    /* The remembered leaf of an inline node, while it is current: the block
+     * parent, or the leaf its inline parent remembers (none without a parent);
+     * a block remembers nothing. */
+    if (node->leaf_memo_generation > current)
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                    "a remembered leaf from a structure generation to come");
+    }
+    if (node->leaf_memo_generation == current)
+    {
+        const amark_node_t *parent = node->parent;
+        bool consistent;
+
+        if (block)
+        {
+            consistent = false;
+        }
+        else if (parent == NULL)
+        {
+            consistent = node->leaf_memo == NULL;
+        }
+        else if (parent->desc->level == AMARK_NODE_LEVEL_BLOCK)
+        {
+            consistent = node->leaf_memo == parent;
+        }
+        else
+        {
+            consistent = (parent->leaf_memo_generation == current) &&
+                         (parent->leaf_memo == node->leaf_memo);
+        }
+        if (!consistent)
+        {
+            return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                        "the remembered leaf of an inline node is not its leaf");
+        }
+    }
+    if ((flags & AMARK_TREE_CACHE_VALID) == 0)
+    {
+        return true;
+    }
+    if ((flags & ~known) != 0)
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CACHE, node, "an unknown cache flag");
+    }
+    if (!block || !verbatim)
+    {
+        if (full || starts || ends || (node->verbatim_columns != NULL))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                        "verbatim columns or line flags on a node that is not a verbatim block");
+        }
+        return true;
+    }
+    if ((count == 0) || (starts == container) || (ends == full) ||
+        ((node->verbatim_columns != NULL) != (starts || ends)))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                    "the verbatim flags or columns do not fit the block");
+    }
+    if (container && ((node->records == NULL) || (node->records->margin_count != count)))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                    "a verbatim container without one margin per line");
+    }
+    for (i = 0; i < count; i++)
+    {
+        uint32_t width = context->document->lines[node->line_first + i].width;
+
+        if ((starts && (node->verbatim_columns[i] > width)) ||
+            (ends && (node->verbatim_columns[(starts ? count : 0) + i] > width)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_CACHE, node,
+                        "a remembered verbatim column beyond the width of its line");
+        }
+    }
+    return true;
+}
+
 /* The checks of one node, in order. Add the invariants of the records and the
  * caches of a node here. */
 static const node_check_t node_checks[] = {
@@ -514,6 +613,7 @@ static const node_check_t node_checks[] = {
     check_cache,
     check_facets,
     check_layout,
+    check_verbatim_cache,
     check_content,
     check_content_tokens,
     check_derived,

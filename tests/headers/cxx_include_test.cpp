@@ -542,6 +542,9 @@ NAOS_TEST(verbatim_functions_link)
     NAOS_CHECK_TRUE(state.complete);
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_verbatim(paragraph, &out));
     NAOS_CHECK_TRUE(out);
+    out = false;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(paragraph, &out));
+    NAOS_CHECK_TRUE(out);
     amark_node_destroy(paragraph);
     amark_document_destroy(document);
 }

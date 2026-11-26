@@ -503,6 +503,37 @@ AMARK_API amark_error_t amark_node_spelling_state(const amark_node_t *node,
  */
 AMARK_API amark_error_t amark_block_content_verbatim(const amark_node_t *leaf, bool *out);
 
+/*
+ * Whether the subtree of node can be output in its original spelling (11.4):
+ * *out is true exactly when
+ *   - for a block: no node of the subtree dropped any spelling; the block has a
+ *     line range; the content of each leaf with content can be output in its
+ *     original lines (amark_block_content_verbatim; a leaf without content has
+ *     nothing spelled on a content); the children of each block hold, lie in its
+ *     range and follow each other in the order of their lines; and each line of
+ *     the range of each block is covered without gap or overlap, from a column
+ *     c0 up to the end of the line, by the margin of the line (required on each
+ *     line of a container), the layout tokens, the blank line, the content
+ *     pieces and the children of the block. Only the children of a type with
+ *     AMARK_NODE_TYPE_SHARE_LINES share a line, in columns that follow each other
+ *     in the order of the children (7.8). The columns left of c0 (the margins of
+ *     the ancestors of node, which amark_block_find_margin tells, 11.5) are not
+ *     judged: a block moved under other containers keeps its own spelling but
+ *     its lines lack their margins, so its new ancestors are not verbatim;
+ *   - for an inline node: no node of the subtree dropped any spelling, its
+ *     tokens are on the laid content of its leaf, and the tokens of the subtree
+ *     nest and cover the range of the node exactly once.
+ * The results are cached in the nodes and dropped by every change of a node or
+ * of its descendants (records, values, styles, structure), so that judging every
+ * node of a document takes time proportional to its nodes and records (14.9).
+ * The cache is internal state: like any getter, the query is not a read-only
+ * operation for concurrency (one thread per document). AMARK_ERROR_INVALID_ARGUMENT
+ * for NULL arguments; AMARK_ERROR_OUT_OF_MEMORY when the columns the judgment
+ * remembers cannot be allocated (*out is then false, and the results already
+ * cached stay consistent).
+ */
+AMARK_API amark_error_t amark_node_verbatim(const amark_node_t *node, bool *out);
+
 /* Whether node is a new node (11.6): it has no line range, no record, no content
  * token and no dropped mark of its structural spelling (false for NULL). */
 AMARK_API bool amark_node_is_new(const amark_node_t *node);

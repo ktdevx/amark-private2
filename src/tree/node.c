@@ -29,6 +29,7 @@ static void free_node_memory(amark_node_t *node)
     amark_tree_content_tokens_free(node->content_tokens);
     amark_tree_content_release(node->content, true);
     amark_free(node->data);
+    amark_free(node->verbatim_columns);
     amark_free(node);
 }
 

@@ -4,17 +4,21 @@
 /*
  * The tests of Verbatim (syntax-tree): the spelling state of a node (11.1), the
  * new nodes (11.6), whether the content of a leaf can be output in its original
- * lines (11.3), and the coverage of a content by its tokens, the internal check
- * that the lossless check (13.2) reuses.
+ * lines (11.3), the coverage of a content by its tokens, the internal check
+ * that the lossless check (13.2) reuses, and whether a subtree can be output in
+ * its original spelling (11.4, 11.5, 7.8) with its cache (14.9).
  */
 #include "tree/tree.h"
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <naos/naos.h>
 
+#include "test_allocator.h"
 #include "tree_builder.h"
 
 /* ---- Helpers ------------------------------------------------------------------- */
@@ -593,6 +597,708 @@ NAOS_TEST(cover_reuses_and_grows_its_scratch)
     amark_document_destroy(document);
 }
 
+/* ---- Subtree verbatim (11.4, 11.5, 7.8, 14.9) ------------------------------------- */
+
+/* The result of amark_node_verbatim, which must succeed. */
+static bool subtree_verbatim(const amark_node_t *node)
+{
+    bool out = true;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(node, &out));
+    return out;
+}
+
+/* The node at path (child indexes from the document node, ended by -1). */
+static amark_node_t *node_at(amark_document_t *document, const int *path)
+{
+    amark_node_t *node = amark_document_root(document);
+
+    while (node != NULL && *path >= 0)
+    {
+        node = child_at(node, (size_t)*path);
+        path++;
+    }
+    return node;
+}
+
+/* INPUT.md 3.4 in a list: L0 "> - a", L1 "b" (a lazy continuation: both the
+ * block quote and the item leave out their margins at column 0), L2 ">" (a
+ * blank line between the items, owned by the list), L3 "> - c". */
+static const char quoted_list_source[] = "> - a\nb\n>\n> - c\n";
+
+static const char quoted_list_tree[] =
+    "(document :lines (0 4)\n"
+    "  (block_quote :lines (0 4)\n"
+    "    :margins ((0 0 2 present) (1 0 0 lazy) (2 0 1 present) (3 0 2 present))\n"
+    "    (list :type bullet :tight false :lines (0 4) :blanks ((2 1 1))\n"
+    "      (item :lines (0 2) :margins ((0 2 4 present first) (1 0 0 lazy))\n"
+    "        (paragraph :lines (0 2) :content laid ((0 4 5) (1 0 1))\n"
+    "          (text :spelling ((text 0 1 :facet literal)) \"a\")\n"
+    "          (softbreak :spelling ((line_break 1 2)))\n"
+    "          (text :spelling ((text 2 3 :facet literal)) \"b\")))\n"
+    "      (item :lines (3 1) :margins ((3 2 4 present first))\n"
+    "        (paragraph :lines (3 1) :content laid ((3 4 5))\n"
+    "          (text :spelling ((text 0 1 :facet literal)) \"c\"))))))";
+
+static const int quote_path[] = {0, -1};
+static const int list_in_quote_path[] = {0, 0, -1};
+static const int first_item_in_quote_path[] = {0, 0, 0, -1};
+static const int second_item_in_quote_path[] = {0, 0, 1, -1};
+
+static amark_document_t *quoted_list(void)
+{
+    amark_document_t *document = new_document(quoted_list_source);
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, quoted_list_tree);
+    CHECK_TREE_OK(document);
+    return document;
+}
+
+NAOS_TEST(an_unedited_list_in_a_block_quote_with_a_lazy_line_is_verbatim)
+{
+    amark_document_t *document = quoted_list();
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *node;
+
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    /* Every node of the tree, blocks and inlines. */
+    for (node = root; node != NULL;)
+    {
+        NAOS_CHECK_TRUE(subtree_verbatim(node));
+        if (amark_node_first_child(node) != NULL)
+        {
+            node = amark_node_first_child(node);
+            continue;
+        }
+        while (node != NULL && amark_node_next(node) == NULL)
+        {
+            node = amark_node_parent(node);
+        }
+        if (node != NULL)
+        {
+            node = amark_node_next(node);
+        }
+    }
+    /* The cache is consistent with the tree (the internal checker). */
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(subtree_verbatim_is_false_without_a_margin_on_each_line)
+{
+    amark_document_t *document = quoted_list();
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote = node_at(document, quote_path);
+    amark_node_t *item = node_at(document, first_item_in_quote_path);
+
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    /* Dropping the lazy margin of the item: the item, and its ancestors, lose
+     * the margin of line 1; the other item is not affected. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_discard_margin(item, 1));
+    NAOS_CHECK_FALSE(subtree_verbatim(item));
+    NAOS_CHECK_FALSE(subtree_verbatim(node_at(document, list_in_quote_path)));
+    NAOS_CHECK_FALSE(subtree_verbatim(quote));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+    NAOS_CHECK_TRUE(subtree_verbatim(node_at(document, second_item_in_quote_path)));
+    NAOS_CHECK_TRUE(subtree_verbatim(amark_node_first_child(item)));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(an_edit_invalidates_the_cached_results_of_the_ancestors)
+{
+    amark_document_t *document = quoted_list();
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *item = node_at(document, second_item_in_quote_path);
+    amark_node_t *text = amark_node_first_child(amark_node_first_child(item));
+
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(text, AMARK_TEXT_LITERAL, "C", 1));
+    NAOS_CHECK_FALSE(subtree_verbatim(text));
+    NAOS_CHECK_FALSE(subtree_verbatim(item));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+    /* A style of a block (its own spelling is dropped). */
+    amark_document_destroy(document);
+
+    document = quoted_list();
+    root = amark_document_root(document);
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_int(node_at(document, list_in_quote_path), AMARK_LIST_BULLET,
+                                         AMARK_LIST_BULLET_PLUS));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* L0 "> a", L1 "", L2 "b", L3 "***": a paragraph moved into the block quote has
+ * no margin of the block quote on its line (11.5). */
+static amark_document_t *quote_and_paragraph(void)
+{
+    amark_document_t *document = new_document("> a\n\nb\n***\n");
+
+    AMARK_CHECK_TREE_BUILD(document, NULL,
+                           "(document :lines (0 4) :blanks ((1 0 0))\n"
+                           "  (block_quote :lines (0 1) :margins ((0 0 2 present))\n"
+                           "    (paragraph :lines (0 1) :content laid ((0 2 3))\n"
+                           "      (text :spelling ((text 0 1 :facet literal)) \"a\")))\n"
+                           "  (paragraph :lines (2 1) :content laid ((2 0 1))\n"
+                           "    (text :spelling ((text 0 1 :facet literal)) \"b\"))\n"
+                           "  (thematic_break :lines (3 1) :tokens ((marker 3 0 3))))");
+    CHECK_TREE_OK(document);
+    return document;
+}
+
+NAOS_TEST(a_moved_block_lacks_the_margins_of_its_new_ancestors)
+{
+    amark_document_t *document = quote_and_paragraph();
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote = child_at(root, 0);
+    amark_node_t *paragraph = child_at(root, 1);
+    amark_margin_t margin;
+    bool found = true;
+
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    NAOS_CHECK_TRUE(subtree_verbatim(child_at(root, 2))); /* a leaf without content */
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(quote, paragraph));
+    /* The moved block keeps its own spelling... */
+    NAOS_CHECK_TRUE(subtree_verbatim(paragraph));
+    /* ...but its line has no margin of the block quote (11.5). */
+    memset(&margin, 0, sizeof(margin));
+    margin.struct_size = sizeof(margin);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_find_margin(quote, 2, &margin, &found));
+    NAOS_CHECK_FALSE(found);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_find_margin(quote, 0, &margin, &found));
+    NAOS_CHECK_TRUE(found);
+    /* The ancestors cannot be output in their original spelling. */
+    NAOS_CHECK_FALSE(subtree_verbatim(quote));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+    CHECK_TREE_OK(document);
+
+    /* Moving it back restores the original spelling. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_after(quote, paragraph));
+    NAOS_CHECK_TRUE(subtree_verbatim(quote));
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+
+    /* Blocks out of the order of their lines are not verbatim either. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_before(quote, paragraph));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(an_inline_subtree_is_judged_on_the_content_of_its_leaf)
+{
+    amark_document_t *document = two_paragraphs();
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *first = child_at(root, 0);
+    amark_node_t *second = child_at(root, 1);
+    amark_node_t *emph = child_at(first, 1);
+    amark_node_t *text = NULL;
+
+    NAOS_CHECK_TRUE(subtree_verbatim(emph));
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    /* Moved to another paragraph, its tokens are on the content of the first. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(second, emph));
+    NAOS_CHECK_FALSE(subtree_verbatim(emph));
+    NAOS_CHECK_FALSE(subtree_verbatim(second));
+    NAOS_CHECK_FALSE(subtree_verbatim(first));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_after(child_at(first, 0), emph));
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    /* A new node under it. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    NAOS_CHECK_FALSE(subtree_verbatim(text));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(emph, text));
+    NAOS_CHECK_FALSE(subtree_verbatim(emph));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+    amark_node_destroy(text);
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(blocks_without_a_range_or_with_dropped_spelling_are_not_verbatim)
+{
+    amark_document_t *document = new_document("```\n```\n");
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *code;
+    amark_node_t *paragraph = NULL;
+    bool out = true;
+
+    /* A fenced code block without content lines: the leaf has no content. */
+    AMARK_CHECK_TREE_BUILD(document, NULL,
+                           "(document :lines (0 2)\n"
+                           "  (code_block :info \"\" :style (:form fenced :fence_char \"`\"\n"
+                           "                               :fence_length 3)\n"
+                           "    :lines (0 2) :tokens ((marker 0 0 3) (marker 1 0 3))))");
+    code = child_at(root, 0);
+    NAOS_CHECK_TRUE(subtree_verbatim(code));
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    /* Its literal set: the content is free. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_string(code, AMARK_CODE_BLOCK_LITERAL, "x\n", 2));
+    NAOS_CHECK_FALSE(subtree_verbatim(code));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+
+    /* A new block. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_CHECK_FALSE(subtree_verbatim(paragraph));
+    amark_node_destroy(paragraph);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_verbatim(NULL, &out));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_verbatim(root, NULL));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_checker_finds_inconsistent_verbatim_results)
+{
+    amark_document_t *document = quoted_list();
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote = node_at(document, quote_path);
+    amark_node_t *list = node_at(document, list_in_quote_path);
+    amark_node_t *text = amark_node_first_child(
+        amark_node_first_child(node_at(document, first_item_in_quote_path)));
+    amark_tree_check_report_t report;
+    uint32_t saved_flags;
+    uint32_t saved_column;
+
+    NAOS_CHECK_TRUE(subtree_verbatim(root));
+    /* The list remembers its start columns; the block quote, a container, does
+     * not; no line ends early. */
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_CACHE_VALID | AMARK_TREE_CACHE_VERBATIM |
+                           AMARK_TREE_CACHE_FULL_LINES | AMARK_TREE_CACHE_STARTS,
+                       list->cache_flags);
+    NAOS_CHECK_UINT_EQ(2, list->verbatim_columns[0]); /* the item margin */
+    NAOS_CHECK_UINT_EQ(0, list->verbatim_columns[1]); /* the lazy line */
+    NAOS_CHECK_UINT_EQ(1, list->verbatim_columns[2]); /* the blank line */
+    NAOS_CHECK_UINT_EQ(2, list->verbatim_columns[3]);
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_CACHE_VALID | AMARK_TREE_CACHE_VERBATIM |
+                           AMARK_TREE_CACHE_FULL_LINES,
+                       quote->cache_flags);
+    NAOS_CHECK_PTR_EQ(NULL, quote->verbatim_columns);
+    CHECK_TREE_OK(document);
+
+    /* Line flags on an inline node. */
+    saved_flags = text->cache_flags;
+    text->cache_flags |= AMARK_TREE_CACHE_FULL_LINES;
+    memset(&report, 0, sizeof(report));
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_PTR_EQ(text, report.node);
+    text->cache_flags = saved_flags;
+
+    /* A pass-through block without its start columns. */
+    saved_flags = list->cache_flags;
+    list->cache_flags &= ~AMARK_TREE_CACHE_STARTS;
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_PTR_EQ(list, report.node);
+    list->cache_flags = saved_flags;
+
+    /* A remembered column beyond the width of its line. */
+    saved_column = list->verbatim_columns[2];
+    list->verbatim_columns[2] = 7;
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    list->verbatim_columns[2] = saved_column;
+
+    /* A remembered leaf that is not the leaf of the inline node. */
+    NAOS_CHECK_TRUE(subtree_verbatim(text));
+    NAOS_CHECK_PTR_EQ(amark_node_parent(text), text->leaf_memo);
+    CHECK_TREE_OK(document);
+    text->leaf_memo = quote;
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_PTR_EQ(text, report.node);
+    text->leaf_memo = amark_node_parent(text);
+
+    /* An unknown flag. */
+    saved_flags = quote->cache_flags;
+    quote->cache_flags |= 0x80000000u;
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(amark_tree_check(document, &report)));
+    quote->cache_flags = saved_flags;
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* ---- Sharing a line (7.8) ---------------------------------------------------------- */
+
+/* A row whose cells share its line (SHARE_LINES), a strip whose children may
+ * not, and a cell: a leaf with inline content. */
+static const amark_node_type_desc_t row_type = {
+    sizeof(amark_node_type_desc_t), "test.row", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK,
+    AMARK_CONTENT_BLOCK, AMARK_NODE_TYPE_SHARE_LINES, NULL, 0, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static const amark_node_type_desc_t strip_type = {
+    sizeof(amark_node_type_desc_t), "test.strip", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK,
+    AMARK_CONTENT_BLOCK, 0, NULL, 0, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static const amark_node_type_desc_t cell_type = {
+    sizeof(amark_node_type_desc_t), "test.cell", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK,
+    AMARK_CONTENT_INLINE, AMARK_NODE_TYPE_CONTENT, NULL, 0, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+static const amark_node_type_desc_t *const share_types[] = {&row_type, &strip_type, &cell_type};
+static const amark_extension_t share_extension = {
+    sizeof(amark_extension_t), "test.share", share_types, 3, NULL, 0, NULL};
+
+NAOS_TEST(only_children_of_a_share_lines_type_share_a_line)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    amark_node_t *root;
+    amark_node_t *row;
+    amark_node_t *strip;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_create(&set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_append(set, &share_extension));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_freeze(set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, "|a|b|\n|a|b|\n", 12,
+                                                  AMARK_SOURCE_FINISHED, &source));
+    AMARK_CHECK_TREE_BUILD(document, NULL,
+                           "(document :lines (0 2)\n"
+                           "  (test.row :lines (0 1)\n"
+                           "    :tokens ((marker 0 0 1) (marker 0 2 3) (marker 0 4 5))\n"
+                           "    (test.cell :lines (0 1) :content laid ((0 1 2))\n"
+                           "      (text :spelling ((text 0 1 :facet literal)) \"a\"))\n"
+                           "    (test.cell :lines (0 1) :content laid ((0 3 4))\n"
+                           "      (text :spelling ((text 0 1 :facet literal)) \"b\")))\n"
+                           "  (test.strip :lines (1 1)\n"
+                           "    :tokens ((marker 1 0 1) (marker 1 2 3) (marker 1 4 5))\n"
+                           "    (test.cell :lines (1 1) :content laid ((1 1 2))\n"
+                           "      (text :spelling ((text 0 1 :facet literal)) \"a\"))\n"
+                           "    (test.cell :lines (1 1) :content laid ((1 3 4))\n"
+                           "      (text :spelling ((text 0 1 :facet literal)) \"b\"))))");
+    CHECK_TREE_OK(document);
+    root = amark_document_root(document);
+    row = child_at(root, 0);
+    strip = child_at(root, 1);
+
+    NAOS_CHECK_TRUE(subtree_verbatim(row));
+    NAOS_CHECK_FALSE(subtree_verbatim(strip));
+    NAOS_CHECK_FALSE(subtree_verbatim(root));
+    /* A cell alone covers only a part of its line. */
+    NAOS_CHECK_FALSE(subtree_verbatim(child_at(row, 0)));
+    NAOS_CHECK_FALSE(subtree_verbatim(child_at(row, 1)));
+    /* The cells in the reverse order of their columns. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_before(child_at(row, 0),
+                                                                 child_at(row, 1)));
+    NAOS_CHECK_FALSE(subtree_verbatim(row));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_insert_before(child_at(row, 0),
+                                                                 child_at(row, 1)));
+    NAOS_CHECK_TRUE(subtree_verbatim(row));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+    amark_syntax_set_destroy(set);
+}
+
+/* ---- The cost of judging every node (14.9) ----------------------------------------- */
+
+/* A block quote holding a list of n items, one per line "> - a" (with a lazy
+ * line "b" after each item), the paragraph of each with its text; built from a
+ * generated S-expression. */
+static amark_document_t *long_quoted_list(size_t n)
+{
+    size_t source_size = n * 8 + 1;
+    size_t tree_size = 512 + n * 512;
+    char *source = (char *)malloc(source_size);
+    char *tree = (char *)malloc(tree_size);
+    amark_document_t *document = NULL;
+    size_t used = 0;
+    size_t i;
+
+    NAOS_REQUIRE_TRUE(source != NULL && tree != NULL);
+    for (i = 0; i < n; i++)
+    {
+        memcpy(source + i * 8, "> - a\nb\n", 8);
+    }
+    source[n * 8] = '\0';
+    document = new_document(source);
+    used += (size_t)snprintf(tree + used, tree_size - used,
+                             "(document :lines (0 %u)\n"
+                             "  (block_quote :lines (0 %u) :margins (",
+                             (unsigned)(2 * n), (unsigned)(2 * n));
+    for (i = 0; i < n; i++)
+    {
+        used += (size_t)snprintf(tree + used, tree_size - used,
+                                 "(%u 0 2 present) (%u 0 0 lazy) ", (unsigned)(2 * i),
+                                 (unsigned)(2 * i + 1));
+    }
+    used += (size_t)snprintf(tree + used, tree_size - used,
+                             ")\n    (list :type bullet :tight true :lines (0 %u)\n",
+                             (unsigned)(2 * n));
+    for (i = 0; i < n; i++)
+    {
+        unsigned line = (unsigned)(2 * i);
+
+        used += (size_t)snprintf(
+            tree + used, tree_size - used,
+            "(item :lines (%u 2) :margins ((%u 2 4 present first) (%u 0 0 lazy))\n"
+            "  (paragraph :lines (%u 2) :content laid ((%u 4 5) (%u 0 1))\n"
+            "    (text :spelling ((text 0 1 :facet literal)) \"a\")\n"
+            "    (softbreak :spelling ((line_break 1 2)))\n"
+            "    (text :spelling ((text 2 3 :facet literal)) \"b\")))\n",
+            line, line, line + 1, line, line, line + 1);
+    }
+    used += (size_t)snprintf(tree + used, tree_size - used, ")))");
+    NAOS_REQUIRE_TRUE(used < tree_size);
+    AMARK_CHECK_TREE_BUILD(document, NULL, tree);
+    free(tree);
+    free(source);
+    return document;
+}
+
+/* The steps of judging every node of document, in preorder (each must be
+ * true). */
+static size_t judge_every_node(amark_document_t *document)
+{
+    size_t before = document->stats.verbatim_steps;
+    amark_node_t *node = amark_document_root(document);
+    bool all = true;
+
+    while (node != NULL)
+    {
+        bool out = false;
+
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(node, &out));
+        all = all && out;
+        if (amark_node_first_child(node) != NULL)
+        {
+            node = amark_node_first_child(node);
+            continue;
+        }
+        while (node != NULL && amark_node_next(node) == NULL)
+        {
+            node = amark_node_parent(node);
+        }
+        if (node != NULL)
+        {
+            node = amark_node_next(node);
+        }
+    }
+    NAOS_CHECK_TRUE(all);
+    return document->stats.verbatim_steps - before;
+}
+
+NAOS_TEST(judging_every_node_is_linear)
+{
+    amark_document_t *small = long_quoted_list(200);
+    amark_document_t *large = long_quoted_list(1600);
+    size_t small_steps;
+    size_t large_steps;
+    size_t again;
+
+    small_steps = judge_every_node(small);
+    large_steps = judge_every_node(large);
+    NAOS_CHECK_UINT_GT(small_steps, 0);
+    /* Eight times the lines, the nodes and the records: at most eight times the
+     * steps (plus a constant). */
+    NAOS_CHECK_UINT_LE(large_steps, 8 * small_steps + 64);
+    /* Bounded by the nodes and the records (6 nodes and 7 records per item). */
+    NAOS_CHECK_UINT_LE(large_steps, 16 * (13 * 1600));
+    /* Once cached, judging every node again costs at most two steps per node
+     * (the visit, and for an inline node its remembered leaf). */
+    again = judge_every_node(large);
+    NAOS_CHECK_UINT_LE(again, 2 * large->node_count);
+    /* Judging from the leaves up, as from the root down. */
+    CHECK_TREE_OK(large);
+    amark_document_destroy(small);
+    amark_document_destroy(large);
+}
+
+/* Adds the content token [start, end) of kind to node, on the content of
+ * leaf. */
+static amark_error_t add_token(amark_node_t *node, const amark_node_t *leaf,
+                               amark_spell_kind_t kind, size_t start, size_t end)
+{
+    amark_content_token_t token;
+
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.start = start;
+    token.end = end;
+    token.kind = kind;
+    return amark_node_add_content_token(node, leaf, &token);
+}
+
+/* One paragraph "*...*a*...*": depth emphasis nodes nested in each other around
+ * a text "a", each spelled by its two delimiters. */
+static amark_document_t *deep_emphasis(size_t depth)
+{
+    size_t length = 2 * depth + 1;
+    char *source = (char *)malloc(length + 2);
+    amark_document_t *document;
+    amark_node_t *root;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *parent;
+    amark_node_t *text = NULL;
+    size_t i;
+
+    NAOS_REQUIRE_NOT_NULL(source);
+    memset(source, '*', length);
+    source[depth] = 'a';
+    source[length] = '\n';
+    source[length + 1] = '\0';
+    document = new_document(source);
+    free(source);
+    root = amark_document_root(document);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(root, 0, 1));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(root, paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(paragraph, 0, 1));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_block_add_content(paragraph, 0, 0, (uint32_t)length));
+    parent = paragraph;
+    for (i = 0; i < depth; i++)
+    {
+        amark_node_t *emph = NULL;
+
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_EMPH, &emph));
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(parent, emph));
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                            add_token(emph, paragraph, AMARK_SPELL_DELIMITER, i, i + 1));
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, add_token(emph, paragraph, AMARK_SPELL_DELIMITER,
+                                                        length - 1 - i, length - i));
+        parent = emph;
+    }
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(parent, text));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        add_token(text, paragraph, AMARK_SPELL_TEXT, depth, depth + 1));
+    return document;
+}
+
+NAOS_TEST(judging_every_node_of_deep_emphasis_is_linear)
+{
+    amark_document_t *small = deep_emphasis(500);
+    amark_document_t *large = deep_emphasis(4000);
+    size_t small_steps;
+    size_t large_steps;
+    size_t again;
+
+    /* Each inline node is judged as the root of its subtree, on the content of
+     * its leaf: finding the leaf is not a walk to it from each node. */
+    small_steps = judge_every_node(small);
+    large_steps = judge_every_node(large);
+    NAOS_CHECK_UINT_GT(small_steps, 0);
+    NAOS_CHECK_UINT_LE(large_steps, 8 * small_steps + 64);
+    NAOS_CHECK_UINT_LE(large_steps, 16 * large->node_count);
+    again = judge_every_node(large);
+    NAOS_CHECK_UINT_LE(again, 2 * large->node_count);
+    CHECK_TREE_OK(large);
+    /* A structural change elsewhere drops the memory of the leaves: judging
+     * every node again stays linear. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_append_child(amark_document_root(large),
+                                              amark_node_first_child(
+                                                  amark_document_root(large))));
+    again = judge_every_node(large);
+    NAOS_CHECK_UINT_LE(again, 6 * large->node_count);
+    CHECK_TREE_OK(large);
+    amark_document_destroy(small);
+    amark_document_destroy(large);
+}
+
+/* ---- Out of memory -------------------------------------------------------------------- */
+
+/* Builds the quoted list and judges it: the computation allocates the start
+ * columns of its blocks. A failure of the judgment leaves the cache consistent,
+ * and judging again succeeds. */
+static amark_error_t judge_oom_scenario(void *context)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    amark_error_t error;
+    amark_error_t failure = AMARK_ERROR_NONE;
+    bool out = false;
+
+    (void)context;
+    error = amark_document_create(NULL, &document);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    error = amark_document_add_source(document, quoted_list_source,
+                                      sizeof(quoted_list_source) - 1, AMARK_SOURCE_FINISHED,
+                                      &source);
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_test_tree_build(document, NULL, quoted_list_tree, NULL);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_verbatim(amark_document_root(document), &out);
+        if (error == AMARK_ERROR_OUT_OF_MEMORY)
+        {
+            failure = error;
+            if (amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE)
+            {
+                error = AMARK_ERROR_INVALID_STATE;
+            }
+            else
+            {
+                /* The injected failure is the only one: this one succeeds. */
+                error = amark_node_verbatim(amark_document_root(document), &out);
+            }
+        }
+    }
+    if ((error == AMARK_ERROR_NONE) &&
+        (!out || (amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE)))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    if ((error == AMARK_ERROR_NONE) && (failure != AMARK_ERROR_NONE))
+    {
+        error = failure;
+    }
+    amark_document_destroy(document);
+    return error;
+}
+
+static amark_test_allocator_t judge_allocator;
+
+NAOS_TEST(out_of_memory_in_the_judgment_leaves_the_cache_consistent)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    amark_error_t built;
+    amark_error_t judged = AMARK_ERROR_INVALID_STATE;
+    size_t judgment_calls = 0;
+    bool out = false;
+
+    /* The judgment allocates (the remembered columns), so the sweep reaches it:
+     * count its allocations with the test allocator set around everything. */
+    amark_test_allocator_init(&judge_allocator);
+    amark_allocator_set(amark_test_allocator_activate(&judge_allocator));
+    built = amark_document_create(NULL, &document);
+    if (built == AMARK_ERROR_NONE)
+    {
+        built = amark_document_add_source(document, quoted_list_source,
+                                          sizeof(quoted_list_source) - 1,
+                                          AMARK_SOURCE_FINISHED, &source);
+    }
+    if (built == AMARK_ERROR_NONE)
+    {
+        built = amark_test_tree_build(document, NULL, quoted_list_tree, NULL);
+    }
+    if (built == AMARK_ERROR_NONE)
+    {
+        amark_test_allocator_reset_counters(&judge_allocator);
+        judged = amark_node_verbatim(amark_document_root(document), &out);
+        judgment_calls = judge_allocator.calls;
+    }
+    amark_document_destroy(document);
+    amark_allocator_set(NULL);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, built);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, judged);
+    NAOS_CHECK_TRUE(out);
+    NAOS_CHECK_UINT_GT(judgment_calls, 0);
+    NAOS_CHECK_UINT_EQ(0, judge_allocator.live_blocks);
+
+    AMARK_CHECK_OOM_SWEEP(judge_oom_scenario, NULL);
+}
+
 NAOS_SUITE(verbatim,
     NAOS_ADD_TEST(spelling_state_of_parsed_nodes_is_complete),
     NAOS_ADD_TEST(spelling_state_tells_the_dropped_facets_and_styles),
@@ -612,7 +1318,18 @@ NAOS_SUITE(verbatim,
     NAOS_ADD_TEST(broken_nesting_is_not_verbatim),
     NAOS_ADD_TEST(cover_reports_the_first_gap_or_overlap),
     NAOS_ADD_TEST(cover_reports_a_foreign_token_in_content_order),
-    NAOS_ADD_TEST(cover_reuses_and_grows_its_scratch)
+    NAOS_ADD_TEST(cover_reuses_and_grows_its_scratch),
+    NAOS_ADD_TEST(an_unedited_list_in_a_block_quote_with_a_lazy_line_is_verbatim),
+    NAOS_ADD_TEST(subtree_verbatim_is_false_without_a_margin_on_each_line),
+    NAOS_ADD_TEST(an_edit_invalidates_the_cached_results_of_the_ancestors),
+    NAOS_ADD_TEST(a_moved_block_lacks_the_margins_of_its_new_ancestors),
+    NAOS_ADD_TEST(an_inline_subtree_is_judged_on_the_content_of_its_leaf),
+    NAOS_ADD_TEST(blocks_without_a_range_or_with_dropped_spelling_are_not_verbatim),
+    NAOS_ADD_TEST(the_checker_finds_inconsistent_verbatim_results),
+    NAOS_ADD_TEST(only_children_of_a_share_lines_type_share_a_line),
+    NAOS_ADD_TEST(judging_every_node_is_linear),
+    NAOS_ADD_TEST(judging_every_node_of_deep_emphasis_is_linear),
+    NAOS_ADD_TEST(out_of_memory_in_the_judgment_leaves_the_cache_consistent)
 )
 
 NAOS_MAIN(

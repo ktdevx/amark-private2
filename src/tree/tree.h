@@ -422,6 +422,20 @@ struct amark_node
      * only children whose cache is valid: a change invalidates the node and its
      * ancestors (amark_tree_changed). A new node has none. */
     uint32_t cache_flags;
+    /* The columns remembered by the verbatim judgment (Verbatim, verbatim.c),
+     * one per line of the line range: the start columns (AMARK_TREE_CACHE_STARTS)
+     * and then the end columns (AMARK_TREE_CACHE_ENDS). Meaningful only while
+     * the cache is valid; a stale array is kept until the next judgment of the
+     * node or its release. NULL when there is none. */
+    uint32_t *verbatim_columns;
+    /* The leaf of an inline node (the nearest block among its ancestors, or
+     * NULL), remembered by the verbatim judgment (verbatim.c) while
+     * leaf_memo_generation is the structure generation of the document + 1 (0:
+     * nothing remembered). A remembered inline node has a block parent that is
+     * its leaf, or an inline parent that remembers the same leaf. Not part of
+     * the value of the node: a copy does not carry it. */
+    amark_node_t *leaf_memo;
+    uint64_t leaf_memo_generation;
     /* desc->facet_count entries (NULL when there is none). */
     amark_tree_facet_t *facets;
     /* desc->data_size bytes of extension data (NULL when 0). */
@@ -474,8 +488,23 @@ void amark_tree_node_release(amark_node_t *node);
  * no parent. */
 void amark_tree_node_detach(amark_node_t *node);
 
-/* The cached results of a node (Verbatim) are valid. */
+/* The cached results of a node (Verbatim) are valid. The other flags are
+ * meaningful only while this one is set. */
 #define AMARK_TREE_CACHE_VALID 0x01u
+/* The verbatim judgment of the node holds (verbatim.c): for a block, every
+ * condition of 11.4 except that each line is covered up to its end; for an
+ * inline node, the conditions of 11.3 within its own range. */
+#define AMARK_TREE_CACHE_VERBATIM 0x02u
+/* With AMARK_TREE_CACHE_VERBATIM, a block: the coverage of each of its lines
+ * reaches the end of the line. */
+#define AMARK_TREE_CACHE_FULL_LINES 0x04u
+/* With AMARK_TREE_CACHE_VERBATIM, a block that is not a container: the start
+ * column of each line is in verbatim_columns. */
+#define AMARK_TREE_CACHE_STARTS 0x08u
+/* With AMARK_TREE_CACHE_VERBATIM and without AMARK_TREE_CACHE_FULL_LINES, a
+ * block: the end column of the coverage of each line is in verbatim_columns
+ * (after the start columns, if any). */
+#define AMARK_TREE_CACHE_ENDS 0x10u
 
 /* The kinds of the changes notified with amark_tree_changed. */
 typedef enum amark_tree_change
@@ -788,6 +817,10 @@ typedef struct amark_tree_stats
      * definition processed, per ancestor visited to see whether a candidate is
      * attached, and per node visited to order several candidates. */
     size_t index_steps;
+    /* The steps of the verbatim judgment (Verbatim): one per node visited by
+     * the walk, per line of a block judged, per record, child or token
+     * examined, and per ancestor visited to find the leaf of an inline node. */
+    size_t verbatim_steps;
 } amark_tree_stats_t;
 
 struct amark_document
@@ -839,7 +872,16 @@ typedef enum amark_tree_violation
     AMARK_TREE_VIOLATION_CONTAINMENT,
     /* A link among the descendants of a link. */
     AMARK_TREE_VIOLATION_LINK_IN_LINK,
-    /* A node whose cache is valid has a child whose cache is not. */
+    /* A node whose cache is valid has a child whose cache is not, or the
+     * verbatim results of a valid node are inconsistent: unknown flags, flags
+     * that do not fit the node (FULL_LINES, STARTS or ENDS without VERBATIM or
+     * on an inline node, STARTS on a container or missing on another block,
+     * ENDS with FULL_LINES or missing without it), remembered columns without
+     * the flags that need them or missing when needed, a verbatim block without
+     * a line range or (a container) without one margin per line, a
+     * remembered column beyond the width of its line, and a current
+     * remembered leaf of an inline node that is not its leaf (or one on a
+     * block). */
     AMARK_TREE_VIOLATION_CACHE,
     /* The sources and the line table: the lines of a source are not the
      * division of its bytes in order (offsets, ranges, line endings, widths,
