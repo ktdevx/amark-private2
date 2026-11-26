@@ -107,7 +107,7 @@ graph TB
     Renderers --> Tree
 ```
 
-**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit_tracking` → `node` → `document` → `token` → `structure_edit` → `literal` / `attr` → `copy_import` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit_tracking.c` と `node.c` は文書の状態（追跡の有無、構文セット）を `tree.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。同じ位置（`/` で並べたもの）の間で許す呼び出しは次の 3 つだけ：`attr` → `literal`（`amark_text_*` の補助）、`dump` → `span`（`amark_node_source_span`）、`equal` → `literal`（`amark_text_equal`）。例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree.h` の構造体だけを使う。違反はレビューでエラーとする。
+**Dependency direction（`src/tree/` の中）**：`builtin_types` → `syntax_set` → `edit_tracking` → `node` → `document` → `token` → `structure_edit` → `literal` / `attr` → `copy_import` → `token_check` / `span` / `iterator` / `equal` / `dump` / `tree_check`。左のファイルは右のファイルの関数を呼ばない。`edit_tracking.c` と `node.c` は文書の状態（追跡の有無、構文セット）を `tree.h` の構造体のフィールドとして読むだけで、`document.c` の関数を呼ばない。`document.c` は根の生成と全ノードの解放に `node.c` を使う。同じ位置（`/` で並べたもの）の間で許す呼び出しは次の 2 つだけ：`attr` → `literal`（`amark_text_*` の補助）、`dump` → `span`（`amark_node_source_span`）。（`equal` → `literal`（`amark_text_equal`）は通常の左向きの呼び出し。）例外として `builtin_types` の関数表は、拡張と同じ立場で公開の `node.h` / `document.h` と `tree.h` の構造体だけを使う。違反はレビューでエラーとする。
 
 **Architecture Integration**：
 - Domain boundaries：公開ヘッダは機能ごとに 1 つ。実装は 1 ファイル 1 責務。

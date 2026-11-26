@@ -278,8 +278,9 @@ amark_error_t amark_node_set_list_start(amark_node_t *node, long start)
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
 
-    /* The start number is kept (and compared) whatever the type of the list, so a
-     * bullet list keeps it for a later change to ordered. */
+    /* The start number is kept whatever the type of the list, so a bullet list keeps
+     * it for a later change to ordered; a change records CONTENT even for a bullet
+     * list, although the list's equal function compares it only for ordered lists. */
     if (data->start != start)
     {
         data->start = start;
