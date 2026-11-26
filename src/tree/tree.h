@@ -287,6 +287,22 @@ void amark_tree_remove_facet_tokens(amark_node_t *node, amark_facet_t facet);
  * CONTENT facets of leaf and notifies the change. Allocates nothing. */
 void amark_tree_leaf_take_content(amark_node_t *leaf, amark_tree_content_t *content);
 
+/*
+ * Makes a new free content object with the bytes and the line count of source
+ * (Facets, dropping the spelling of a leaf: laid content becomes free with the
+ * same bytes; a virtual LF becomes a real one). The object has one owner, as
+ * for amark_tree_content_from_value. AMARK_ERROR_OUT_OF_MEMORY leaves nothing
+ * allocated.
+ */
+amark_error_t amark_tree_content_free_copy(const amark_tree_content_t *source,
+                                           amark_tree_content_t **out);
+
+/* As amark_tree_leaf_take_content, and when content has the same bytes as the
+ * old content of leaf, the content tokens of leaf and of its descendants on
+ * the old content move to content first (otherwise they stay on the old one).
+ * Allocates nothing. */
+void amark_tree_leaf_replace_content(amark_node_t *leaf, amark_tree_content_t *content);
+
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
 /* The states of the storage of a facet (amark_tree_facet_t.state). */

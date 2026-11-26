@@ -3,7 +3,8 @@
 
 /*
  * Facets: the storage of the facets, getting, setting, unsetting and recording
- * them, the calls of the hooks and the dropping of the facet spellings.
+ * them, the calls of the hooks, the dropping of the spelling of a facet and of
+ * a node, and the setting of the inline text of a node.
  *
  * Each node holds one amark_tree_facet_t per facet of its type (tree.h): a
  * state (none, set, recorded), the number or the owned string, and the cache
@@ -13,8 +14,12 @@
  * value facet, then UNSET for a style. The setters check the value, return
  * early for the same value, normalize the multi-line values, prepare the new
  * value, call the on_change hook and commit only when it succeeds; the records
- * do the same without the hook and without the early return. A CONTENT facet
- * stores no value: setting or recording it gives the leaf new free content.
+ * do the same without the hook and without the early return. An edit (a set,
+ * or the unset of a style) drops the spelling of its facet: the tokens that
+ * spell it are removed and the facet is marked in amark_node_t.dropped. A
+ * CONTENT facet stores no value: setting or recording it gives the leaf new
+ * free content. Dropping a spelling keeps the values: a value derived from
+ * the dropped tokens becomes the set value, and laid content becomes free.
  */
 #include "tree/tree.h"
 
@@ -28,7 +33,11 @@
 typedef enum store_mode
 {
     STORE_SET,
-    STORE_RECORD
+    STORE_RECORD,
+    /* The value of a new node without spelling (amark_node_set_inline_text):
+     * checked and stored as set, without the hook and without dropping a
+     * spelling. */
+    STORE_FRESH
 } store_mode_t;
 
 /* The descriptor of facet of the type of node, or NULL when node is NULL or its
@@ -350,6 +359,110 @@ static amark_error_t is_current_value(const amark_node_t *node, amark_facet_t fa
     return AMARK_ERROR_NONE;
 }
 
+/* ---- Dropping the spelling ------------------------------------------------------- */
+
+/* Removes the tokens of node that spell facet and marks the spelling of facet
+ * as dropped (6.7, 6.8). Allocates nothing and does not notify. */
+static void drop_facet_spelling(amark_node_t *node, amark_facet_t facet)
+{
+    amark_tree_remove_facet_tokens(node, facet);
+    node->dropped |= 1u << facet;
+}
+
+/* Whether a token of node spells facet. */
+static bool is_spelled(const amark_node_t *node, amark_facet_t facet)
+{
+    return amark_tree_layout_spells(node, facet) || amark_tree_content_spells(node, facet);
+}
+
+/* An owned copy of the length bytes at text, terminated by NUL, or NULL when
+ * it cannot be allocated. */
+static char *copy_text(const char *text, size_t length)
+{
+    char *copy;
+
+    if (length >= SIZE_MAX)
+    {
+        return NULL;
+    }
+    copy = (char *)amark_malloc(length + 1);
+    if (copy != NULL)
+    {
+        if (length > 0)
+        {
+            memcpy(copy, text, length);
+        }
+        copy[length] = '\0';
+    }
+    return copy;
+}
+
+/*
+ * Prepares in *out the free content that keeps the value of the CONTENT facet
+ * (desc) of leaf when its spelling is dropped, or NULL when the content needs
+ * no change: only laid content, or content with tokens of the leaf on it
+ * (whose replaced ranges are part of the value), is replaced, by the value as
+ * set (the replaced bytes become U+FFFD).
+ */
+static amark_error_t prepare_content_value(const amark_node_t *leaf, amark_facet_t facet,
+                                           const amark_facet_desc_t *desc,
+                                           amark_tree_content_t **out)
+{
+    const amark_tree_content_t *content = leaf->content;
+    const char *text = NULL;
+    size_t length = 0;
+    bool derived = false;
+    amark_error_t error;
+
+    *out = NULL;
+    if ((content == NULL) ||
+        ((content->state != AMARK_CONTENT_LAID) &&
+         ((leaf->content_tokens == NULL) || (leaf->content_tokens->base != content))))
+    {
+        return AMARK_ERROR_NONE;
+    }
+    error = amark_tree_derive(leaf, facet, desc, &derived, &text, &length);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    return amark_tree_content_from_value(text, length, out);
+}
+
+/*
+ * Prepares in *text and *length an owned copy of the value of the STRING facet
+ * (desc) of node derived from its tokens, or NULL when no token spells it.
+ */
+static amark_error_t prepare_derived_copy(const amark_node_t *node, amark_facet_t facet,
+                                          const amark_facet_desc_t *desc, char **text,
+                                          size_t *length)
+{
+    const char *derived_text = NULL;
+    size_t derived_length = 0;
+    bool derived = false;
+    amark_error_t error;
+
+    *text = NULL;
+    *length = 0;
+    if ((desc->kind != AMARK_FACET_STRING) || ((desc->flags & AMARK_FACET_CONTENT) != 0) ||
+        !is_spelled(node, facet))
+    {
+        return AMARK_ERROR_NONE;
+    }
+    error = amark_tree_derive(node, facet, desc, &derived, &derived_text, &derived_length);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    *text = copy_text(derived_text, derived_length);
+    if (*text == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    *length = derived_length;
+    return AMARK_ERROR_NONE;
+}
+
 /* ---- Storing ----------------------------------------------------------------------- */
 
 /*
@@ -462,25 +575,22 @@ static amark_error_t store(amark_node_t *node, amark_facet_t facet, bool is_stri
         }
     }
     /* 5. Commit. An edit of a value or a style also drops the spelling of that
-     *    facet (6.7, 6.8): its tokens are removed and the facet is marked as
-     *    dropped by the same step as amark_node_discard_facet_spelling, which
-     *    the spelling component adds after this commit; a record keeps the
-     *    spelling (6.14). A CONTENT facet takes the new content: the facet
-     *    stores nothing, and an edit removes the tokens of the facet and
-     *    marks its spelling as dropped (no token is put on the new content). */
+     *    facet (6.7, 6.8), as amark_node_discard_facet_spelling does: its
+     *    tokens are removed and the facet is marked as dropped; the other
+     *    facets and the other nodes keep theirs. A record keeps the spelling
+     *    (6.14). A CONTENT facet takes the new content: the facet stores
+     *    nothing, and no token is put on the new content (8.7). */
+    if (mode == STORE_SET)
+    {
+        drop_facet_spelling(node, facet);
+    }
     if (is_content)
     {
         amark_free(text);
-        if (mode == STORE_SET)
-        {
-            /* The tokens of the facet go with the spelling (no allocation). */
-            amark_tree_remove_facet_tokens(node, facet);
-            node->dropped |= 1u << facet;
-        }
         amark_tree_leaf_take_content(node, content);
         return AMARK_ERROR_NONE;
     }
-    commit(node, facet, mode == STORE_SET ? AMARK_TREE_FACET_SET : AMARK_TREE_FACET_RECORDED,
+    commit(node, facet, mode == STORE_RECORD ? AMARK_TREE_FACET_RECORDED : AMARK_TREE_FACET_SET,
            is_string ? 0 : prepared.number, text, prepared.length);
     return AMARK_ERROR_NONE;
 }
@@ -561,12 +671,345 @@ amark_error_t amark_node_unset(amark_node_t *node, amark_facet_t facet)
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
-    if (node->facets[facet - 1].state == AMARK_TREE_FACET_NONE)
+    if (desc->role != AMARK_FACET_STYLE)
+    {
+        /* An OVERRIDABLE value facet: the override goes. */
+        if (node->facets[facet - 1].state != AMARK_TREE_FACET_NONE)
+        {
+            commit(node, facet, AMARK_TREE_FACET_NONE, 0, NULL, 0);
+        }
+        return AMARK_ERROR_NONE;
+    }
+    /* A style has a value when one is stored, or when its tokens derive one
+     * (a STRING style). */
+    if ((node->facets[facet - 1].state == AMARK_TREE_FACET_NONE) &&
+        ((desc->kind != AMARK_FACET_STRING) || !is_spelled(node, facet)))
     {
         return AMARK_ERROR_NONE;
     }
-    /* Unsetting a style also drops the spelling of the style (the same step as
-     * the commit of a setter, added by the spelling component). */
+    /* Unsetting a style also drops its spelling, as the commit of a setter. */
+    drop_facet_spelling(node, facet);
     commit(node, facet, AMARK_TREE_FACET_NONE, 0, NULL, 0);
     return AMARK_ERROR_NONE;
 }
+
+/* ---- Dropping the spelling of a facet and of a node (6.13) ----------------------- */
+
+amark_error_t amark_node_discard_facet_spelling(amark_node_t *node, amark_facet_t facet)
+{
+    const amark_facet_desc_t *desc = facet_desc(node, facet);
+    amark_tree_content_t *content = NULL;
+    char *text = NULL;
+    size_t length = 0;
+    amark_error_t error;
+
+    if (desc == NULL)
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    if ((desc->flags & AMARK_FACET_CONTENT) != 0)
+    {
+        /* The value of the content stays: laid content, or content with the
+         * tokens of the leaf, becomes the value as set. */
+        error = prepare_content_value(node, facet, desc, &content);
+        if (error != AMARK_ERROR_NONE)
+        {
+            return error;
+        }
+    }
+    else
+    {
+        /* A value derived from the tokens becomes the set value. */
+        error = prepare_derived_copy(node, facet, desc, &text, &length);
+        if (error != AMARK_ERROR_NONE)
+        {
+            return error;
+        }
+    }
+    if ((content == NULL) && (text == NULL) && !is_spelled(node, facet) &&
+        ((node->dropped & (1u << facet)) != 0))
+    {
+        /* Nothing left to drop. */
+        return AMARK_ERROR_NONE;
+    }
+
+    /* Commit (no allocation from here on). */
+    drop_facet_spelling(node, facet);
+    if (content != NULL)
+    {
+        amark_tree_leaf_replace_content(node, content);
+    }
+    if (text != NULL)
+    {
+        commit(node, facet, AMARK_TREE_FACET_SET, 0, text, length);
+    }
+    amark_tree_changed(node, AMARK_TREE_CHANGE_RECORD);
+    return AMARK_ERROR_NONE;
+}
+
+/*
+ * The list whose OVERRIDABLE facets (tight) are derived from the blank lines
+ * that dropping all of the spelling of node removes: node itself when it is a
+ * list, its parent when node is an item directly under a list, else NULL.
+ */
+static amark_node_t *derived_list_of(amark_node_t *node)
+{
+    if (node->type == AMARK_NODE_LIST)
+    {
+        return node;
+    }
+    if ((node->type == AMARK_NODE_ITEM) && (node->parent != NULL) &&
+        (node->parent->type == AMARK_NODE_LIST))
+    {
+        return node->parent;
+    }
+    return NULL;
+}
+
+amark_error_t amark_node_discard_spelling(amark_node_t *node)
+{
+    char *texts[AMARK_FACET_MAX];
+    size_t lengths[AMARK_FACET_MAX];
+    int64_t overrides[AMARK_FACET_MAX];
+    bool overridden[AMARK_FACET_MAX];
+    amark_tree_content_t *content = NULL;
+    amark_facet_t content_facet = AMARK_FACET_NONE;
+    amark_node_t *list;
+    size_t count;
+    size_t i;
+    uint32_t marks = AMARK_TREE_DROPPED_STRUCTURE;
+    amark_error_t error = AMARK_ERROR_NONE;
+
+    if (node == NULL)
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    count = node->desc->facet_count;
+    memset(texts, 0, sizeof(texts));
+    memset(lengths, 0, sizeof(lengths));
+    memset(overrides, 0, sizeof(overrides));
+    memset(overridden, 0, sizeof(overridden));
+
+    /* 1. The values derived from the tokens become set values; the facets
+     *    that have tokens get their dropped mark in step 4. */
+    for (i = 0; (i < count) && (error == AMARK_ERROR_NONE); i++)
+    {
+        const amark_facet_desc_t *desc = &node->desc->facets[i];
+
+        if (is_spelled(node, (amark_facet_t)(i + 1)))
+        {
+            marks |= 1u << (i + 1);
+        }
+        if ((desc->flags & AMARK_FACET_CONTENT) != 0)
+        {
+            if (content_facet == AMARK_FACET_NONE)
+            {
+                content_facet = (amark_facet_t)(i + 1);
+            }
+            continue;
+        }
+        error = prepare_derived_copy(node, (amark_facet_t)(i + 1), desc, &texts[i], &lengths[i]);
+    }
+    /* 1. The values derived from the blank lines stay: the OVERRIDABLE facets
+     *    without an override (tight) of the list of node (node itself, or the
+     *    parent list of an item) take their current value as the override.
+     *    They are numbers, read without allocation. */
+    list = derived_list_of(node);
+    if (list != NULL)
+    {
+        for (i = 0; (i < list->desc->facet_count) && (error == AMARK_ERROR_NONE); i++)
+        {
+            const amark_facet_desc_t *desc = &list->desc->facets[i];
+            amark_value_t value;
+
+            if (((desc->flags & AMARK_FACET_OVERRIDABLE) == 0) ||
+                (desc->kind == AMARK_FACET_STRING) ||
+                (list->facets[i].state != AMARK_TREE_FACET_NONE))
+            {
+                continue;
+            }
+            value.struct_size = sizeof(value);
+            error = facet_value(list, (amark_facet_t)(i + 1), desc, &value);
+            overrides[i] = value.number;
+            overridden[i] = true;
+        }
+    }
+    /* 3 (prepared before the tokens go). Laid content becomes free content with
+     * the same bytes; the content of a CONTENT facet keeps its value. */
+    if (error == AMARK_ERROR_NONE)
+    {
+        if (content_facet != AMARK_FACET_NONE)
+        {
+            error = prepare_content_value(node, content_facet,
+                                          &node->desc->facets[content_facet - 1], &content);
+        }
+        else if ((node->content != NULL) && (node->content->state == AMARK_CONTENT_LAID))
+        {
+            error = amark_tree_content_free_copy(node->content, &content);
+        }
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        for (i = 0; i < count; i++)
+        {
+            amark_free(texts[i]);
+        }
+        return error;
+    }
+
+    /* Commit (no allocation from here on). */
+    for (i = 0; i < count; i++)
+    {
+        if (texts[i] != NULL)
+        {
+            commit(node, (amark_facet_t)(i + 1), AMARK_TREE_FACET_SET, 0, texts[i], lengths[i]);
+        }
+    }
+    for (i = 0; (list != NULL) && (i < list->desc->facet_count); i++)
+    {
+        if (overridden[i])
+        {
+            commit(list, (amark_facet_t)(i + 1), AMARK_TREE_FACET_SET, overrides[i], NULL, 0);
+        }
+    }
+    /* 2. The own layout tokens, content tokens, margins and blank lines. */
+    amark_tree_records_free(node->records);
+    node->records = NULL;
+    amark_tree_content_tokens_free(node->content_tokens);
+    node->content_tokens = NULL;
+    amark_tree_drop_derived(node, AMARK_FACET_NONE);
+    /* 3. The tokens of the leaf and its descendants move to the new content
+     *    only when its bytes are the same; otherwise they stay on the old
+     *    object (8.8). */
+    if (content != NULL)
+    {
+        amark_tree_leaf_replace_content(node, content);
+    }
+    /* 4. The structural spelling and the facets that had tokens are marked as
+     *    dropped; the line range stays. */
+    node->dropped |= marks;
+    amark_tree_changed(node, AMARK_TREE_CHANGE_RECORD);
+    return AMARK_ERROR_NONE;
+}
+
+/* ---- Setting the inline text (6.12) ------------------------------------------------ */
+
+/* Destroys the chain of new nodes from first on (linked by next, without a
+ * parent). */
+static void destroy_chain(amark_node_t *first)
+{
+    while (first != NULL)
+    {
+        amark_node_t *next = first->next;
+
+        first->next = NULL;
+        first->prev = NULL;
+        amark_node_destroy(first);
+        first = next;
+    }
+}
+
+/* Appends a new node of type to the chain [*first, *last]; *out receives it. */
+static amark_error_t chain_new(amark_document_t *document, amark_node_type_t type,
+                               amark_node_t **first, amark_node_t **last, amark_node_t **out)
+{
+    amark_error_t error = amark_tree_node_new(document, type, out);
+
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    if (*last == NULL)
+    {
+        *first = *out;
+    }
+    else
+    {
+        (*last)->next = *out;
+        (*out)->prev = *last;
+    }
+    *last = *out;
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_node_set_inline_text(amark_node_t *node, const char *text, size_t length)
+{
+    const amark_syntax_set_t *set;
+    amark_node_t *first = NULL;
+    amark_node_t *last = NULL;
+    amark_node_t *created = NULL;
+    size_t position = 0;
+    amark_error_t error = AMARK_ERROR_NONE;
+
+    if ((node == NULL) || ((text == NULL) && (length > 0)))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    if (text == NULL)
+    {
+        text = "";
+    }
+    set = node->document->set;
+    if (!amark_registry_can_contain(set, node, node->type, AMARK_NODE_TEXT) ||
+        (has_line_break(text, length) &&
+         !amark_registry_can_contain(set, node, node->type, AMARK_NODE_SOFTBREAK)) ||
+        (memchr(text, '\0', length) != NULL) || !amark_utf8_validate(text, length, NULL))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* The new children, built apart: a text for each nonempty line, a
+     * softbreak for each line break. */
+    while (error == AMARK_ERROR_NONE)
+    {
+        size_t end = position;
+
+        while ((end < length) && (text[end] != '\n') && (text[end] != '\r'))
+        {
+            end++;
+        }
+        if (end > position)
+        {
+            amark_value_t value = string_value(text + position, end - position);
+
+            error = chain_new(node->document, AMARK_NODE_TEXT, &first, &last, &created);
+            if (error == AMARK_ERROR_NONE)
+            {
+                error = store(created, AMARK_TEXT_LITERAL, true, &value, STORE_FRESH);
+            }
+        }
+        if ((error != AMARK_ERROR_NONE) || (end == length))
+        {
+            break;
+        }
+        position = end + (((text[end] == '\r') && (end + 1 < length) && (text[end + 1] == '\n'))
+                              ? 2u
+                              : 1u);
+        error = chain_new(node->document, AMARK_NODE_SOFTBREAK, &first, &last, &created);
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        destroy_chain(first);
+        return error;
+    }
+
+    /* Commit: the old children go, the new ones take their place. Appending
+     * cannot fail: the types were checked and a text or a softbreak holds no
+     * link. */
+    while (node->first_child != NULL)
+    {
+        amark_node_destroy(node->first_child);
+    }
+    while (first != NULL)
+    {
+        amark_node_t *next = first->next;
+
+        first->next = NULL;
+        first->prev = NULL;
+        (void)amark_node_append_child(node, first);
+        first = next;
+    }
+    amark_tree_changed(node, AMARK_TREE_CHANGE_STRUCTURE);
+    return AMARK_ERROR_NONE;
+}
+

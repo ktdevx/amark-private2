@@ -294,6 +294,11 @@ NAOS_TEST(facet_value_functions_link)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_get(node, AMARK_LINK_DESTINATION, &value));
     NAOS_CHECK_INT_EQ(AMARK_VALUE_PRESENT, value.state);
     NAOS_CHECK_STR_EQ("/a", value.text);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_discard_facet_spelling(node, AMARK_LINK_TITLE));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(node));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_set_inline_text(node, "a\nb", 3));
+    NAOS_CHECK_TRUE(amark_node_first_child(node) != NULL);
     amark_document_destroy(document);
 }
 

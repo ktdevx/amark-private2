@@ -11,7 +11,12 @@
  * (derived before set or recorded); the cache of the derived value and its
  * drop when the tokens or the content change; the refusal of a facet spelled
  * by both layout and content tokens; the internal check of the caches and the
- * allocation failures (3.3).
+ * allocation failures (3.3). The dropping of the spelling by the edits: a set
+ * value or style, and an unset style, drop only the tokens of their facet
+ * (6.7, 6.8); the dropping of the spelling of a facet and of a node, which
+ * keeps the values (the tight of a list as an override) and makes laid
+ * content free (6.13); the round trip of the
+ * literals of the CONTENT facets (8.7); the setting of the inline text (6.12).
  */
 #include "tree/tree.h"
 
@@ -880,6 +885,723 @@ NAOS_TEST(out_of_memory_in_setting_a_content_facet_changes_nothing)
     AMARK_CHECK_OOM_SWEEP(set_content_oom_scenario, NULL);
 }
 
+/* ---- Dropping the spelling (6.7, 6.8, 6.9, 6.12, 6.13, 8.7) ------------------------- */
+
+/* The tokens of a facet of node (layout and content tokens). */
+static size_t facet_tokens(const amark_node_t *node, amark_facet_t facet)
+{
+    size_t count = 0;
+    size_t i;
+
+    if (node->records != NULL)
+    {
+        for (i = 0; i < node->records->token_count; i++)
+        {
+            count += (node->records->tokens[i].facet == facet) ? 1u : 0u;
+        }
+    }
+    if (node->content_tokens != NULL)
+    {
+        for (i = 0; i < node->content_tokens->count; i++)
+        {
+            count += (node->content_tokens->items[i].facet == facet) ? 1u : 0u;
+        }
+    }
+    return count;
+}
+
+#define DROPPED(node, facet) (((node)->dropped & (1u << (facet))) != 0)
+
+/*
+ * [a *b*](/u "t") c
+ * 0123456789012345678
+ * A paragraph whose content is the line, with a link (its brackets,
+ * parentheses, destination, title and title quotes), a text "a " and an emph
+ * (its delimiters and a text "b") in the link, and a text " c" after it.
+ */
+typedef struct link_fixture
+{
+    amark_document_t *document;
+    amark_node_t *paragraph;
+    amark_node_t *link;
+    amark_node_t *inner;
+    amark_node_t *emph;
+    amark_node_t *emphasized;
+    amark_node_t *after;
+} link_fixture_t;
+
+static link_fixture_t new_link_fixture(void)
+{
+    link_fixture_t f;
+
+    f.document = NEW_DOCUMENT("[a *b*](/u \"t\") c\n");
+    f.paragraph = new_block(f.document, AMARK_NODE_PARAGRAPH, 0, 1);
+    add_content(f.paragraph, 0, 0, 17);
+    f.link = new_child(f.paragraph, AMARK_NODE_LINK);
+    token(f.link, f.paragraph, 0, 1, AMARK_SPELL_DELIMITER, AMARK_FACET_NONE);
+    f.inner = new_child(f.link, AMARK_NODE_TEXT);
+    token(f.inner, f.paragraph, 1, 3, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL);
+    f.emph = new_child(f.link, AMARK_NODE_EMPH);
+    token(f.emph, f.paragraph, 3, 4, AMARK_SPELL_DELIMITER, AMARK_EMPH_DELIMITER);
+    f.emphasized = new_child(f.emph, AMARK_NODE_TEXT);
+    token(f.emphasized, f.paragraph, 4, 5, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL);
+    token(f.emph, f.paragraph, 5, 6, AMARK_SPELL_DELIMITER, AMARK_EMPH_DELIMITER);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_record_int(f.emph, AMARK_EMPH_DELIMITER,
+                                                                AMARK_EMPH_DELIMITER_ASTERISK));
+    token(f.link, f.paragraph, 6, 7, AMARK_SPELL_DELIMITER, AMARK_FACET_NONE);
+    token(f.link, f.paragraph, 7, 8, AMARK_SPELL_DELIMITER, AMARK_FACET_NONE);
+    token(f.link, f.paragraph, 8, 10, AMARK_SPELL_TEXT, AMARK_LINK_DESTINATION);
+    token(f.link, f.paragraph, 10, 11, AMARK_SPELL_SPACE, AMARK_FACET_NONE);
+    token(f.link, f.paragraph, 11, 12, AMARK_SPELL_DELIMITER, AMARK_LINK_TITLE_QUOTE);
+    token(f.link, f.paragraph, 12, 13, AMARK_SPELL_TEXT, AMARK_LINK_TITLE);
+    token(f.link, f.paragraph, 13, 14, AMARK_SPELL_DELIMITER, AMARK_LINK_TITLE_QUOTE);
+    token(f.link, f.paragraph, 14, 15, AMARK_SPELL_DELIMITER, AMARK_FACET_NONE);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_record_int(f.link, AMARK_LINK_FORM, AMARK_LINK_FORM_INLINE));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_record_int(f.link, AMARK_LINK_TITLE_QUOTE,
+                                              AMARK_LINK_TITLE_QUOTE_DOUBLE));
+    f.after = new_child(f.paragraph, AMARK_NODE_TEXT);
+    token(f.after, f.paragraph, 15, 17, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL);
+    return f;
+}
+
+NAOS_TEST(changing_a_link_destination_keeps_the_other_spelling)
+{
+    link_fixture_t f = new_link_fixture();
+
+    CHECK_TEXT(f.link, AMARK_LINK_DESTINATION, "/u");
+    CHECK_TEXT(f.link, AMARK_LINK_TITLE, "t");
+    NAOS_CHECK_UINT_EQ(9, amark_node_content_token_count(f.link));
+
+    /* The same value keeps the spelling (6.9). */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_string(f.link, AMARK_LINK_DESTINATION, "/u", 2));
+    NAOS_CHECK_UINT_EQ(9, amark_node_content_token_count(f.link));
+    NAOS_CHECK_UINT_EQ(0, f.link->dropped);
+
+    /* A new destination drops only the tokens of the destination (6.7). */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_string(f.link, AMARK_LINK_DESTINATION, "/v", 2));
+    CHECK_TEXT(f.link, AMARK_LINK_DESTINATION, "/v");
+    NAOS_CHECK_UINT_EQ(8, amark_node_content_token_count(f.link));
+    NAOS_CHECK_UINT_EQ(0, facet_tokens(f.link, AMARK_LINK_DESTINATION));
+    NAOS_CHECK_UINT_EQ(5, facet_tokens(f.link, AMARK_FACET_NONE));
+    NAOS_CHECK_UINT_EQ(2, facet_tokens(f.link, AMARK_LINK_TITLE_QUOTE));
+    NAOS_CHECK_UINT_EQ(1, facet_tokens(f.link, AMARK_LINK_TITLE));
+    NAOS_CHECK_UINT_EQ(1u << AMARK_LINK_DESTINATION, f.link->dropped);
+    CHECK_TEXT(f.link, AMARK_LINK_TITLE, "t");
+    /* The link text and the neighbours keep their spelling. */
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(f.inner));
+    NAOS_CHECK_UINT_EQ(2, amark_node_content_token_count(f.emph));
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(f.emphasized));
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(f.after));
+    NAOS_CHECK_UINT_EQ(0, f.inner->dropped | f.emph->dropped | f.after->dropped);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_LAID, amark_block_content_state(f.paragraph));
+    CHECK_TREE_OK(f.document);
+
+    /* The title derived from its tokens: the same value keeps them. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_string(f.link, AMARK_LINK_TITLE, "t", 1));
+    NAOS_CHECK_UINT_EQ(1, facet_tokens(f.link, AMARK_LINK_TITLE));
+
+    /* A new style drops only the tokens of the style, and keeps the title
+     * (6.8). */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_int(f.link, AMARK_LINK_TITLE_QUOTE,
+                                           AMARK_LINK_TITLE_QUOTE_SINGLE));
+    NAOS_CHECK_UINT_EQ(0, facet_tokens(f.link, AMARK_LINK_TITLE_QUOTE));
+    NAOS_CHECK_UINT_EQ(1, facet_tokens(f.link, AMARK_LINK_TITLE));
+    NAOS_CHECK_TRUE(DROPPED(f.link, AMARK_LINK_TITLE_QUOTE));
+    CHECK_TEXT(f.link, AMARK_LINK_TITLE, "t");
+
+    /* Unsetting a style drops its spelling. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(f.emph, AMARK_EMPH_DELIMITER));
+    NAOS_CHECK_UINT_EQ(0, amark_node_content_token_count(f.emph));
+    NAOS_CHECK_NULL(f.emph->content_tokens);
+    NAOS_CHECK_UINT_EQ(1u << AMARK_EMPH_DELIMITER, f.emph->dropped);
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(f.emphasized));
+    /* A record keeps the spelling (6.14). */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_record_string(f.link, AMARK_LINK_TITLE, "x", 1));
+    NAOS_CHECK_UINT_EQ(1, facet_tokens(f.link, AMARK_LINK_TITLE));
+    NAOS_CHECK_FALSE(DROPPED(f.link, AMARK_LINK_TITLE));
+    CHECK_TREE_OK(f.document);
+    amark_document_destroy(f.document);
+}
+
+NAOS_TEST(setting_a_layout_spelled_facet_drops_only_its_layout_tokens)
+{
+    /* ```py
+     * x
+     * ``` */
+    amark_document_t *document = NEW_DOCUMENT("```py\nx\n```\n");
+    amark_node_t *block = new_block(document, AMARK_NODE_CODE_BLOCK, 0, 3);
+
+    layout_token(block, 0, 0, 3, AMARK_SPELL_DELIMITER, AMARK_CODE_BLOCK_FENCE_CHAR);
+    layout_token(block, 0, 3, 5, AMARK_SPELL_TEXT, AMARK_CODE_BLOCK_INFO);
+    layout_token(block, 2, 0, 3, AMARK_SPELL_DELIMITER, AMARK_CODE_BLOCK_FENCE_CHAR);
+    add_content(block, 1, 0, 1);
+    CHECK_TEXT(block, AMARK_CODE_BLOCK_INFO, "py");
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_string(block, AMARK_CODE_BLOCK_INFO, "c", 1));
+    CHECK_TEXT(block, AMARK_CODE_BLOCK_INFO, "c");
+    NAOS_CHECK_UINT_EQ(2, amark_block_token_count(block));
+    NAOS_CHECK_UINT_EQ(2, facet_tokens(block, AMARK_CODE_BLOCK_FENCE_CHAR));
+    NAOS_CHECK_UINT_EQ(1u << AMARK_CODE_BLOCK_INFO, block->dropped);
+    /* The content keeps its pieces. */
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_LAID, amark_block_content_state(block));
+    CHECK_TEXT(block, AMARK_CODE_BLOCK_LITERAL, "x\n");
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(literals_of_content_facets_round_trip)
+{
+    static const char *const values[] = {"", "\n", "a", "a\n\n"};
+    static const char *const expected[] = {"", "\n", "a\n", "a\n\n"};
+    static const size_t lines[] = {0, 1, 1, 2};
+    amark_document_t *document = NEW_DOCUMENT("```\nold\n```\n");
+    amark_node_t *block = new_block(document, AMARK_NODE_CODE_BLOCK, 0, 3);
+    amark_node_t *html = new_block(document, AMARK_NODE_HTML_BLOCK, 1, 1);
+    size_t i;
+
+    layout_token(block, 0, 0, 3, AMARK_SPELL_DELIMITER, AMARK_CODE_BLOCK_FENCE_CHAR);
+    add_content(block, 1, 0, 3);
+    add_content(html, 1, 0, 3);
+    for (i = 0; i < 4; i++)
+    {
+        amark_value_t value;
+
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                            amark_node_set_string(block, AMARK_CODE_BLOCK_LITERAL, values[i],
+                                                  strlen(values[i])));
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                            amark_node_set_string(html, AMARK_HTML_BLOCK_LITERAL, values[i],
+                                                  strlen(values[i])));
+        value = get(block, AMARK_CODE_BLOCK_LITERAL);
+        NAOS_CHECK_STR_EQ(expected[i], value.text);
+        NAOS_CHECK_UINT_EQ(strlen(expected[i]), value.length);
+        value = get(html, AMARK_HTML_BLOCK_LITERAL);
+        NAOS_CHECK_STR_EQ(expected[i], value.text);
+        NAOS_CHECK_UINT_EQ(lines[i], block->content->line_count);
+        NAOS_CHECK_UINT_EQ(lines[i], html->content->line_count);
+        NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(block));
+        NAOS_CHECK_UINT_EQ(0, amark_node_content_token_count(block));
+        /* The fence line stays; the literal is marked as dropped. */
+        NAOS_CHECK_UINT_EQ(1, amark_block_token_count(block));
+        NAOS_CHECK_TRUE(DROPPED(block, AMARK_CODE_BLOCK_LITERAL));
+        CHECK_TREE_OK(document);
+    }
+    /* Each value read back sets the same content again. */
+    for (i = 0; i < 4; i++)
+    {
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                            amark_node_set_string(block, AMARK_CODE_BLOCK_LITERAL, expected[i],
+                                                  strlen(expected[i])));
+        NAOS_CHECK_STR_EQ(expected[i], get(block, AMARK_CODE_BLOCK_LITERAL).text);
+        NAOS_CHECK_UINT_EQ(lines[i], block->content->line_count);
+    }
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(discarding_the_spelling_of_a_facet_keeps_its_value)
+{
+    link_fixture_t f = new_link_fixture();
+    amark_document_t *document = NEW_DOCUMENT("<a\0b>\n");
+    amark_node_t *html = new_block(document, AMARK_NODE_HTML_BLOCK, 0, 1);
+    amark_tree_content_t *old;
+    size_t steps;
+
+    /* A STRING facet derived from its tokens keeps the value as set. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_discard_facet_spelling(f.link, AMARK_LINK_TITLE));
+    CHECK_TEXT(f.link, AMARK_LINK_TITLE, "t");
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, f.link->facets[AMARK_LINK_TITLE - 1].state);
+    NAOS_CHECK_UINT_EQ(0, facet_tokens(f.link, AMARK_LINK_TITLE));
+    NAOS_CHECK_UINT_EQ(2, facet_tokens(f.link, AMARK_LINK_TITLE_QUOTE));
+    NAOS_CHECK_UINT_EQ(1, facet_tokens(f.link, AMARK_LINK_DESTINATION));
+    NAOS_CHECK_UINT_EQ(1u << AMARK_LINK_TITLE, f.link->dropped);
+    /* A style keeps its recorded value. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_discard_facet_spelling(f.emph, AMARK_EMPH_DELIMITER));
+    NAOS_CHECK_UINT_EQ(0, amark_node_content_token_count(f.emph));
+    NAOS_CHECK_INT_EQ(AMARK_EMPH_DELIMITER_ASTERISK, get(f.emph, AMARK_EMPH_DELIMITER).number);
+    /* Again: nothing left to drop. */
+    steps = f.document->stats.invalidation_steps;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_discard_facet_spelling(f.emph, AMARK_EMPH_DELIMITER));
+    NAOS_CHECK_UINT_EQ(steps, f.document->stats.invalidation_steps);
+    /* Refused. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_discard_facet_spelling(NULL, AMARK_LINK_TITLE));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_discard_facet_spelling(f.link, AMARK_FACET_NONE));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_discard_facet_spelling(f.link, 7));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_discard_facet_spelling(f.paragraph, 1));
+    CHECK_TREE_OK(f.document);
+    amark_document_destroy(f.document);
+
+    /* A CONTENT facet keeps its value in new free content. */
+    add_content(html, 0, 0, 5);
+    token(html, html, 2, 3, AMARK_SPELL_REPLACED, AMARK_HTML_BLOCK_LITERAL);
+    old = html->content;
+    CHECK_TEXT(html, AMARK_HTML_BLOCK_LITERAL, "<a\xEF\xBF\xBD" "b>\n");
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_discard_facet_spelling(html, AMARK_HTML_BLOCK_LITERAL));
+    NAOS_CHECK_TRUE(html->content != old);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(html));
+    NAOS_CHECK_UINT_EQ(0, amark_node_content_token_count(html));
+    CHECK_TEXT(html, AMARK_HTML_BLOCK_LITERAL, "<a\xEF\xBF\xBD" "b>\n");
+    NAOS_CHECK_TRUE(DROPPED(html, AMARK_HTML_BLOCK_LITERAL));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(discarding_all_spelling_keeps_the_values_and_frees_the_content)
+{
+    link_fixture_t f = new_link_fixture();
+    amark_tree_content_t *old = f.paragraph->content;
+    const char *bytes = NULL;
+    size_t length = 0;
+    amark_content_state_t state = AMARK_CONTENT_NONE;
+    bool own = false;
+
+    /* The link: its derived values become set values, its tokens go, its
+     * children keep theirs. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(f.link));
+    NAOS_CHECK_NULL(f.link->content_tokens);
+    CHECK_TEXT(f.link, AMARK_LINK_DESTINATION, "/u");
+    CHECK_TEXT(f.link, AMARK_LINK_TITLE, "t");
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, f.link->facets[AMARK_LINK_DESTINATION - 1].state);
+    NAOS_CHECK_INT_EQ(AMARK_LINK_TITLE_QUOTE_DOUBLE, get(f.link, AMARK_LINK_TITLE_QUOTE).number);
+    NAOS_CHECK_INT_EQ(AMARK_LINK_FORM_INLINE, get(f.link, AMARK_LINK_FORM).number);
+    /* The structure and the facets that had tokens are marked, not the
+     * others (form, label, angle). */
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_DROPPED_STRUCTURE | (1u << AMARK_LINK_DESTINATION) |
+                           (1u << AMARK_LINK_TITLE) | (1u << AMARK_LINK_TITLE_QUOTE),
+                       f.link->dropped);
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(f.inner));
+    NAOS_CHECK_UINT_EQ(2, amark_node_content_token_count(f.emph));
+    CHECK_TREE_OK(f.document);
+
+    /* The paragraph: its laid content becomes free content with the same bytes,
+     * and the tokens of its descendants move to it. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(f.paragraph));
+    NAOS_CHECK_TRUE(f.paragraph->content != old);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(f.paragraph));
+    NAOS_CHECK_UINT_EQ(0, amark_block_content_piece_count(f.paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_block_content_bytes(f.paragraph, &bytes, &length));
+    AMARK_CHECK_BYTES_EQ(bytes, length, "[a *b*](/u \"t\") c");
+    NAOS_CHECK_UINT_EQ(1, f.paragraph->content->line_count);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_content_base(f.emphasized, &bytes, &length, &state, &own));
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, state);
+    NAOS_CHECK_TRUE(own);
+    NAOS_CHECK_TRUE(f.after->content_tokens->base == f.paragraph->content);
+    CHECK_TEXT(f.after, AMARK_TEXT_LITERAL, " c");
+    CHECK_TEXT(f.emphasized, AMARK_TEXT_LITERAL, "b");
+    /* The line range stays. */
+    NAOS_CHECK_UINT_EQ(1, f.paragraph->line_count);
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_DROPPED_STRUCTURE, f.paragraph->dropped);
+    CHECK_TREE_OK(f.document);
+    amark_document_destroy(f.document);
+}
+
+NAOS_TEST(discarding_all_spelling_of_containers_and_code_blocks)
+{
+    /* > ```
+     * > a\0
+     * >
+     * (the code block has no closing fence) */
+    amark_document_t *document = NEW_DOCUMENT("> ```\n> a\0\n>\n");
+    amark_node_t *quote = new_block(document, AMARK_NODE_BLOCK_QUOTE, 0, 3);
+    amark_node_t *block = new_block(document, AMARK_NODE_CODE_BLOCK, 0, 2);
+    amark_margin_t margin;
+    amark_blank_line_t blank;
+    uint32_t line;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(quote, block));
+    for (line = 0; line < 3; line++)
+    {
+        memset(&margin, 0, sizeof(margin));
+        margin.struct_size = sizeof(margin);
+        margin.line = line;
+        margin.state = AMARK_MARGIN_PRESENT;
+        margin.column_start = 0;
+        margin.column_end = (line < 2) ? 2 : 1;
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_margin(quote, &margin));
+    }
+    memset(&blank, 0, sizeof(blank));
+    blank.struct_size = sizeof(blank);
+    blank.line = 2;
+    blank.column_start = 1;
+    blank.column_end = 1;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_blank_line(quote, &blank));
+    layout_token(block, 0, 2, 5, AMARK_SPELL_DELIMITER, AMARK_CODE_BLOCK_FENCE_CHAR);
+    add_content(block, 1, 2, 4);
+    token(block, block, 1, 2, AMARK_SPELL_REPLACED, AMARK_CODE_BLOCK_LITERAL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_record_int(block, AMARK_CODE_BLOCK_FORM,
+                                              AMARK_CODE_BLOCK_FORM_FENCED));
+    CHECK_TEXT(block, AMARK_CODE_BLOCK_LITERAL, "a\xEF\xBF\xBD\n");
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(quote));
+    NAOS_CHECK_UINT_EQ(0, amark_block_margin_count(quote));
+    NAOS_CHECK_UINT_EQ(0, amark_block_blank_line_count(quote));
+    NAOS_CHECK_UINT_EQ(3, quote->line_count);
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_DROPPED_STRUCTURE, quote->dropped);
+    /* The child keeps its spelling. */
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(block));
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_LAID, amark_block_content_state(block));
+    CHECK_TREE_OK(document);
+
+    /* The code block keeps its literal (the replaced byte as U+FFFD) in free
+     * content, and its style. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(block));
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(block));
+    NAOS_CHECK_UINT_EQ(0, amark_node_content_token_count(block));
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(block));
+    CHECK_TEXT(block, AMARK_CODE_BLOCK_LITERAL, "a\xEF\xBF\xBD\n");
+    NAOS_CHECK_INT_EQ(AMARK_CODE_BLOCK_FORM_FENCED, get(block, AMARK_CODE_BLOCK_FORM).number);
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_DROPPED_STRUCTURE | (1u << AMARK_CODE_BLOCK_LITERAL) |
+                           (1u << AMARK_CODE_BLOCK_FENCE_CHAR),
+                       block->dropped);
+    NAOS_CHECK_FALSE(DROPPED(block, AMARK_CODE_BLOCK_FORM));
+    CHECK_TREE_OK(document);
+
+    /* Again: nothing changes but the marks, which are already there. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(block));
+    CHECK_TEXT(block, AMARK_CODE_BLOCK_LITERAL, "a\xEF\xBF\xBD\n");
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_discard_spelling(NULL));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(discarding_all_spelling_of_a_list_or_its_item_keeps_tight)
+{
+    /* - a
+     *
+     * - b
+     * The tight value of a list is derived from the blank lines that dropping
+     * the spelling removes: it becomes an override with the value it had.
+     * Until Verbatim derives tight (12.3) the derived value is the default
+     * (tight); 12.3 must make this test check a loose list. */
+    amark_document_t *document = NEW_DOCUMENT("- a\n\n- b\n");
+    amark_node_t *list = new_block(document, AMARK_NODE_LIST, 0, 3);
+    amark_node_t *item = new_block(document, AMARK_NODE_ITEM, 0, 2);
+    amark_node_t *other = new_block(document, AMARK_NODE_LIST, 2, 1);
+    amark_node_t *paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    amark_blank_line_t blank;
+    int64_t tight = get(list, AMARK_LIST_TIGHT).number;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(list, item));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(item, paragraph));
+    memset(&blank, 0, sizeof(blank));
+    blank.struct_size = sizeof(blank);
+    blank.line = 1;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_blank_line(item, &blank));
+
+    /* A paragraph in the item leaves the list alone. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(paragraph));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_NONE, list->facets[AMARK_LIST_TIGHT - 1].state);
+    /* An item of the list: the parent list takes the override. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(item));
+    NAOS_CHECK_UINT_EQ(0, amark_block_blank_line_count(item));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, list->facets[AMARK_LIST_TIGHT - 1].state);
+    NAOS_CHECK_INT_EQ(tight, get(list, AMARK_LIST_TIGHT).number);
+    NAOS_CHECK_UINT_EQ(0, list->dropped);
+    /* A list itself. */
+    tight = get(other, AMARK_LIST_TIGHT).number;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(other));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, other->facets[AMARK_LIST_TIGHT - 1].state);
+    NAOS_CHECK_INT_EQ(tight, get(other, AMARK_LIST_TIGHT).number);
+    NAOS_CHECK_UINT_EQ(AMARK_TREE_DROPPED_STRUCTURE, other->dropped);
+    /* An existing override is kept as it is. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_int(list, AMARK_LIST_TIGHT, 0));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(list));
+    NAOS_CHECK_INT_EQ(0, get(list, AMARK_LIST_TIGHT).number);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* The types of the children of node, as a string ("t" text, "s" softbreak,
+ * "?" other), and checks that the text children have the literals in order. */
+static void check_inline_children(const amark_node_t *node, const char *types,
+                                  const char *const *literals)
+{
+    const amark_node_t *child;
+    size_t i = 0;
+    size_t text = 0;
+
+    for (child = node->first_child; child != NULL; child = child->next, i++)
+    {
+        NAOS_REQUIRE_TRUE(types[i] != '\0');
+        if (types[i] == 't')
+        {
+            NAOS_REQUIRE_INT_EQ(AMARK_NODE_TEXT, child->type);
+            NAOS_CHECK_STR_EQ(literals[text], get(child, AMARK_TEXT_LITERAL).text);
+            NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET,
+                              child->facets[AMARK_TEXT_LITERAL - 1].state);
+            text++;
+        }
+        else
+        {
+            NAOS_REQUIRE_INT_EQ(AMARK_NODE_SOFTBREAK, child->type);
+        }
+        NAOS_CHECK_NULL(child->content_tokens);
+        NAOS_CHECK_UINT_EQ(0, child->dropped);
+    }
+    NAOS_CHECK_INT_EQ('\0', types[i]);
+}
+
+NAOS_TEST(set_inline_text_places_texts_and_softbreaks)
+{
+    static const char *const abcd[] = {"a", "b", "c", "d"};
+    static const char *const one[] = {"x y"};
+    link_fixture_t f = new_link_fixture();
+    amark_node_t *heading = new_node(f.document, AMARK_NODE_HEADING);
+    amark_node_t *block = new_node(f.document, AMARK_NODE_CODE_BLOCK);
+    size_t nodes = f.document->node_count;
+    const char *bytes = NULL;
+    size_t length = 0;
+
+    /* The children of the paragraph (the link, its 3 descendants, the text after)
+     * are destroyed; 4 texts and 4 softbreaks take their place. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_inline_text(f.paragraph, "a\r\nb\rc\n\nd", 9));
+    check_inline_children(f.paragraph, "tststsst", abcd);
+    NAOS_CHECK_UINT_EQ(nodes - 5 + 8, f.document->node_count);
+    /* The paragraph keeps its content and its line range. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_block_content_bytes(f.paragraph, &bytes, &length));
+    AMARK_CHECK_BYTES_EQ(bytes, length, "[a *b*](/u \"t\") c");
+    CHECK_TREE_OK(f.document);
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_inline_text(heading, "x y", 3));
+    check_inline_children(heading, "t", one);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_inline_text(heading, "\n", 1));
+    check_inline_children(heading, "s", NULL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_set_inline_text(heading, NULL, 0));
+    check_inline_children(heading, "", NULL);
+
+    /* Refused, leaving the children. */
+    nodes = f.document->node_count;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_set_inline_text(f.paragraph, "a\0b", 3));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_set_inline_text(f.paragraph, "a\xFF", 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_set_inline_text(f.paragraph, NULL, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_set_inline_text(NULL, "a", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_set_inline_text(block, "a", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_set_inline_text(f.document->root, "a", 1));
+    check_inline_children(f.paragraph, "tststsst", abcd);
+    NAOS_CHECK_UINT_EQ(nodes, f.document->node_count);
+    CHECK_TREE_OK(f.document);
+    amark_document_destroy(f.document);
+}
+
+/* The facet edits under allocation failures: a failure changes nothing. */
+static amark_error_t discard_oom_scenario(void *context)
+{
+    static const char source[] = "[a](/u \"t\")\n```\nx\0\n```\n";
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *link = NULL;
+    amark_node_t *text = NULL;
+    amark_node_t *block = NULL;
+    amark_source_id_t id = 0;
+    amark_content_token_t record;
+    amark_layout_token_t layout;
+    static const struct
+    {
+        int on_block;
+        size_t start, end;
+        amark_spell_kind_t kind;
+        amark_facet_t facet;
+    } tokens[] = {
+        {0, 0, 1, AMARK_SPELL_DELIMITER, AMARK_FACET_NONE},
+        {0, 2, 4, AMARK_SPELL_DELIMITER, AMARK_FACET_NONE},
+        {0, 4, 6, AMARK_SPELL_TEXT, AMARK_LINK_DESTINATION},
+        {0, 7, 8, AMARK_SPELL_DELIMITER, AMARK_LINK_TITLE_QUOTE},
+        {0, 8, 9, AMARK_SPELL_TEXT, AMARK_LINK_TITLE},
+        {0, 9, 10, AMARK_SPELL_DELIMITER, AMARK_LINK_TITLE_QUOTE},
+        {0, 10, 11, AMARK_SPELL_DELIMITER, AMARK_FACET_NONE},
+        {1, 1, 2, AMARK_SPELL_REPLACED, AMARK_CODE_BLOCK_LITERAL},
+    };
+    size_t i;
+    amark_error_t error;
+
+    (void)context;
+    error = amark_document_create(NULL, &document);
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_document_add_source(document, source, sizeof(source) - 1,
+                                          AMARK_SOURCE_FINISHED, &id);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_append_child(document->root, paragraph);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_block_set_lines(paragraph, 0, 1);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_block_add_content(paragraph, 0, 0, 11);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_create(document, AMARK_NODE_LINK, &link);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_append_child(paragraph, link);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_create(document, AMARK_NODE_TEXT, &text);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_append_child(link, text);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_create(document, AMARK_NODE_CODE_BLOCK, &block);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_append_child(document->root, block);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_block_set_lines(block, 1, 3);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_block_add_content(block, 2, 0, 2);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        memset(&layout, 0, sizeof(layout));
+        layout.struct_size = sizeof(layout);
+        layout.line = 1;
+        layout.column_start = 0;
+        layout.column_end = 3;
+        layout.kind = AMARK_SPELL_DELIMITER;
+        layout.facet = AMARK_CODE_BLOCK_FENCE_CHAR;
+        error = amark_block_add_token(block, &layout);
+    }
+    memset(&record, 0, sizeof(record));
+    record.struct_size = sizeof(record);
+    record.start = 1;
+    record.end = 2;
+    record.kind = AMARK_SPELL_TEXT;
+    record.facet = AMARK_TEXT_LITERAL;
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_add_content_token(text, paragraph, &record);
+    }
+    for (i = 0; (error == AMARK_ERROR_NONE) && (i < sizeof(tokens) / sizeof(tokens[0])); i++)
+    {
+        record.start = tokens[i].start;
+        record.end = tokens[i].end;
+        record.kind = tokens[i].kind;
+        record.facet = tokens[i].facet;
+        error = amark_node_add_content_token(tokens[i].on_block ? block : link,
+                                             tokens[i].on_block ? block : paragraph, &record);
+    }
+
+    /* Each edit fails without a change, or succeeds. */
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_set_string(link, AMARK_LINK_DESTINATION, "/v", 2);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((amark_node_content_token_count(link) != 7) || (link->dropped != 0)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_discard_facet_spelling(link, AMARK_LINK_TITLE);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((amark_node_content_token_count(link) != 6) ||
+             (link->facets[AMARK_LINK_TITLE - 1].state != AMARK_TREE_FACET_NONE) ||
+             (link->dropped != (1u << AMARK_LINK_DESTINATION))))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_discard_facet_spelling(block, AMARK_CODE_BLOCK_LITERAL);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((amark_node_content_token_count(block) != 1) ||
+             (amark_block_content_state(block) != AMARK_CONTENT_LAID) || (block->dropped != 0)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_discard_spelling(link);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((amark_node_content_token_count(link) != 5) ||
+             (link->facets[AMARK_LINK_DESTINATION - 1].state != AMARK_TREE_FACET_SET) ||
+             (link->dropped != ((1u << AMARK_LINK_DESTINATION) | (1u << AMARK_LINK_TITLE)))))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_discard_spelling(paragraph);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((amark_block_content_state(paragraph) != AMARK_CONTENT_LAID) ||
+             (paragraph->dropped != 0) || (text->content_tokens->base != paragraph->content)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = amark_node_set_inline_text(paragraph, "p\nq", 3);
+        if ((error != AMARK_ERROR_NONE) &&
+            ((paragraph->first_child != link) || (link->next != NULL)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    if ((error == AMARK_ERROR_NONE) &&
+        ((paragraph->first_child == NULL) || (paragraph->first_child->next == NULL) ||
+         (paragraph->last_child->type != AMARK_NODE_TEXT)))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    if ((document != NULL) && (amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    amark_document_destroy(document);
+    return error;
+}
+
+NAOS_TEST(out_of_memory_in_dropping_the_spelling_changes_nothing)
+{
+    AMARK_CHECK_OOM_SWEEP(discard_oom_scenario, NULL);
+}
+
 NAOS_SUITE(derive,
     NAOS_ADD_TEST(escapes_and_character_references_are_decoded),
     NAOS_ADD_TEST(replaced_bytes_become_one_replacement_character_per_unit),
@@ -901,7 +1623,16 @@ NAOS_SUITE(derive,
     NAOS_ADD_TEST(a_string_facet_is_not_spelled_by_layout_and_content_tokens_both),
     NAOS_ADD_TEST(the_check_finds_a_stale_cache_and_a_stored_content_value),
     NAOS_ADD_TEST(out_of_memory_in_a_derivation_leaves_no_cache),
-    NAOS_ADD_TEST(out_of_memory_in_setting_a_content_facet_changes_nothing)
+    NAOS_ADD_TEST(out_of_memory_in_setting_a_content_facet_changes_nothing),
+    NAOS_ADD_TEST(changing_a_link_destination_keeps_the_other_spelling),
+    NAOS_ADD_TEST(setting_a_layout_spelled_facet_drops_only_its_layout_tokens),
+    NAOS_ADD_TEST(literals_of_content_facets_round_trip),
+    NAOS_ADD_TEST(discarding_the_spelling_of_a_facet_keeps_its_value),
+    NAOS_ADD_TEST(discarding_all_spelling_keeps_the_values_and_frees_the_content),
+    NAOS_ADD_TEST(discarding_all_spelling_of_containers_and_code_blocks),
+    NAOS_ADD_TEST(discarding_all_spelling_of_a_list_or_its_item_keeps_tight),
+    NAOS_ADD_TEST(set_inline_text_places_texts_and_softbreaks),
+    NAOS_ADD_TEST(out_of_memory_in_dropping_the_spelling_changes_nothing)
 )
 
 NAOS_MAIN(

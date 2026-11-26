@@ -313,9 +313,11 @@ static amark_error_t copy_pieces(amark_document_t *document, const amark_tree_co
  * content move to the copy, and the leaf releases the old content as an owner
  * (the other nodes keep it). Walks the subtree of the leaf without recursion.
  */
-static void adopt_copy(amark_node_t *leaf, amark_tree_content_t *copy)
+/* Moves the content tokens of leaf and of its descendants whose base is old to
+ * the base copy (the same bytes). Walks the subtree without recursion. */
+static void rebase_subtree(amark_node_t *leaf, amark_tree_content_t *old,
+                           amark_tree_content_t *copy)
 {
-    amark_tree_content_t *old = leaf->content;
     amark_node_t *node = leaf;
 
     for (;;)
@@ -343,6 +345,13 @@ static void adopt_copy(amark_node_t *leaf, amark_tree_content_t *copy)
         }
         node = node->next;
     }
+}
+
+static void adopt_copy(amark_node_t *leaf, amark_tree_content_t *copy)
+{
+    amark_tree_content_t *old = leaf->content;
+
+    rebase_subtree(leaf, old, copy);
     copy->owners = 1;
     leaf->content = copy;
     amark_tree_content_release(old, true);
@@ -673,6 +682,49 @@ void amark_tree_leaf_take_content(amark_node_t *leaf, amark_tree_content_t *cont
     leaf->content = content;
     amark_tree_drop_content_derived(leaf);
     amark_tree_changed(leaf, AMARK_TREE_CHANGE_RECORD);
+}
+
+amark_error_t amark_tree_content_free_copy(const amark_tree_content_t *source,
+                                           amark_tree_content_t **out)
+{
+    amark_tree_content_t *content;
+
+    *out = NULL;
+    content = (amark_tree_content_t *)amark_calloc(1, sizeof(*content));
+    if (content == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    content->bytes = (char *)amark_malloc(source->length + 1);
+    if (content->bytes == NULL)
+    {
+        content_free(content);
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    content->capacity = source->length + 1;
+    if (source->length > 0)
+    {
+        memcpy(content->bytes, source->bytes, source->length);
+    }
+    content->bytes[source->length] = '\0';
+    content->length = source->length;
+    content->line_count = source->line_count;
+    content->state = AMARK_CONTENT_FREE;
+    content->owners = 1;
+    *out = content;
+    return AMARK_ERROR_NONE;
+}
+
+void amark_tree_leaf_replace_content(amark_node_t *leaf, amark_tree_content_t *content)
+{
+    amark_tree_content_t *old = leaf->content;
+
+    if ((old != NULL) && (old->length == content->length) &&
+        ((old->length == 0) || (memcmp(old->bytes, content->bytes, old->length) == 0)))
+    {
+        rebase_subtree(leaf, old, content);
+    }
+    amark_tree_leaf_take_content(leaf, content);
 }
 
 /* ---- Readers -------------------------------------------------------------------------- */

@@ -87,8 +87,18 @@ AMARK_API amark_error_t amark_node_get(const amark_node_t *node, amark_facet_t f
  *      empty, ends with LF (6.5).
  *   4. The new value is prepared and the on_change function of the facet, if
  *      any, is called with it; the node still holds the old value.
- *   5. When on_change succeeds the value is committed; when it fails, the
- *      prepared value is discarded and its error is returned.
+ *   5. When on_change succeeds the value is committed and the spelling of the
+ *      facet is dropped as by amark_node_discard_facet_spelling, without its
+ *      copy of the value: the tokens that spell the facet are removed and the
+ *      facet is marked as dropped; the other facets of the node, its layout
+ *      and the spelling of the other nodes stay (6.7, 6.8). When on_change
+ *      fails, the prepared value is discarded and its error is returned.
+ *   A CONTENT facet (the literal of code_block and html_block) stores no value:
+ *   the leaf gets new free content from the value (the value without its last
+ *   LF; no line for "", else the LFs of the content + 1), without content
+ *   tokens; the own spelling of the leaf (its layout tokens, such as the fence
+ *   lines) stays (8.7). So "", "\n", "a" and "a\n\n" read back as "", "\n",
+ *   "a\n" and "a\n\n".
  * On failure (also AMARK_ERROR_OUT_OF_MEMORY and AMARK_ERROR_OVERFLOW) the
  * value is not changed.
  */
@@ -98,10 +108,11 @@ AMARK_API amark_error_t amark_node_set_string(amark_node_t *node, amark_facet_t 
                                               const char *text, size_t length);
 
 /*
- * Unsets facet: a style returns to UNSET, and an OVERRIDABLE facet loses its
- * override and returns to its derived value (6.11). Calls no on_change.
- * Unsetting a facet that has no value does nothing. Any other facet is
- * AMARK_ERROR_INVALID_ARGUMENT.
+ * Unsets facet: a style returns to UNSET and its spelling is dropped (its
+ * tokens are removed and the facet is marked as dropped), and an OVERRIDABLE
+ * facet loses its override and returns to its derived value (6.11). Calls no
+ * on_change. Unsetting a facet that has no value does nothing. Any other
+ * facet is AMARK_ERROR_INVALID_ARGUMENT.
  */
 AMARK_API amark_error_t amark_node_unset(amark_node_t *node, amark_facet_t facet);
 
@@ -116,6 +127,62 @@ AMARK_API amark_error_t amark_node_record_int(amark_node_t *node, amark_facet_t 
                                               int64_t number);
 AMARK_API amark_error_t amark_node_record_string(amark_node_t *node, amark_facet_t facet,
                                                  const char *text, size_t length);
+
+/*
+ * Sets the inline children of node from text (6.12): the children of node are
+ * unlinked and destroyed, and text, of length bytes (NULL when length is 0),
+ * is divided at its line breaks (LF, CRLF and CR) into text nodes, one per
+ * nonempty line with the line as its literal, with a softbreak node for each
+ * line break between them, in order. The new nodes have no spelling; "" leaves
+ * node without children. AMARK_ERROR_INVALID_ARGUMENT for a NULL node, NULL
+ * text with a length, text with NUL or invalid UTF-8, and a node that cannot
+ * contain a text node (or a softbreak node, when text has a line break); on
+ * failure (also AMARK_ERROR_OUT_OF_MEMORY) node and its children are not
+ * changed.
+ */
+AMARK_API amark_error_t amark_node_set_inline_text(amark_node_t *node, const char *text,
+                                                   size_t length);
+
+/*
+ * Drops the spelling of facet of node, keeping its value: the tokens of node
+ * that spell facet (layout and content tokens) are removed and the facet is
+ * marked as dropped.
+ *   - A STRING facet that was derived from those tokens keeps the derived
+ *     value as its set value.
+ *   - A CONTENT facet keeps its value as new free content of the leaf (the
+ *     replaced bytes become U+FFFD), as when the facet is set; the own layout
+ *     tokens of the leaf stay.
+ * The change is notified. Dropping the spelling of a facet that has no token
+ * and is already marked does nothing. AMARK_ERROR_INVALID_ARGUMENT for a NULL
+ * node and a facet its type does not have; on failure (also
+ * AMARK_ERROR_OUT_OF_MEMORY) node is not changed.
+ */
+AMARK_API amark_error_t amark_node_discard_facet_spelling(amark_node_t *node,
+                                                          amark_facet_t facet);
+
+/*
+ * Drops all of the own spelling of node, keeping its values and styles (6.13):
+ *   1. the value of each STRING facet derived from its tokens becomes its set
+ *      value; and the values derived from the blank lines stay: for a list,
+ *      or an item directly under a list, each OVERRIDABLE facet of that list
+ *      without an override (tight) takes its current value as the override;
+ *   2. the layout tokens, the content tokens, the margins and the blank lines
+ *      of node are removed;
+ *   3. laid content of a leaf becomes new free content with the same bytes and
+ *      line count (the old object, which other leaves may share, is not
+ *      changed), and the content tokens of the descendants of the leaf on the
+ *      old content move to it. For a leaf with a CONTENT facet, laid content
+ *      and content with tokens of the leaf on it become the value of that
+ *      facet as set (the replaced bytes as U+FFFD), and the tokens of the
+ *      descendants move only when the bytes stay the same;
+ *   4. the structural spelling, and the spelling of each facet of node that
+ *      had tokens, are marked as dropped. The line range stays (for the
+ *      position queries).
+ * The spelling of the children of node stays. The change is notified.
+ * AMARK_ERROR_INVALID_ARGUMENT for a NULL node; on failure (also
+ * AMARK_ERROR_OUT_OF_MEMORY) node is not changed.
+ */
+AMARK_API amark_error_t amark_node_discard_spelling(amark_node_t *node);
 
 /*
  * The facet numbers of the built-in node types (AMARK_<TYPE>_<FACET>) and the
