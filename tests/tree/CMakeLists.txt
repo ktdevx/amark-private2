@@ -66,3 +66,13 @@ amark_add_test(iterator_span_test SOURCES iterator_span_test.c)
 # failure, deep chains, no allocation of the comparison and the out-of-memory sweep
 # of the dump (sets unknown edit record bits through the internal struct).
 amark_add_test(equal_dump_test SOURCES equal_dump_test.c INTERNAL)
+
+# The test support that builds trees from S-expressions (tests/support/tree_builder.c,
+# linked through amark_test_tree): the round trip of the dump for the example of the
+# design, every built-in attribute, the tokens, the escapes; the extension attributes
+# given to the callback; the position of each kind of error; the document left as it
+# was on failure and the edit tracking restored (public API only). Built twice, with
+# amark and with amark_internal, as the tests of both kinds link amark_test_tree.
+amark_add_test(tree_builder_test SOURCES tree_builder_test.c LIBRARIES amark_test_tree)
+amark_add_test(tree_builder_internal_test SOURCES tree_builder_test.c LIBRARIES amark_test_tree
+  INTERNAL)
