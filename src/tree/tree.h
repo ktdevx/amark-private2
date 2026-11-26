@@ -90,8 +90,8 @@ struct amark_document
     size_t source_capacity;
     bool tracking;
     /* Counters for the INTERNAL tests of the complexity, never exposed: the
-     * ancestor steps of the edit propagation (amark_edit_mark, and the propagation
-     * of an inserted subtree's records in structure_edit.c), the tokens moved by
+     * ancestor steps of the edit propagation (amark_edit_propagate_descendants,
+     * from amark_edit_mark and from the insertions of structure_edit.c), the tokens moved by
      * sorted insertions (token.c) and the ancestor steps of the cycle check of
      * the insertions (structure_edit.c; 0 for inserting a node without children).
      * 0 when the document is created. */
@@ -108,6 +108,15 @@ struct amark_document
  * up, stopping at the first ancestor that already has it.
  */
 void amark_edit_mark(amark_node_t *node, uint32_t bits);
+
+/*
+ * Gives AMARK_EDIT_DESCENDANTS to the ancestors of node, from the parent up,
+ * stopping at the first ancestor that already has it, whether tracking is on or
+ * not, and counts the steps in stat_propagation_steps. amark_edit_mark uses it
+ * with tracking on; structure_edit.c uses it to keep the closure of the records
+ * over the new ancestors when a subtree with records is inserted.
+ */
+void amark_edit_propagate_descendants(amark_node_t *node);
 
 /* --- node.c ------------------------------------------------------------------- */
 

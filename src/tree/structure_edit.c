@@ -29,24 +29,6 @@ bool amark_node_allows_child(const amark_node_t *parent, const amark_node_type_d
 
 /* --- Links and records ------------------------------------------------------------ */
 
-/*
- * Gives AMARK_EDIT_DESCENDANTS to ancestor and the ancestors above it, stopping at
- * the first one that has it already, whether tracking is on or not: keeps the
- * closure of the records over the ancestors when a subtree with records is
- * inserted.
- */
-static void propagate_descendants(amark_node_t *ancestor)
-{
-    amark_document_t *document = ancestor->document;
-
-    for (; (ancestor != NULL) && ((ancestor->edits & AMARK_EDIT_DESCENDANTS) == 0);
-         ancestor = ancestor->parent)
-    {
-        ancestor->edits |= AMARK_EDIT_DESCENDANTS;
-        document->stat_propagation_steps++;
-    }
-}
-
 /* Detaches node, which has a parent, and records AMARK_EDIT_CHILDREN on the
  * parent. */
 static void detach(amark_node_t *node)
@@ -112,7 +94,7 @@ void amark_node_link_child(amark_node_t *parent, amark_node_t *before, amark_nod
      * ancestors. */
     if (node->edits != 0)
     {
-        propagate_descendants(parent);
+        amark_edit_propagate_descendants(node);
     }
 }
 

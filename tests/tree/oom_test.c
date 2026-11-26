@@ -28,7 +28,8 @@
  * the transfer of tokens.
  * Suite oom_copies: copies, imports into another syntax set, imports of children
  * into another document and into the same one.
- * Suite oom_syntax_sets: the appending of an extension, freezing, cloning.
+ * Suite oom_syntax_sets: the appending and the insertion (before another) of an
+ * extension, freezing, cloning.
  * Suite oom_reading: the creation of an iterator, the dump, the lossless check.
  */
 #include "tree/syntax_set.h"
@@ -1381,6 +1382,22 @@ static bool extension_appended(fixture_t *f, op_t *op)
     return (count >= 3) && (amark_syntax_set_extension_at(op->set, count - 1) == &o_extension);
 }
 
+static amark_error_t insert_extension_before(fixture_t *f, op_t *op)
+{
+    (void)f;
+    return amark_syntax_set_insert_before(op->set, "p", &o_extension);
+}
+
+static bool extension_inserted_before(fixture_t *f, op_t *op)
+{
+    (void)f;
+    size_t count = amark_syntax_set_extension_count(op->set);
+
+    return (count >= 4) && (amark_syntax_set_extension_at(op->set, 1) == &o_extension)
+           && (amark_syntax_set_extension_at(op->set, 2) == &p_extension)
+           && (amark_syntax_set_extension_at(op->set, count - 1) != &o_extension);
+}
+
 static amark_error_t freeze_set(fixture_t *f, op_t *op)
 {
     (void)f;
@@ -1427,6 +1444,8 @@ static bool set_cloned(fixture_t *f, op_t *op)
 static oom_case_t syntax_set_cases[] = {
     { "syntax set append", prepare_open_set, append_extension, NULL, extension_appended, 0, 0,
       NULL },
+    { "syntax set insert before", prepare_open_set, insert_extension_before, NULL,
+      extension_inserted_before, 0, 0, NULL },
     { "syntax set freeze", prepare_full_set, freeze_set, NULL, set_frozen, 0, 0, NULL },
     { "syntax set clone (open)", prepare_full_set, clone_set, clone_is_null, set_cloned, 0, 0,
       NULL },

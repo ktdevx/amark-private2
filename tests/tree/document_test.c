@@ -24,8 +24,10 @@
  * the bytes at each offset and updates the line index, a CRLF split between two
  * chunks being one line ending; amark_document_position converts the offsets of
  * LF, CR and CRLF lines to lines and columns and rejects the out of range ones;
- * the destruction of the document frees the sources; and the out-of-memory sweeps
- * of the addition and the appending leave the document unchanged.
+ * appending leaves the tokens that refer to the source, their source span and
+ * their dump unchanged and accepts tokens in the appended range; the destruction
+ * of the document frees the sources; and the out-of-memory sweeps of the addition
+ * and the appending leave the document unchanged.
  *
  * Suite ownership (1.3, 1.10, 1.11): amark_document_take_syntax_set takes the heap
  * set the document uses, which the destruction of the document then frees after
@@ -38,10 +40,13 @@
 #include "tree/tree.h"
 
 #include <amark/allocator.h>
+#include <amark/buffer.h>
 #include <amark/document.h>
+#include <amark/dump.h>
 #include <amark/error.h>
 #include <amark/extension.h>
 #include <amark/node.h>
+#include <amark/token.h>
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -1294,6 +1299,111 @@ NAOS_TEST(appending_a_source_to_itself_survives_the_reallocation)
     amark_document_destroy(document);
 }
 
+/* A text token over the length bytes at offset of source. */
+static amark_token_t text_token(amark_source_id_t source, size_t offset, size_t length)
+{
+    amark_token_t token;
+
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.kind = AMARK_TOKEN_TEXT;
+    token.source = source;
+    token.offset = offset;
+    token.length = length;
+    return token;
+}
+
+/* Whether the token at index of node is the text token over the length bytes at
+ * offset of source. */
+static bool token_is(const amark_node_t *node, size_t index, amark_source_id_t source,
+                     size_t offset, size_t length)
+{
+    amark_token_t token;
+
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    return (amark_node_token_at(node, index, &token) == AMARK_ERROR_NONE) &&
+           (token.kind == AMARK_TOKEN_TEXT) && (token.source == source) &&
+           (token.offset == offset) && (token.length == length) && (token.flags == 0);
+}
+
+/* Whether the source span of node is [start_offset, end_offset) of source, from
+ * start_line:start_column to end_line:end_column. */
+static bool span_is(const amark_node_t *node, amark_source_id_t source, size_t start_offset,
+                    size_t end_offset, size_t start_line, size_t start_column, size_t end_line,
+                    size_t end_column)
+{
+    amark_source_span_t span;
+
+    memset(&span, 0, sizeof(span));
+    span.struct_size = sizeof(span);
+    return amark_node_source_span(node, &span) && (span.source == source) &&
+           (span.start_offset == start_offset) && (span.end_offset == end_offset) &&
+           (span.start_line == start_line) && (span.start_column == start_column) &&
+           (span.end_line == end_line) && (span.end_column == end_column);
+}
+
+NAOS_TEST(appending_keeps_the_tokens_that_refer_to_the_source)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 99;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *text = NULL;
+    amark_buffer_t *before = NULL;
+    amark_buffer_t *after = NULL;
+    amark_token_t token;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "ab\ncd", 5, &id));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_append_child(amark_document_root(document), paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(paragraph, text));
+
+    token = text_token(id, 0, 2);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_add_token(paragraph, &token));
+    token = text_token(id, 3, 2);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_add_token(text, &token));
+
+    /* Before the appending, the range after the end is out of the source. */
+    token = text_token(id, 6, 2);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_add_token(text, &token));
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&before));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&after));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_dump(amark_document_root(document), AMARK_DUMP_TOKENS, before));
+    NAOS_CHECK_TRUE(span_is(paragraph, id, 0, 5, 1, 1, 2, 3));
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, id, "\nef", 3));
+
+    /* The tokens, the span and the dump are those of before the appending. */
+    NAOS_CHECK_UINT_EQ(1, amark_node_token_count(paragraph));
+    NAOS_CHECK_TRUE(token_is(paragraph, 0, id, 0, 2));
+    NAOS_CHECK_UINT_EQ(1, amark_node_token_count(text));
+    NAOS_CHECK_TRUE(token_is(text, 0, id, 3, 2));
+    NAOS_CHECK_TRUE(span_is(paragraph, id, 0, 5, 1, 1, 2, 3));
+    NAOS_CHECK_TRUE(span_is(text, id, 3, 5, 2, 1, 2, 3));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_dump(amark_document_root(document), AMARK_DUMP_TOKENS, after));
+    NAOS_CHECK_UINT_GT(amark_buffer_length(before), 0);
+    NAOS_CHECK_MEM_EQ(amark_buffer_data(after), amark_buffer_length(after),
+                      amark_buffer_data(before), amark_buffer_length(before));
+
+    /* A token in the appended range is accepted now. */
+    token = text_token(id, 6, 2);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_add_token(text, &token));
+    NAOS_CHECK_UINT_EQ(2, amark_node_token_count(text));
+    NAOS_CHECK_TRUE(token_is(text, 1, id, 6, 2));
+    NAOS_CHECK_TRUE(span_is(paragraph, id, 0, 8, 1, 1, 3, 3));
+
+    amark_buffer_destroy(after);
+    amark_buffer_destroy(before);
+    amark_document_destroy(document);
+}
+
 NAOS_TEST(destroying_a_document_frees_its_sources)
 {
     amark_document_t *document = NULL;
@@ -1435,6 +1545,7 @@ NAOS_SUITE(source,
     NAOS_ADD_TEST(a_crlf_split_between_chunks_is_one_line_ending),
     NAOS_ADD_TEST(appending_keeps_the_bytes_at_each_offset),
     NAOS_ADD_TEST(appending_a_source_to_itself_survives_the_reallocation),
+    NAOS_ADD_TEST(appending_keeps_the_tokens_that_refer_to_the_source),
     NAOS_ADD_TEST(destroying_a_document_frees_its_sources),
     NAOS_ADD_TEST(adding_a_source_passes_the_out_of_memory_sweep),
     NAOS_ADD_TEST(appending_to_a_source_passes_the_out_of_memory_sweep))

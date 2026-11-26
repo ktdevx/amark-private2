@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MIT
  * Copyright (c) The Amark Authors */
 
-/* Edit records and their propagation to the ancestors (amark_edit_mark). */
+/* Edit records and their propagation to the ancestors (amark_edit_mark,
+ * amark_edit_propagate_descendants). */
 
 #include <amark/node.h>
 
@@ -11,15 +12,19 @@
 
 void amark_edit_mark(amark_node_t *node, uint32_t bits)
 {
-    amark_document_t *document = node->document;
-    amark_node_t *ancestor;
-
-    if (!document->tracking || (bits == 0))
+    if (!node->document->tracking || (bits == 0))
     {
         return;
     }
 
     node->edits |= bits;
+    amark_edit_propagate_descendants(node);
+}
+
+void amark_edit_propagate_descendants(amark_node_t *node)
+{
+    amark_document_t *document = node->document;
+    amark_node_t *ancestor;
 
     /* Every ancestor of a node with AMARK_EDIT_DESCENDANTS has it already, so the
      * walk stops at the first one that has it: over a sequence of edits, each
