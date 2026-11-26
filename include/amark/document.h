@@ -267,6 +267,75 @@ AMARK_API amark_error_t amark_node_source_range(const amark_node_t *node,
                                                 amark_source_range_t *out,
                                                 bool *has_position);
 
+/* ---- Lossless verification ---------------------------------------------------- */
+
+/* The kinds of the inconsistencies the lossless verification reports (10.4). */
+typedef enum amark_lossless_problem
+{
+    /* A column of a line covered by no record, or a line of no column that no
+     * blank line and no content piece refers to; a byte of the content of a
+     * leaf covered by no content token. */
+    AMARK_LOSSLESS_GAP = 1,
+    /* A column of a line, or a byte of the content of a leaf, covered more
+     * than once. */
+    AMARK_LOSSLESS_OVERLAP,
+    /* A boundary of a record inside a character other than a tab. */
+    AMARK_LOSSLESS_SPLIT_CHARACTER,
+    /* A content token under a leaf whose base is not the content of that
+     * leaf. */
+    AMARK_LOSSLESS_FOREIGN_TOKEN
+} amark_lossless_problem_t;
+
+/*
+ * The first inconsistency found by amark_document_check_lossless:
+ *   - problem: its kind;
+ *   - line, column: for the division of the lines, the line (its identifier in
+ *     the line table) and the column; AMARK_LINE_NONE and 0 otherwise;
+ *   - leaf, content_offset: for the coverage of a content, the leaf and the
+ *     position in its content (the start of the token, on its own base, for a
+ *     foreign token); NULL and 0 otherwise.
+ */
+typedef struct amark_lossless_report
+{
+    size_t struct_size; /* sizeof(amark_lossless_report_t), set by the caller */
+    amark_lossless_problem_t problem;
+    amark_line_id_t line;
+    uint32_t column;
+    const amark_node_t *leaf;
+    size_t content_offset;
+} amark_lossless_report_t;
+
+/*
+ * Verifies that the tree of document holds every byte of source exactly once
+ * (10.1-10.5), looking only at the nodes connected to the document node:
+ *   1. The division of the lines: on each completed line of source, the
+ *      margins (a lazy margin has no columns and counts for nothing), the
+ *      blank lines, the layout tokens and the content pieces cover every
+ *      column exactly once; a line of no column is referred to by at least one
+ *      blank line or content piece; and no boundary of these records is inside
+ *      a character other than a tab (a boundary inside a tab is allowed: the
+ *      tab is divided by columns). The BOM belongs to the source and the line
+ *      endings to the line table, so the bytes of source are all covered.
+ *   2. The coverage of the contents: for each block with content (every one,
+ *      whatever its source), the content tokens of the leaf and of its
+ *      descendants cover its content exactly once, and all are on the content
+ *      of that leaf.
+ * On the first inconsistency, in the order of the lines and then of the columns
+ * (a split character first at a column), then in the document order of the
+ * leaves and the order of the content positions, returns
+ * AMARK_ERROR_NOT_LOSSLESS and writes it to *report when report is not NULL;
+ * report is written only then. The time is proportional to the lines, the
+ * columns and the bytes of the source, the records and the nodes of the tree
+ * and the bytes and tokens of the contents (14.7). AMARK_ERROR_INVALID_ARGUMENT
+ * for a NULL document, a source that is not in document and a report whose
+ * struct_size is smaller than sizeof(amark_lossless_report_t);
+ * AMARK_ERROR_OUT_OF_MEMORY when the working memory cannot be allocated. The
+ * tree is never changed.
+ */
+AMARK_API amark_error_t amark_document_check_lossless(const amark_document_t *document,
+                                                      amark_source_id_t source,
+                                                      amark_lossless_report_t *report);
+
 /* ---- Labels ------------------------------------------------------------------ */
 
 /*

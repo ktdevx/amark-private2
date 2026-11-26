@@ -858,6 +858,10 @@ typedef struct amark_tree_stats
     /* The steps of the derivation of the tightness of the lists (Verbatim):
      * one per derivation, plus one per child and per blank line examined. */
     size_t tight_steps;
+    /* The steps of the lossless check (LosslessCheck): one per node visited by
+     * each walk, per record collected and placed, per line and per column of
+     * the source checked, and per byte and token of each content covered. */
+    size_t lossless_steps;
 } amark_tree_stats_t;
 
 struct amark_document

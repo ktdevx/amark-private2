@@ -53,7 +53,8 @@ amark_add_test(position_test SOURCES position_test.c INTERNAL
   LIBRARIES amark_test_tree)
 
 # LosslessCheck: the lossless verification.
-amark_add_test(lossless_test SOURCES lossless_test.c INTERNAL)
+amark_add_test(lossless_test SOURCES lossless_test.c INTERNAL
+  LIBRARIES amark_test_tree)
 
 # Verbatim: the spelling state and whether the original spelling can be output.
 amark_add_test(verbatim_test SOURCES verbatim_test.c INTERNAL

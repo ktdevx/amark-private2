@@ -275,6 +275,15 @@ NAOS_TEST(source_and_line_functions_link)
                       amark_node_source_range(amark_document_root(document), &range,
                                               &has_position));
     NAOS_CHECK_FALSE(has_position);
+    /* Nothing covers the line "\tx" (line 2) of the second source. */
+    amark_lossless_report_t report;
+    report.struct_size = sizeof(report);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NOT_LOSSLESS,
+                      amark_document_check_lossless(document, source, &report));
+    NAOS_CHECK_INT_EQ(AMARK_LOSSLESS_GAP, report.problem);
+    NAOS_CHECK_UINT_EQ(2, report.line);
+    NAOS_CHECK_UINT_EQ(0, report.column);
+    NAOS_CHECK_NULL(report.leaf);
     amark_document_destroy(document);
 }
 
