@@ -83,7 +83,16 @@ amark_error_t amark_tree_node_new(amark_document_t *document, amark_node_type_t 
         }
     }
 
-    /* Commit: add the node at the end of the ring (before the root). */
+    amark_tree_node_link(node);
+    *out = node;
+    return AMARK_ERROR_NONE;
+}
+
+void amark_tree_node_link(amark_node_t *node)
+{
+    amark_document_t *document = node->document;
+
+    /* At the end of the ring (before the root); the root alone is its ring. */
     if (document->root == NULL)
     {
         node->ring_next = node;
@@ -98,8 +107,6 @@ amark_error_t amark_tree_node_new(amark_document_t *document, amark_node_type_t 
     }
     document->node_count++;
     document->stats.nodes_created++;
-    *out = node;
-    return AMARK_ERROR_NONE;
 }
 
 void amark_tree_node_release(amark_node_t *node)

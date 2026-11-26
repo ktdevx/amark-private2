@@ -234,6 +234,10 @@ NAOS_TEST(structural_edit_functions_link)
     NAOS_REQUIRE_NOT_NULL(b);
     NAOS_CHECK_NULL(amark_node_parent(b));
     NAOS_CHECK_UINT_EQ(AMARK_NODE_PARAGRAPH, amark_node_get_type(b));
+    b = NULL;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import(document, c, &b));
+    NAOS_REQUIRE_NOT_NULL(b);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import_children(b, NULL, c));
     amark_document_destroy(document);
 }
 

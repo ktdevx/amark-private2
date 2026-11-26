@@ -501,6 +501,12 @@ struct amark_node
 amark_error_t amark_tree_node_new(amark_document_t *document, amark_node_type_t type,
                                   amark_node_t **out);
 
+/* Adds node, allocated for its document (node->document) and not yet in its
+ * ring, at the end of the ring (the first node, the document node, makes a ring
+ * of its own) and counts it as created. Allocates nothing. Used by
+ * amark_tree_node_new and by CopyImport, which commits the nodes it built. */
+void amark_tree_node_link(amark_node_t *node);
+
 /* Releases one node: calls the deinit function of its type, removes it from the
  * definition index and the ring of its document and frees it. Its tree links
  * are not looked at. */

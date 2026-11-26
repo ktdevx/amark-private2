@@ -222,6 +222,54 @@ AMARK_API amark_error_t amark_node_replace(amark_node_t *old_node, amark_node_t 
  */
 AMARK_API amark_error_t amark_node_copy(const amark_node_t *node, amark_node_t **out);
 
+/* ---- Importing (5.7–5.9) ----------------------------------------------------------- */
+
+/*
+ * Imports node and its subtree from its document into target: *out receives a
+ * new detached node of target that is a copy of node as amark_node_copy makes
+ * it, except that
+ *   - each type is the type of the same name in the syntax set of target;
+ *   - the lines the subtree refers to (the line ranges, the margins, the blank
+ *     lines, the layout tokens and the pieces of the content) are added to
+ *     target as one new finished source, in their order, each with its bytes
+ *     and its line ending as they are (a line without a line ending may be
+ *     followed by another line, and a CR line by an empty LF line), and the
+ *     copied records refer to them, so the spelling is kept (5.7);
+ *   - each content object is copied once, so the nodes that share one in the
+ *     source share its copy in target.
+ * A copied link_definition is looked up with its label from its insertion into
+ * the tree on. Nothing is added when the subtree refers to no line. An import
+ * into the document of node is amark_node_copy. The subtree is walked without
+ * recursion.
+ *
+ * AMARK_ERROR_INVALID_ARGUMENT for NULL arguments, the document node, and a
+ * type of the subtree that target does not have (or describes with other
+ * facets, flags or data), or that the syntax set of target does not accept
+ * under its parent (5.9); AMARK_ERROR_LIMIT_EXCEEDED when target cannot hold
+ * the lines; AMARK_ERROR_OUT_OF_MEMORY, or the error of the copy function of a
+ * type. On failure *out is NULL and neither document changes.
+ */
+AMARK_API amark_error_t amark_node_import(amark_document_t *target, const amark_node_t *node,
+                                          amark_node_t **out);
+
+/*
+ * Imports every child of source_parent, in order, with its subtree, as
+ * amark_node_import does (one new source for all of them), and inserts them
+ * under target_parent before before, or at the end when before is NULL, in one
+ * operation (5.8). source_parent may be the document node, and may be in the
+ * document of target_parent (the children are then copied). Nothing happens
+ * when source_parent has no child.
+ *
+ * AMARK_ERROR_INVALID_ARGUMENT, inserting nothing and changing no document, for
+ * NULL arguments, a before that is not a child of target_parent, a child that
+ * target_parent does not accept or a link that would get a link among its
+ * descendants, and the errors of amark_node_import (5.9). All are copied
+ * before any is inserted: on failure nothing changes.
+ */
+AMARK_API amark_error_t amark_node_import_children(amark_node_t *target_parent,
+                                                   amark_node_t *before,
+                                                   const amark_node_t *source_parent);
+
 /* ---- User pointers and extension data (4.5) ------------------------------------ */
 
 /* The pointer the application associated with node (NULL until set, and for a

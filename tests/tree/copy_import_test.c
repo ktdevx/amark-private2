@@ -5,7 +5,8 @@
  * The tests of CopyImport (syntax-tree): the copy within the same document
  * (5.6), with the content objects shared and copied on write (Content, 6.3),
  * the copied definitions in the definition index, and the extension data
- * copied by the copy function of the type (12.13).
+ * copied by the copy function of the type (12.13), the import from another
+ * document and of the children of a node (5.7–5.9).
  */
 #include "tree/tree.h"
 
@@ -911,6 +912,490 @@ NAOS_TEST(a_deep_subtree_is_copied_without_recursion)
     amark_document_destroy(document);
 }
 
+/* ---- The import (5.7–5.9) -------------------------------------------------------------- */
+
+/* Checks line of document: its source, number, length and line ending. */
+static void check_line(const amark_document_t *document, amark_line_id_t line,
+                       amark_source_id_t source, uint32_t number, size_t length, amark_eol_t eol)
+{
+    amark_line_info_t info;
+
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_line(document, line, &info));
+    NAOS_CHECK_UINT_EQ(source, info.source);
+    NAOS_CHECK_UINT_EQ(number, info.number);
+    NAOS_CHECK_UINT_EQ(length, info.length);
+    NAOS_CHECK_INT_EQ(eol, info.eol);
+}
+
+/* Checks that the bytes of source of document are expected (of length bytes). */
+static void check_source(const amark_document_t *document, amark_source_id_t source,
+                         const char *expected, size_t expected_length)
+{
+    const char *data = NULL;
+    size_t length = 0;
+    bool has_bom = true;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_source_data(document, source, &data, &length, &has_bom));
+    NAOS_CHECK_FALSE(has_bom);
+    NAOS_REQUIRE_UINT_EQ(expected_length, length);
+    NAOS_CHECK_INT_EQ(0, memcmp(expected, data, length));
+}
+
+NAOS_TEST(the_import_reproduces_the_subtree_with_its_lines)
+{
+    amark_document_t *source = new_document(input_3_1_source);
+    amark_document_t *target = NULL;
+    amark_node_t *quote;
+    amark_node_t *imported = NULL;
+    amark_node_t *paragraph;
+    amark_tree_content_t *content;
+    char *expected;
+    size_t nodes;
+    bool verbatim = false;
+
+    AMARK_CHECK_TREE_BUILD(source, NULL, input_3_1_tree);
+    quote = amark_node_first_child(amark_document_root(source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(quote, &verbatim));
+    NAOS_CHECK_TRUE(verbatim);
+    expected = fingerprint(quote);
+    nodes = source->node_count;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &target));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import(target, quote, &imported));
+    NAOS_REQUIRE_NOT_NULL(imported);
+    NAOS_CHECK_PTR_EQ(target, amark_node_document(imported));
+    NAOS_CHECK_NULL(amark_node_parent(imported));
+    NAOS_CHECK_UINT_EQ(1 + subtree_size(quote), target->node_count);
+    NAOS_CHECK_UINT_EQ(nodes, source->node_count);
+    check_no_cache(imported);
+
+    /* The lines are in one new finished source of the target. */
+    NAOS_CHECK_UINT_EQ(1, amark_document_source_count(target));
+    NAOS_CHECK_UINT_EQ(2, amark_document_line_count(target));
+    check_source(target, 0, input_3_1_source, strlen(input_3_1_source));
+    check_line(target, 0, 0, 1, 12, AMARK_EOL_LF);
+    check_line(target, 1, 0, 2, 15, AMARK_EOL_LF);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_STATE,
+                      amark_document_append_source(target, 0, "x", 1));
+
+    /* The content is copied once: a new object, owned by the imported
+     * paragraph, the base of its six nodes with tokens. */
+    paragraph = paragraph_of(imported);
+    content = paragraph->content;
+    NAOS_REQUIRE_NOT_NULL(content);
+    NAOS_CHECK_TRUE(content != paragraph_of(quote)->content);
+    NAOS_CHECK_UINT_EQ(1, content->owners);
+    NAOS_CHECK_UINT_EQ(6, content->bases);
+    NAOS_CHECK_PTR_EQ(content, amark_node_first_child(paragraph)->content_tokens->base);
+    NAOS_CHECK_UINT_EQ(1, paragraph_of(quote)->content->owners);
+    NAOS_CHECK_UINT_EQ(6, paragraph_of(quote)->content->bases);
+
+    /* With the same lines at the same identifiers, everything reads the same:
+     * values, spelling, judgment and positions. */
+    CHECK_FINGERPRINT(expected, imported);
+    CHECK_FINGERPRINT(expected, quote);
+    CHECK_TREE_OK(target);
+    CHECK_TREE_OK(source);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_append_child(amark_document_root(target), imported));
+    CHECK_FINGERPRINT(expected, imported);
+    free(expected);
+    CHECK_TREE_OK(target);
+
+    /* The two documents are independent. */
+    amark_document_destroy(source);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(imported, &verbatim));
+    NAOS_CHECK_TRUE(verbatim);
+    CHECK_TREE_OK(target);
+    amark_document_destroy(target);
+}
+
+/* The lines of the line ending test: three sources, so that a CR line is
+ * followed by an empty LF line and a line without a line ending by another
+ * line, which dividing the joined bytes again would not give back. */
+static amark_document_t *new_eol_document(void)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(
+                                              document, "a\r", 2, AMARK_SOURCE_FINISHED, &id));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(
+                                              document, "\nb", 2, AMARK_SOURCE_FINISHED, &id));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(
+                                              document, "c", 1, AMARK_SOURCE_FINISHED, &id));
+    NAOS_REQUIRE_UINT_EQ(4, amark_document_line_count(document));
+    AMARK_CHECK_TREE_BUILD(document, NULL,
+                           "(block_quote\n"
+                           "  :lines (0 4)\n"
+                           "  :blanks ((1 0 0))\n"
+                           "  (paragraph :lines (0 1) :content laid ((0 0 1)))\n"
+                           "  (paragraph :lines (2 1) :content laid ((2 0 1)))\n"
+                           "  (paragraph :lines (3 1) :content laid ((3 0 1))))\n");
+    return document;
+}
+
+NAOS_TEST(the_import_keeps_the_line_endings_of_each_line)
+{
+    amark_document_t *source = new_eol_document();
+    amark_document_t *target = new_document("x\n");
+    amark_node_t *quote = amark_node_first_child(amark_document_root(source));
+    amark_node_t *imported = NULL;
+    amark_node_t *child;
+    amark_line_id_t first = 0;
+    uint32_t count = 0;
+    amark_content_piece_t piece;
+    const char *bytes = NULL;
+    size_t length = 0;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import(target, quote, &imported));
+    NAOS_REQUIRE_NOT_NULL(imported);
+
+    /* Four lines, renumbered after the line of the target, with their line
+     * endings: the joined bytes "a\r\nbc" are not divided again. */
+    NAOS_CHECK_UINT_EQ(2, amark_document_source_count(target));
+    NAOS_CHECK_UINT_EQ(5, amark_document_line_count(target));
+    check_source(target, 1, "a\r\nbc", 5);
+    check_line(target, 0, 0, 1, 1, AMARK_EOL_LF);
+    check_line(target, 1, 1, 1, 1, AMARK_EOL_CR);
+    check_line(target, 2, 1, 2, 0, AMARK_EOL_LF);
+    check_line(target, 3, 1, 3, 1, AMARK_EOL_NONE);
+    check_line(target, 4, 1, 4, 1, AMARK_EOL_NONE);
+    NAOS_CHECK_INT_EQ(AMARK_EOL_LF, amark_document_default_eol(target));
+
+    /* The records follow the lines. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines(imported, &first, &count));
+    NAOS_CHECK_UINT_EQ(1, first);
+    NAOS_CHECK_UINT_EQ(4, count);
+    NAOS_REQUIRE_UINT_EQ(1, amark_block_blank_line_count(imported));
+    child = child_at(imported, 2);
+    NAOS_REQUIRE_NOT_NULL(child);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines(child, &first, &count));
+    NAOS_CHECK_UINT_EQ(4, first);
+    piece.struct_size = sizeof(piece);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_piece_at(child, 0, &piece));
+    NAOS_CHECK_UINT_EQ(4, piece.line);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(child, &bytes, &length));
+    NAOS_CHECK_STR_EQ("c", bytes);
+    CHECK_TREE_OK(target);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_append_child(amark_document_root(target), imported));
+    CHECK_TREE_OK(target);
+
+    /* The children only: the lines they refer to (not the blank line of the
+     * quote) in a third source, in order. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_import_children(imported, NULL, quote));
+    NAOS_CHECK_UINT_EQ(3, amark_document_source_count(target));
+    NAOS_CHECK_UINT_EQ(8, amark_document_line_count(target));
+    check_source(target, 2, "a\rbc", 4);
+    check_line(target, 5, 2, 1, 1, AMARK_EOL_CR);
+    check_line(target, 6, 2, 2, 1, AMARK_EOL_NONE);
+    check_line(target, 7, 2, 3, 1, AMARK_EOL_NONE);
+    NAOS_CHECK_UINT_EQ(6, subtree_size(imported) - 1);
+    child = child_at(imported, 4);
+    NAOS_REQUIRE_NOT_NULL(child);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines(child, &first, &count));
+    NAOS_CHECK_UINT_EQ(6, first);
+    CHECK_TREE_OK(target);
+    CHECK_TREE_OK(source);
+    amark_document_destroy(source);
+    amark_document_destroy(target);
+}
+
+/* The counts of target that a refused import must keep. */
+typedef struct target_state
+{
+    size_t nodes;
+    size_t sources;
+    size_t lines;
+    size_t dirty;
+    uint64_t generation;
+} target_state_t;
+
+static target_state_t state_of(const amark_document_t *document)
+{
+    target_state_t state;
+
+    state.nodes = document->node_count;
+    state.sources = document->source_count;
+    state.lines = document->line_count;
+    state.dirty = document->def_index.dirty_count;
+    state.generation = document->structure_generation;
+    return state;
+}
+
+static bool same_state(const amark_document_t *document, target_state_t state)
+{
+    target_state_t now = state_of(document);
+
+    return (now.nodes == state.nodes) && (now.sources == state.sources) &&
+           (now.lines == state.lines) && (now.dirty == state.dirty) &&
+           (now.generation == state.generation);
+}
+
+NAOS_TEST(the_children_are_imported_in_order_at_once)
+{
+    amark_document_t *source = new_document(input_3_1_source);
+    amark_document_t *target = new_document("");
+    amark_node_t *root;
+    amark_node_t *quote;
+    amark_node_t *copy = NULL;
+    amark_node_t *before = NULL;
+    amark_node_t *first;
+    amark_node_t *second;
+    amark_tree_content_t *content;
+    target_state_t state;
+    uint64_t generation;
+
+    AMARK_CHECK_TREE_BUILD(source, NULL, input_3_1_tree);
+    quote = amark_node_first_child(amark_document_root(source));
+    /* Two quotes sharing one content object. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_copy(quote, &copy));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_append_child(amark_document_root(source), copy));
+    NAOS_REQUIRE_UINT_EQ(2, paragraph_of(quote)->content->owners);
+
+    root = amark_document_root(target);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(target, AMARK_NODE_PARAGRAPH, &before));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(root, before));
+    generation = target->structure_generation;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_import_children(root, before, amark_document_root(source)));
+    /* One insertion: one structural change. */
+    NAOS_CHECK_UINT_EQ(generation + 1, target->structure_generation);
+    first = child_at(root, 0);
+    second = child_at(root, 1);
+    NAOS_REQUIRE_NOT_NULL(first);
+    NAOS_REQUIRE_NOT_NULL(second);
+    NAOS_CHECK_PTR_EQ(before, child_at(root, 2));
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_BLOCK_QUOTE, amark_node_get_type(first));
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_BLOCK_QUOTE, amark_node_get_type(second));
+
+    /* The shared content object is copied once and stays shared. */
+    content = paragraph_of(first)->content;
+    NAOS_REQUIRE_NOT_NULL(content);
+    NAOS_CHECK_PTR_EQ(content, paragraph_of(second)->content);
+    NAOS_CHECK_TRUE(content != paragraph_of(quote)->content);
+    NAOS_CHECK_UINT_EQ(2, content->owners);
+    NAOS_CHECK_UINT_EQ(12, content->bases);
+    /* The lines both quotes refer to are imported once. */
+    NAOS_CHECK_UINT_EQ(2, amark_document_line_count(target));
+    CHECK_TREE_OK(target);
+    CHECK_TREE_OK(source);
+
+    /* An edit of one import copies the shared content first. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(paragraph_of(second)));
+    NAOS_CHECK_UINT_EQ(1, content->owners);
+    CHECK_TREE_OK(target);
+
+    /* Without children nothing is imported. */
+    state = state_of(target);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import_children(root, NULL, before));
+    NAOS_CHECK_TRUE(same_state(target, state));
+    amark_document_destroy(source);
+    amark_document_destroy(target);
+}
+
+NAOS_TEST(imported_definitions_are_found_once_attached)
+{
+    amark_document_t *source = new_document("");
+    amark_document_t *target = new_document("");
+    amark_node_t *root = amark_document_root(target);
+    amark_node_t *imported = NULL;
+
+    AMARK_CHECK_TREE_BUILD(source, NULL,
+                           "(link_definition :label \"Foo\" :destination \"/a\" :title \"\")\n"
+                           "(block_quote\n"
+                           "  (link_definition :label \"bar\" :destination \"/b\" :title \"\"))\n");
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_import(target, amark_node_first_child(amark_document_root(source)),
+                                        &imported));
+    NAOS_REQUIRE_NOT_NULL(imported);
+    NAOS_CHECK_TRUE(imported->def_dirty);
+    NAOS_CHECK_UINT_EQ(1, target->def_index.dirty_count);
+    NAOS_CHECK_NULL(find(target, "foo"));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(root, imported));
+    NAOS_CHECK_PTR_EQ(imported, find(target, "FOO"));
+    NAOS_CHECK_NULL(find(target, "bar"));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_import_children(root, imported, amark_document_root(source)));
+    NAOS_CHECK_UINT_EQ(2, target->def_index.dirty_count);
+    /* The first in document order is the imported child now. */
+    NAOS_CHECK_PTR_EQ(amark_node_first_child(root), find(target, "foo"));
+    NAOS_CHECK_PTR_EQ(amark_node_first_child(child_at(root, 1)), find(target, "bar"));
+    CHECK_TREE_OK(target);
+    CHECK_TREE_OK(source);
+    amark_document_destroy(source);
+    amark_document_destroy(target);
+}
+
+NAOS_TEST(refused_imports_change_nothing)
+{
+    amark_node_type_t note = AMARK_NODE_NONE;
+    amark_node_type_t plain = AMARK_NODE_NONE;
+    amark_document_t *notes = new_note_document(&note, &plain);
+    amark_document_t *source = new_document("a [b](c) d\n");
+    amark_document_t *target = new_document("x\n");
+    amark_node_t *root = amark_document_root(target);
+    amark_node_t *note_node = NULL;
+    amark_node_t *paragraph;
+    amark_node_t *link = NULL;
+    amark_node_t *other = NULL;
+    amark_node_t *out;
+    amark_document_t *other_notes;
+    target_state_t state;
+    target_state_t notes_state;
+    char *before;
+
+    note_fail_value = -1;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(notes, note, &note_node));
+    AMARK_CHECK_TREE_BUILD(source, NULL,
+                           "(paragraph :lines (0 1) :content laid ((0 0 10))\n"
+                           "  (text \"a \")\n"
+                           "  (link :destination \"c\" :title \"\" (text \"b\"))\n"
+                           "  (text \" d\"))\n");
+    paragraph = amark_node_first_child(amark_document_root(source));
+    AMARK_CHECK_TREE_BUILD(target, NULL,
+                           "(paragraph (link :destination \"z\" :title \"\" (text \"y\")))\n");
+    link = amark_node_first_child(amark_node_first_child(root));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(target, AMARK_NODE_PARAGRAPH, &other));
+    before = fingerprint(paragraph);
+    state = state_of(target);
+
+    /* NULL arguments and the document node. */
+    out = root;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_import(NULL, paragraph, &out));
+    NAOS_CHECK_NULL(out);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_import(target, NULL, &out));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_import(target, paragraph, NULL));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import(target, amark_document_root(source), &out));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import_children(NULL, NULL, paragraph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import_children(root, NULL, NULL));
+
+    /* A type the target does not have, alone or in the subtree. */
+    out = root;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_import(target, note_node, &out));
+    NAOS_CHECK_NULL(out);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_append_child(amark_document_root(notes), note_node));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import_children(root, NULL, amark_document_root(notes)));
+    NAOS_CHECK_TRUE(same_state(target, state));
+
+    /* Containment: inline children under the document node, a link under a
+     * link. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import_children(root, NULL, paragraph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import_children(link, NULL, paragraph));
+    NAOS_CHECK_TRUE(same_state(target, state));
+
+    /* The position: before must be a child of the target parent. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import_children(amark_node_first_child(root), other, paragraph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_import_children(amark_node_first_child(root), root, paragraph));
+    NAOS_CHECK_TRUE(same_state(target, state));
+    NAOS_CHECK_NULL(amark_node_next(link));
+
+    /* A failing copy function of a type: nothing is left in the target. */
+    other_notes = new_note_document(&note, &plain);
+    notes_state = state_of(other_notes);
+    note_fail_value = 7;
+    out = root;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_STATE, amark_node_import(other_notes, note_node, &out));
+    NAOS_CHECK_NULL(out);
+    NAOS_CHECK_TRUE(same_state(other_notes, notes_state));
+    note_fail_value = -1;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import(other_notes, note_node, &out));
+    NAOS_REQUIRE_NOT_NULL(out);
+    NAOS_CHECK_INT_EQ(7, ((note_data_t *)amark_node_data(out))->value);
+    NAOS_CHECK_INT_EQ(1, *((note_data_t *)amark_node_data(out))->owned);
+    CHECK_TREE_OK(other_notes);
+    amark_document_destroy(other_notes);
+
+    CHECK_FINGERPRINT(before, paragraph);
+    free(before);
+    CHECK_TREE_OK(target);
+    CHECK_TREE_OK(source);
+    CHECK_TREE_OK(notes);
+
+    /* The same inline children fit in a paragraph, after the link. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_import_children(amark_node_first_child(root), NULL, paragraph));
+    NAOS_CHECK_UINT_EQ(7, subtree_size(amark_node_first_child(root)));
+    CHECK_TREE_OK(target);
+    amark_document_destroy(notes);
+    amark_document_destroy(source);
+    amark_document_destroy(target);
+}
+
+/* An import from a document into itself is a copy (its lines are already
+ * there). */
+NAOS_TEST(an_import_within_the_same_document_is_a_copy)
+{
+    amark_document_t *document = new_document(input_3_1_source);
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote;
+    amark_node_t *imported = NULL;
+    size_t lines;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_1_tree);
+    quote = amark_node_first_child(root);
+    lines = amark_document_line_count(document);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import(document, quote, &imported));
+    NAOS_REQUIRE_NOT_NULL(imported);
+    NAOS_CHECK_PTR_EQ(paragraph_of(quote)->content, paragraph_of(imported)->content);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import_children(imported, NULL, quote));
+    NAOS_CHECK_UINT_EQ(2, paragraph_of(quote)->content->owners - 1);
+    NAOS_CHECK_UINT_EQ(lines, amark_document_line_count(document));
+    NAOS_CHECK_UINT_EQ(1, amark_document_source_count(document));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* A deep subtree is imported without recursion (5.10). */
+NAOS_TEST(a_deep_subtree_is_imported_without_recursion)
+{
+    enum { DEPTH = 100000 };
+    amark_document_t *source = new_document("");
+    amark_document_t *target = new_document("");
+    amark_node_t *inner = NULL;
+    amark_node_t *imported = NULL;
+    size_t i;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(source, AMARK_NODE_PARAGRAPH, &inner));
+    for (i = 1; i < DEPTH; i++)
+    {
+        amark_node_t *outer = NULL;
+
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                            amark_node_create(source, AMARK_NODE_BLOCK_QUOTE, &outer));
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(outer, inner));
+        inner = outer;
+    }
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import(target, inner, &imported));
+    NAOS_REQUIRE_NOT_NULL(imported);
+    NAOS_CHECK_UINT_EQ(DEPTH + 1, target->node_count);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_append_child(amark_document_root(target), imported));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_import_children(imported, NULL, amark_node_first_child(imported)));
+    NAOS_CHECK_UINT_EQ(2 * DEPTH - 1, target->node_count);
+    CHECK_TREE_OK(target);
+    amark_document_destroy(source);
+    amark_document_destroy(target);
+}
+
 /* ---- Out of memory --------------------------------------------------------------------- */
 
 typedef struct oom_context
@@ -987,6 +1472,98 @@ NAOS_TEST(out_of_memory_leaks_nothing_and_leaves_the_document_unchanged)
     amark_document_destroy(document);
 }
 
+
+/* The import under out of memory: each refused import leaves the target as it
+ * was (no node, source, line or dirty definition added), and the source
+ * document is never changed. */
+static amark_error_t import_oom_scenario(void *context)
+{
+    oom_context_t *c = (oom_context_t *)context;
+    amark_document_t *source = c->document;
+    amark_tree_content_t *content = paragraph_of(c->quote)->content;
+    target_state_t source_state = state_of(source);
+    size_t owners = content->owners;
+    size_t bases = content->bases;
+    amark_document_t *target = NULL;
+    amark_node_t *imported = c->quote;
+    amark_source_id_t id = 0;
+    target_state_t state;
+    amark_error_t error;
+
+    error = amark_document_create(NULL, &target);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    error = amark_document_add_source(target, "x\n", 2, AMARK_SOURCE_FINISHED, &id);
+    if (error == AMARK_ERROR_NONE)
+    {
+        state = state_of(target);
+        error = amark_node_import(target, c->quote, &imported);
+        if (error != AMARK_ERROR_NONE)
+        {
+            if ((imported != NULL) || !same_state(target, state))
+            {
+                error = AMARK_ERROR_INVALID_STATE;
+            }
+        }
+        else
+        {
+            error = amark_node_append_child(amark_document_root(target), imported);
+        }
+        if (error == AMARK_ERROR_NONE)
+        {
+            state = state_of(target);
+            error = amark_node_import_children(amark_document_root(target), imported,
+                                               amark_document_root(source));
+            if ((error != AMARK_ERROR_NONE) && !same_state(target, state))
+            {
+                error = AMARK_ERROR_INVALID_STATE;
+            }
+        }
+        if ((error == AMARK_ERROR_NONE) &&
+            ((amark_document_line_count(target) != 5) ||
+             (amark_node_first_child(amark_document_root(target)) == imported) ||
+             (target->def_index.dirty_count != 1)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+        if (amark_tree_check(target, NULL) != AMARK_TREE_VIOLATION_NONE)
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    amark_document_destroy(target);
+    if (!same_state(source, source_state) || (content->owners != owners) ||
+        (content->bases != bases) ||
+        (amark_tree_check(source, NULL) != AMARK_TREE_VIOLATION_NONE))
+    {
+        return AMARK_ERROR_INVALID_STATE;
+    }
+    return error;
+}
+
+NAOS_TEST(out_of_memory_in_an_import_leaves_both_documents_unchanged)
+{
+    amark_document_t *document = new_document(input_3_1_source);
+    oom_context_t context;
+    char *before;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_1_tree);
+    AMARK_CHECK_TREE_BUILD(document, NULL,
+                           "(link_definition :label \"foo\" :destination \"/a\" :title \"t\")\n");
+    context.document = document;
+    context.quote = amark_node_first_child(amark_document_root(document));
+    context.definition = amark_node_next(context.quote);
+    NAOS_REQUIRE_PTR_EQ(context.definition, find(document, "foo"));
+    before = fingerprint(amark_document_root(document));
+    AMARK_CHECK_OOM_SWEEP(import_oom_scenario, &context);
+    CHECK_FINGERPRINT(before, amark_document_root(document));
+    free(before);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(copy_import,
     NAOS_ADD_TEST(invalid_arguments_change_nothing),
     NAOS_ADD_TEST(the_copy_reproduces_the_subtree_detached_with_shared_content),
@@ -998,7 +1575,15 @@ NAOS_SUITE(copy_import,
     NAOS_ADD_TEST(copied_definitions_are_found_once_attached),
     NAOS_ADD_TEST(extension_data_is_copied_by_the_copy_function),
     NAOS_ADD_TEST(a_deep_subtree_is_copied_without_recursion),
-    NAOS_ADD_TEST(out_of_memory_leaks_nothing_and_leaves_the_document_unchanged)
+    NAOS_ADD_TEST(out_of_memory_leaks_nothing_and_leaves_the_document_unchanged),
+    NAOS_ADD_TEST(the_import_reproduces_the_subtree_with_its_lines),
+    NAOS_ADD_TEST(the_import_keeps_the_line_endings_of_each_line),
+    NAOS_ADD_TEST(the_children_are_imported_in_order_at_once),
+    NAOS_ADD_TEST(imported_definitions_are_found_once_attached),
+    NAOS_ADD_TEST(refused_imports_change_nothing),
+    NAOS_ADD_TEST(an_import_within_the_same_document_is_a_copy),
+    NAOS_ADD_TEST(a_deep_subtree_is_imported_without_recursion),
+    NAOS_ADD_TEST(out_of_memory_in_an_import_leaves_both_documents_unchanged)
 )
 
 NAOS_MAIN(
