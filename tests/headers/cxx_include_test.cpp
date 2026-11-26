@@ -73,6 +73,7 @@ NAOS_TEST(utf8_and_unicode_functions_link)
 {
     char out[AMARK_UTF8_MAX_LENGTH];
     uint32_t codepoint = 0;
+    uint32_t folded[3] = {0, 0, 0};
 
     NAOS_CHECK_UINT_EQ(2, amark_utf8_encode(0x00E9u, out));
     NAOS_CHECK_UINT_EQ(2, amark_utf8_decode(out, 2, &codepoint));
@@ -82,6 +83,10 @@ NAOS_TEST(utf8_and_unicode_functions_link)
     NAOS_CHECK_TRUE(amark_unicode_is_whitespace(0x3000u));
     NAOS_CHECK_TRUE(amark_unicode_is_punctuation(0x00A1u));
     NAOS_CHECK_TRUE(amark_ascii_is_punctuation('!'));
+
+    NAOS_CHECK_UINT_EQ(2, amark_unicode_case_fold(0x00DFu, folded));
+    NAOS_CHECK_UINT_EQ(0x73u, folded[0]);
+    NAOS_CHECK_UINT_EQ(0x73u, folded[1]);
 }
 
 NAOS_SUITE(cxx_include,
