@@ -68,8 +68,10 @@ amark_add_test(dump_test SOURCES dump_test.c INTERNAL)
 # The extension node types through the public API.
 amark_add_test(extension_type_test SOURCES extension_type_test.c INTERNAL)
 
-# The flow of a parser building a tree and of the msgstr insertion.
-amark_add_test(msgstr_flow_test SOURCES msgstr_flow_test.c INTERNAL)
+# The flow of a parser building a tree and of the msgstr insertion (the tree
+# builder sets up the containers of some examples).
+amark_add_test(msgstr_flow_test SOURCES msgstr_flow_test.c INTERNAL
+  LIBRARIES amark_test_tree)
 
 # The out-of-memory sweep of every operation that changes a document.
 amark_add_test(oom_test SOURCES oom_test.c INTERNAL)
