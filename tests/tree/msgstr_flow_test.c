@@ -18,12 +18,27 @@
  * refused, that the tokens of the paragraph and of its inlines are on its
  * current content and cover each of its bytes exactly once, and that the values
  * derived from the tokens and the resolved destinations and titles are those of
- * the HTML. The lossless check of the same trees (13.2) is in 15.1.
+ * the HTML. Each assembled tree also passes the lossless verification (10.1-10.3)
+ * and every node of it has its whole spelling and is verbatim (11.1, 11.3, 11.4).
+ *
+ * The examples of INPUT.md (3.1, 3.3, 3.4), built with the tree builder: the
+ * lossless verification, the judgments, the values, the positions and the dump.
+ *
+ * The msgstr insertion (INPUT.md 3.2, 8.6, 11.4): the msgid from the content of
+ * a paragraph in a list in a block quote, the msgstr as a leaf with free content
+ * in another document, and amark_block_replace_content: the paragraph keeps its
+ * line range, the margins of its ancestors and the styles; its inlines keep the
+ * bytes of the translator; it and its ancestors are no longer verbatim, the
+ * other paragraph still is. Moving a paragraph from a block quote into an item
+ * (11.4, 11.5): the ancestors at the destination have no margin on its line and
+ * are not verbatim, the moved paragraph is.
  */
 #include "tree/tree.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <naos/naos.h>
@@ -462,6 +477,92 @@ static void check_resolves_to(amark_document_t *document, const amark_node_t *li
     NAOS_CHECK_PTR_EQ(definition, found);
 }
 
+/* The lossless verification of the source of document (it has one: 0),
+ * reporting into *report. */
+static amark_error_t check_lossless(const amark_document_t *document,
+                                    amark_lossless_report_t *report)
+{
+    memset(report, 0, sizeof(*report));
+    report->struct_size = sizeof(*report);
+    return amark_document_check_lossless(document, 0, report);
+}
+
+/* Whether the subtree of node can be output in its original spelling (false
+ * when the query fails, which the check reports). */
+static bool verbatim(const amark_node_t *node)
+{
+    bool out = false;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(node, &out));
+    return out;
+}
+
+/* Whether the content of leaf can be output in its original lines. */
+static bool content_verbatim(const amark_node_t *leaf)
+{
+    bool out = false;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_verbatim(leaf, &out));
+    return out;
+}
+
+/* The next node of the subtree of top in document order (NULL after the last). */
+static const amark_node_t *next_in(const amark_node_t *top, const amark_node_t *node)
+{
+    if (amark_node_first_child(node) != NULL)
+    {
+        return amark_node_first_child(node);
+    }
+    while ((node != top) && (amark_node_next(node) == NULL))
+    {
+        node = amark_node_parent(node);
+    }
+    return (node == top) ? NULL : amark_node_next(node);
+}
+
+/*
+ * Checks a tree just assembled as a parser does (the tree of an unedited
+ * document): the internal checker finds nothing, the lossless verification
+ * (10.1-10.3) finds every column of every line and every byte of every content
+ * owned exactly once, and every node of the tree has its whole spelling and can
+ * be output in its original spelling (11.1, 11.3, 11.4).
+ */
+static void check_assembled(amark_document_t *document)
+{
+    const amark_node_t *root = amark_document_root(document);
+    const amark_node_t *node;
+    amark_lossless_report_t report;
+    amark_error_t error = check_lossless(document, &report);
+
+    NAOS_CHECK_STR_EQ("none", amark_tree_violation_name(amark_tree_check(document, NULL)));
+    NAOS_CHECK_STR_EQ(amark_error_string(AMARK_ERROR_NONE), amark_error_string(error));
+    if (error == AMARK_ERROR_NOT_LOSSLESS)
+    {
+        /* Where, to tell the failure. */
+        NAOS_CHECK_INT_EQ(0, (int)report.problem);
+        NAOS_CHECK_UINT_EQ(AMARK_LINE_NONE, report.line);
+        NAOS_CHECK_UINT_EQ(0, report.column);
+        NAOS_CHECK_UINT_EQ(0, report.content_offset);
+    }
+    for (node = root; node != NULL; node = next_in(root, node))
+    {
+        amark_spelling_state_t state;
+
+        memset(&state, 0, sizeof(state));
+        state.struct_size = sizeof(state);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_spelling_state(node, &state));
+        NAOS_CHECK_TRUE(state.complete);
+        NAOS_CHECK_FALSE(amark_node_is_new(node));
+        NAOS_CHECK_TRUE(verbatim(node));
+        if (amark_node_has_content(node))
+        {
+            NAOS_CHECK_TRUE(content_verbatim(node));
+        }
+    }
+}
+
+#define CHECK_ASSEMBLED(document) check_assembled(document)
+
 /* ---- Emphasis ---------------------------------------------------------------------- */
 
 /* Example 418: "*foo **bar *baz* bim** bop*"
@@ -512,7 +613,7 @@ NAOS_TEST(example_418_nested_emphasis)
     NAOS_CHECK_UINT_EQ(4, amark_node_content_token_count(strong));
     NAOS_CHECK_UINT_EQ(2, amark_node_content_token_count(inner));
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -562,7 +663,7 @@ NAOS_TEST(example_413_a_delimiter_run_shared_by_two_matches)
     CHECK_TEXT(foo, AMARK_TEXT_LITERAL, "foo");
     CHECK_TEXT(bar, AMARK_TEXT_LITERAL, " bar");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -590,7 +691,7 @@ NAOS_TEST(example_444_an_opener_used_in_part_leaves_a_text)
     CHECK_TEXT(opener, AMARK_TEXT_LITERAL, "*");
     CHECK_TEXT(foo, AMARK_TEXT_LITERAL, "foo");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -618,7 +719,7 @@ NAOS_TEST(example_443_a_closer_used_in_part_leaves_a_text)
     CHECK_TEXT(foo, AMARK_TEXT_LITERAL, "foo");
     CHECK_TEXT(closer, AMARK_TEXT_LITERAL, "*");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -660,7 +761,7 @@ NAOS_TEST(example_405_emphasis_over_two_lines_of_a_block_quote)
     CHECK_TEXT(foo, AMARK_TEXT_LITERAL, "foo");
     CHECK_TEXT(bar, AMARK_TEXT_LITERAL, "bar");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -704,7 +805,7 @@ NAOS_TEST(example_405_emphasis_over_a_lazy_line_of_a_block_quote)
     CHECK_TEXT(foo, AMARK_TEXT_LITERAL, "foo");
     CHECK_TEXT(bar, AMARK_TEXT_LITERAL, "bar");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -733,7 +834,7 @@ NAOS_TEST(example_329_a_code_span_with_its_padding)
     CHECK_TEXT(code, AMARK_CODE_LITERAL, "foo ` bar");
     CHECK_NUMBER(code, AMARK_CODE_BACKTICKS, 2);
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -759,7 +860,7 @@ NAOS_TEST(example_337_a_code_span_over_two_lines)
     CHECK_SHAPE(paragraph, "(paragraph (code))");
     CHECK_TEXT(code, AMARK_CODE_LITERAL, "foo   bar  baz");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -792,7 +893,7 @@ NAOS_TEST(example_515_an_escape_in_a_link_text)
     CHECK_TEXT(link, AMARK_LINK_DESTINATION, "/uri");
     CHECK_TEXT(link, AMARK_LINK_TITLE, "");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -817,7 +918,7 @@ NAOS_TEST(example_26_numeric_character_references)
     CHECK_SHAPE(paragraph, "(paragraph (text))");
     CHECK_TEXT(text, AMARK_TEXT_LITERAL, "# \xD3\x92 \xCF\xA0 \xEF\xBF\xBD");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -873,7 +974,7 @@ NAOS_TEST(example_25_named_character_references_over_three_lines)
     /* U+2232, U+2267 U+0338 */
     CHECK_TEXT(texts[2], AMARK_TEXT_LITERAL, "\xE2\x88\xB2 \xE2\x89\xA7\xCC\xB8");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -911,7 +1012,7 @@ NAOS_TEST(example_22_escapes_in_the_destination_and_the_title)
     CHECK_TEXT(link, AMARK_LINK_DESTINATION, "/bar*");
     CHECK_TEXT(link, AMARK_LINK_TITLE, "ti*tle");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -967,7 +1068,7 @@ NAOS_TEST(example_505_inline_links_with_each_title_quote)
         CHECK_NUMBER(links[line], AMARK_LINK_TITLE_QUOTE, quotes[line]);
     }
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -1046,7 +1147,7 @@ NAOS_TEST(example_527_a_full_reference_link)
     check_resolves_to(document, link, definition);
     check_cover(paragraph);
     check_cover(definition);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -1088,7 +1189,7 @@ NAOS_TEST(example_561_a_shortcut_reference_link)
     check_resolves_to(document, link, definition);
     check_cover(paragraph);
     check_cover(definition);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -1155,7 +1256,7 @@ NAOS_TEST(example_570_a_full_and_a_shortcut_reference_link)
     check_cover(paragraph);
     check_cover(baz_definition);
     check_cover(bar_definition);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -1184,7 +1285,7 @@ NAOS_TEST(example_633_a_hard_line_break_of_spaces)
     CHECK_TEXT(baz, AMARK_TEXT_LITERAL, "baz");
     CHECK_NUMBER(linebreak, AMARK_LINEBREAK_FORM, AMARK_LINEBREAK_FORM_SPACES);
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -1213,7 +1314,7 @@ NAOS_TEST(example_634_a_hard_line_break_of_a_backslash)
     CHECK_TEXT(baz, AMARK_TEXT_LITERAL, "baz");
     CHECK_NUMBER(linebreak, AMARK_LINEBREAK_FORM, AMARK_LINEBREAK_FORM_BACKSLASH);
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -1247,7 +1348,7 @@ NAOS_TEST(example_649_a_soft_line_break_between_spaces)
     CHECK_TEXT(foo, AMARK_TEXT_LITERAL, "foo");
     CHECK_TEXT(baz, AMARK_TEXT_LITERAL, "baz");
     check_cover(paragraph);
-    CHECK_TREE_OK(document);
+    CHECK_ASSEMBLED(document);
     amark_document_destroy(document);
 }
 
@@ -1273,6 +1374,649 @@ NAOS_SUITE(inline_assembly,
     NAOS_ADD_TEST(example_649_a_soft_line_break_between_spaces)
 )
 
+/* ---- Checks of the examples of INPUT.md ------------------------------------------------- */
+
+#define ALL_FLAGS \
+    (AMARK_DUMP_STYLE | AMARK_DUMP_LAYOUT | AMARK_DUMP_SPELLING | AMARK_DUMP_POSITIONS | \
+     AMARK_DUMP_LINES)
+
+/* Checks that facet of node reads the boolean expected. */
+#define CHECK_BOOL(node, facet, expected) CHECK_NUMBER((node), (facet), (expected) ? 1 : 0)
+
+/* Checks the margin of container on line: present or lazy, its columns and
+ * whether it is the first line of an item. */
+static void check_margin(const amark_node_t *container, amark_line_id_t line,
+                         amark_margin_state_t state, uint32_t start, uint32_t end, bool first)
+{
+    amark_margin_t margin;
+    bool found = false;
+
+    memset(&margin, 0, sizeof(margin));
+    margin.struct_size = sizeof(margin);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_find_margin(container, line, &margin, &found));
+    NAOS_CHECK_TRUE(found);
+    NAOS_CHECK_INT_EQ(state, margin.state);
+    NAOS_CHECK_UINT_EQ(start, margin.column_start);
+    NAOS_CHECK_UINT_EQ(end, margin.column_end);
+    NAOS_CHECK_UINT_EQ(first ? AMARK_MARGIN_FIRST : 0u, margin.flags & AMARK_MARGIN_FIRST);
+}
+
+/* Whether container has a margin on line (false for a node that is not a
+ * container). */
+static bool has_margin(const amark_node_t *container, amark_line_id_t line)
+{
+    bool found = true;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_find_margin(container, line, NULL, &found));
+    return found;
+}
+
+/* Checks the source range of node: its offsets in the source and its start
+ * and end (lines from 1, columns as amark_source_range_t tells). */
+static void check_range(const amark_node_t *node, size_t start_offset, size_t end_offset,
+                        uint32_t start_line, uint32_t start_column, uint32_t end_line,
+                        uint32_t end_column)
+{
+    amark_source_range_t range;
+    bool has_position = false;
+
+    memset(&range, 0, sizeof(range));
+    range.struct_size = sizeof(range);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_source_range(node, &range, &has_position));
+    NAOS_CHECK_TRUE(has_position);
+    NAOS_CHECK_UINT_EQ(0, range.source);
+    NAOS_CHECK_UINT_EQ(start_offset, range.start_offset);
+    NAOS_CHECK_UINT_EQ(end_offset, range.end_offset);
+    NAOS_CHECK_UINT_EQ(start_line, range.start_line);
+    NAOS_CHECK_UINT_EQ(start_column, range.start_column);
+    NAOS_CHECK_UINT_EQ(end_line, range.end_line);
+    NAOS_CHECK_UINT_EQ(end_column, range.end_column);
+}
+
+/* Whether node has a source position. */
+static bool has_position(const amark_node_t *node)
+{
+    amark_source_range_t range;
+    bool out = true;
+
+    memset(&range, 0, sizeof(range));
+    range.struct_size = sizeof(range);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_source_range(node, &range, &out));
+    return out;
+}
+
+/* ---- INPUT.md 3.1: a paragraph in a list in a block quote ---------------------------------- */
+
+static const char input_3_1_source[] = "> - one *two\n>   three* four\n";
+
+/* The layout layer and the spelling layer of 3.1 (the roles of the delimiters of
+ * the emphasis: 1 the opener, 2 the closer). */
+static const char input_3_1_tree[] =
+    "(block_quote :lines (0 2) :margins ((0 0 2 present) (1 0 2 present))\n"
+    "  (list :type bullet :tight true :style (:bullet \"-\") :lines (0 2)\n"
+    "    (item :lines (0 2) :margins ((0 2 4 present first) (1 2 4 present))\n"
+    "      (paragraph :lines (0 2) :content laid ((0 4 12) (1 4 15))\n"
+    "        (text :spelling ((text 0 4 :facet literal)))\n"
+    "        (emph :style (:delimiter \"*\")\n"
+    "              :spelling ((delimiter 4 5 :role 1) (delimiter 14 15 :role 2))\n"
+    "          (text :spelling ((text 5 8 :facet literal)))\n"
+    "          (softbreak :spelling ((line_break 8 9)))\n"
+    "          (text :spelling ((text 9 14 :facet literal))))\n"
+    "        (text :spelling ((text 15 20 :facet literal)))))))";
+
+/* The dump of 3.1 with every flag (the notation of INPUT.md 3.1). */
+static const char input_3_1_dump[] =
+    "(document :lines (0 2) :pos (1 1 2 15)"
+    " :line_table ((0 1 0 12 lf 12) (0 2 13 15 lf 15))\n"
+    "  (block_quote :lines (0 2) :margins ((0 0 2 present) (1 0 2 present)) :pos (1 1 2 15)\n"
+    "    (list :type bullet :start 1 :tight true :style (:bullet \"-\") :lines (0 2)"
+    " :pos (1 3 2 15)\n"
+    "      (item :lines (0 2) :margins ((0 2 4 present first) (1 2 4 present))"
+    " :pos (1 3 2 15)\n"
+    "        (paragraph :lines (0 2) :content laid ((0 4 12) (1 4 15)) :pos (1 5 2 15)\n"
+    "          (text :spelling ((text 0 4 :facet literal)) :pos (1 5 1 8) \"one \")\n"
+    "          (emph :style (:delimiter \"*\")"
+    " :spelling ((delimiter 4 5 :role 1) (delimiter 14 15 :role 2)) :pos (1 9 2 10)\n"
+    "            (text :spelling ((text 5 8 :facet literal)) :pos (1 10 1 12) \"two\")\n"
+    "            (softbreak :spelling ((line_break 8 9)) :pos (1 13 1 13))\n"
+    "            (text :spelling ((text 9 14 :facet literal)) :pos (2 5 2 9) \"three\"))\n"
+    "          (text :spelling ((text 15 20 :facet literal)) :pos (2 11 2 15) \" four\"))))))\n";
+
+NAOS_TEST(input_3_1_a_paragraph_in_a_list_in_a_block_quote)
+{
+    amark_document_t *document = new_document(input_3_1_source);
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote;
+    amark_node_t *list;
+    amark_node_t *item;
+    amark_node_t *paragraph;
+    amark_node_t *emph;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_1_tree);
+    quote = amark_node_first_child(root);
+    NAOS_REQUIRE_NOT_NULL(quote);
+    list = amark_node_first_child(quote);
+    NAOS_REQUIRE_NOT_NULL(list);
+    item = amark_node_first_child(list);
+    NAOS_REQUIRE_NOT_NULL(item);
+    paragraph = amark_node_first_child(item);
+    NAOS_REQUIRE_NOT_NULL(paragraph);
+    CHECK_SHAPE(root, "(document (block_quote (list (item (paragraph (text) (emph (text) "
+                      "(softbreak) (text)) (text))))))");
+    emph = child_at(paragraph, 1);
+
+    /* Lossless, every node complete and verbatim. */
+    CHECK_ASSEMBLED(document);
+    /* The division of the lines: [0,2) the block quote, [2,4) the item, [4,end)
+     * the paragraph. */
+    check_margin(quote, 0, AMARK_MARGIN_PRESENT, 0, 2, false);
+    check_margin(quote, 1, AMARK_MARGIN_PRESENT, 0, 2, false);
+    check_margin(item, 0, AMARK_MARGIN_PRESENT, 2, 4, true);
+    check_margin(item, 1, AMARK_MARGIN_PRESENT, 2, 4, false);
+    /* The content: "one *two" + the virtual "\n" + "three* four". */
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_LAID, amark_block_content_state(paragraph));
+    CHECK_CONTENT(paragraph, "one *two\nthree* four");
+    check_cover(paragraph);
+
+    /* The values. */
+    CHECK_NUMBER(list, AMARK_LIST_TYPE, AMARK_LIST_TYPE_BULLET);
+    CHECK_NUMBER(list, AMARK_LIST_BULLET, AMARK_LIST_BULLET_DASH);
+    CHECK_BOOL(list, AMARK_LIST_TIGHT, true);
+    CHECK_TEXT(child_at(paragraph, 0), AMARK_TEXT_LITERAL, "one ");
+    CHECK_NUMBER(emph, AMARK_EMPH_DELIMITER, AMARK_EMPH_DELIMITER_ASTERISK);
+    CHECK_TEXT(child_at(emph, 0), AMARK_TEXT_LITERAL, "two");
+    CHECK_TEXT(child_at(emph, 2), AMARK_TEXT_LITERAL, "three");
+    CHECK_TEXT(child_at(paragraph, 2), AMARK_TEXT_LITERAL, " four");
+
+    /* The positions: the paragraph from "one" to the end of the second line,
+     * the emphasis from its "*" on the first line to its "*" on the second. */
+    check_range(quote, 0, 28, 1, 1, 2, 15);
+    check_range(paragraph, 4, 28, 1, 5, 2, 15);
+    check_range(emph, 8, 23, 1, 9, 2, 10);
+    check_range(child_at(emph, 1), 12, 13, 1, 13, 1, 13);
+
+    /* The dump. */
+    AMARK_CHECK_TREE_DUMP(root, ALL_FLAGS, input_3_1_dump);
+    amark_document_destroy(document);
+}
+
+/* ---- INPUT.md 3.3: a partial tab ------------------------------------------------------------ */
+
+/*
+ * `>\t\tfoo` (CommonMark example 7): the first tab takes the columns [1,4), the
+ * second [4,8). [0,2) is the margin of the block quote (its first tab column is
+ * the optional space after ">"), [2,6) the 4-column indentation of the code
+ * block, [6,11) its content, whose two first columns are the rest of the
+ * second tab, spelled as a tab_remainder.
+ */
+static const char input_3_3_tree[] =
+    "(block_quote :lines (0 1) :margins ((0 0 2 present))\n"
+    "  (code_block :style (:form indented)\n"
+    "    :lines (0 1)\n"
+    "    :tokens ((space 0 2 6))\n"
+    "    :content laid ((0 6 11))\n"
+    "    :spelling ((tab_remainder 0 2) (text 2 5))))";
+
+static const char input_3_3_dump[] =
+    "(document :lines (0 1) :pos (1 1 1 6) :line_table ((0 1 0 6 none 11))\n"
+    "  (block_quote :lines (0 1) :margins ((0 0 2 present)) :pos (1 1 1 6)\n"
+    "    (code_block :info \"\" :style (:form indented) :lines (0 1) :tokens ((space 0 2 6))"
+    " :content laid ((0 6 11)) :spelling ((tab_remainder 0 2) (text 2 5)) :pos (1 2 1 6)"
+    " \"  foo\\n\")))\n";
+
+NAOS_TEST(input_3_3_a_partial_tab)
+{
+    amark_document_t *document = new_document(">\t\tfoo");
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote;
+    amark_node_t *code;
+    amark_layout_token_t indent;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_3_tree);
+    quote = amark_node_first_child(root);
+    NAOS_REQUIRE_NOT_NULL(quote);
+    code = amark_node_first_child(quote);
+    NAOS_REQUIRE_NOT_NULL(code);
+    CHECK_SHAPE(root, "(document (block_quote (code_block)))");
+
+    /* Lossless: both tabs are divided by columns, without a special token. */
+    CHECK_ASSEMBLED(document);
+    check_margin(quote, 0, AMARK_MARGIN_PRESENT, 0, 2, false);
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(code));
+    memset(&indent, 0, sizeof(indent));
+    indent.struct_size = sizeof(indent);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_token_at(code, 0, &indent));
+    NAOS_CHECK_UINT_EQ(2, indent.column_start);
+    NAOS_CHECK_UINT_EQ(6, indent.column_end);
+
+    /* The rest of the second tab is two spaces of the content: the content is
+     * "  foo", and the literal, its lines each ended by a line break,
+     * "  foo\n". */
+    CHECK_CONTENT(code, "  foo");
+    check_cover(code);
+    CHECK_TEXT(code, AMARK_CODE_BLOCK_LITERAL, "  foo\n");
+    CHECK_TEXT(code, AMARK_CODE_BLOCK_INFO, "");
+    CHECK_NUMBER(code, AMARK_CODE_BLOCK_FORM, AMARK_CODE_BLOCK_FORM_INDENTED);
+
+    /* The positions: the code block starts in the first tab (byte 1), the
+     * column 2 being inside it. */
+    check_range(quote, 0, 6, 1, 1, 1, 6);
+    check_range(code, 1, 6, 1, 2, 1, 6);
+
+    AMARK_CHECK_TREE_DUMP(root, ALL_FLAGS, input_3_3_dump);
+    amark_document_destroy(document);
+}
+
+/* ---- INPUT.md 3.4: lazy continuation -------------------------------------------------------- */
+
+static const char input_3_4_tree[] =
+    "(block_quote :lines (0 2) :margins ((0 0 2 present) (1 0 0 lazy))\n"
+    "  (paragraph :lines (0 2) :content laid ((0 2 3) (1 0 1))\n"
+    "    (text :spelling ((text 0 1 :facet literal)))\n"
+    "    (softbreak :spelling ((line_break 1 2)))\n"
+    "    (text :spelling ((text 2 3 :facet literal)))))";
+
+static const char input_3_4_dump[] =
+    "(document :lines (0 2) :pos (1 1 2 1) :line_table ((0 1 0 3 lf 3) (0 2 4 1 lf 1))\n"
+    "  (block_quote :lines (0 2) :margins ((0 0 2 present) (1 0 0 lazy)) :pos (1 1 2 1)\n"
+    "    (paragraph :lines (0 2) :content laid ((0 2 3) (1 0 1)) :pos (1 3 2 1)\n"
+    "      (text :spelling ((text 0 1 :facet literal)) :pos (1 3 1 3) \"a\")\n"
+    "      (softbreak :spelling ((line_break 1 2)) :pos (1 4 1 4))\n"
+    "      (text :spelling ((text 2 3 :facet literal)) :pos (2 1 2 1) \"b\"))))\n";
+
+NAOS_TEST(input_3_4_lazy_continuation)
+{
+    amark_document_t *document = new_document("> a\nb\n");
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote;
+    amark_node_t *paragraph;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_4_tree);
+    quote = amark_node_first_child(root);
+    NAOS_REQUIRE_NOT_NULL(quote);
+    paragraph = amark_node_first_child(quote);
+    NAOS_REQUIRE_NOT_NULL(paragraph);
+    CHECK_SHAPE(root, "(document (block_quote (paragraph (text) (softbreak) (text))))");
+
+    /* Lossless: the lazy margin has no columns and adds nothing to the
+     * division of L1; the block quote with it is still verbatim. */
+    CHECK_ASSEMBLED(document);
+    check_margin(quote, 0, AMARK_MARGIN_PRESENT, 0, 2, false);
+    check_margin(quote, 1, AMARK_MARGIN_LAZY, 0, 0, false);
+
+    CHECK_CONTENT(paragraph, "a\nb");
+    check_cover(paragraph);
+    CHECK_TEXT(child_at(paragraph, 0), AMARK_TEXT_LITERAL, "a");
+    CHECK_TEXT(child_at(paragraph, 2), AMARK_TEXT_LITERAL, "b");
+
+    /* The positions: L1 starts at offset 4; the virtual "\n" is the LF of L0. */
+    check_range(quote, 0, 5, 1, 1, 2, 1);
+    check_range(paragraph, 2, 5, 1, 3, 2, 1);
+    check_range(child_at(paragraph, 1), 3, 4, 1, 4, 1, 4);
+    check_range(child_at(paragraph, 2), 4, 5, 2, 1, 2, 1);
+
+    AMARK_CHECK_TREE_DUMP(root, ALL_FLAGS, input_3_4_dump);
+    amark_document_destroy(document);
+}
+
+NAOS_SUITE(input_examples,
+    NAOS_ADD_TEST(input_3_1_a_paragraph_in_a_list_in_a_block_quote),
+    NAOS_ADD_TEST(input_3_3_a_partial_tab),
+    NAOS_ADD_TEST(input_3_4_lazy_continuation)
+)
+
+/* ---- The msgstr insertion (INPUT.md 3.2; 8.6, 11.4) ------------------------------------------ */
+
+/* INPUT.md 3.1 with a second item: "five". */
+static const char msgstr_target_source[] = "> - one *two\n>   three* four\n> - five\n";
+
+static const char msgstr_target_tree[] =
+    "(block_quote :lines (0 3)\n"
+    "  :margins ((0 0 2 present) (1 0 2 present) (2 0 2 present))\n"
+    "  (list :type bullet :tight true :style (:bullet \"-\") :lines (0 3)\n"
+    "    (item :lines (0 2) :margins ((0 2 4 present first) (1 2 4 present))\n"
+    "      (paragraph :lines (0 2) :content laid ((0 4 12) (1 4 15))\n"
+    "        (text :spelling ((text 0 4 :facet literal)))\n"
+    "        (emph :style (:delimiter \"*\")\n"
+    "              :spelling ((delimiter 4 5 :role 1) (delimiter 14 15 :role 2))\n"
+    "          (text :spelling ((text 5 8 :facet literal)))\n"
+    "          (softbreak :spelling ((line_break 8 9)))\n"
+    "          (text :spelling ((text 9 14 :facet literal))))\n"
+    "        (text :spelling ((text 15 20 :facet literal)))))\n"
+    "    (item :lines (2 1) :margins ((2 2 4 present first))\n"
+    "      (paragraph :lines (2 1) :content laid ((2 4 8))\n"
+    "        (text :spelling ((text 0 4 :facet literal)))))))";
+
+/* The msgstr of the translator, "いち *に さん* よん", in UTF-8: "いち " is
+ * [0,7), "*" [7,8), "に さん" [8,18), "*" [18,19) and " よん" [19,26). */
+#define ICHI "\xE3\x81\x84\xE3\x81\xA1"
+#define NI "\xE3\x81\xAB"
+#define SAN "\xE3\x81\x95\xE3\x82\x93"
+#define YON "\xE3\x82\x88\xE3\x82\x93"
+#define MSGSTR ICHI " *" NI " " SAN "* " YON
+
+/* The msgstr parsed as an inline fragment: a temporary leaf with free content
+ * and its inline CST (the delimiters of the translator spell the emphasis). */
+static const char msgstr_fragment_tree[] =
+    "(paragraph :content free \"" MSGSTR "\"\n"
+    "  (text :spelling ((text 0 7 :facet literal)) \"" ICHI " \")\n"
+    "  (emph :style (:delimiter \"*\")\n"
+    "        :spelling ((delimiter 7 8 :role 1) (delimiter 18 19 :role 2))\n"
+    "    (text :spelling ((text 8 18 :facet literal)) \"" NI " " SAN "\"))\n"
+    "  (text :spelling ((text 19 26 :facet literal)) \" " YON "\"))";
+
+/* The replaced paragraph: its line range, the free content and the inlines of
+ * the fragment with their spelling. */
+static const char msgstr_replaced_dump[] =
+    "(paragraph :lines (0 2) :content free \"" MSGSTR "\"\n"
+    "  (text :spelling ((text 0 7 :facet literal)) \"" ICHI " \")\n"
+    "  (emph :style (:delimiter \"*\")"
+    " :spelling ((delimiter 7 8 :role 1) (delimiter 18 19 :role 2))\n"
+    "    (text :spelling ((text 8 18 :facet literal)) \"" NI " " SAN "\"))\n"
+    "  (text :spelling ((text 19 26 :facet literal)) \" " YON "\"))\n";
+
+#define MSGSTR_FLAGS (AMARK_DUMP_STYLE | AMARK_DUMP_LAYOUT | AMARK_DUMP_SPELLING)
+
+/* The msgid of leaf: its content with each line break a space and each run of
+ * spaces one space (INPUT.md 3.2). */
+static void make_msgid(const amark_node_t *leaf, char *out, size_t size)
+{
+    const char *bytes = NULL;
+    size_t length = 0;
+    size_t used = 0;
+    size_t i;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(leaf, &bytes, &length));
+    NAOS_REQUIRE_TRUE(length < size);
+    for (i = 0; i < length; i++)
+    {
+        char c = (bytes[i] == '\n') ? ' ' : bytes[i];
+
+        if ((c == ' ') && (used > 0) && (out[used - 1] == ' '))
+        {
+            continue;
+        }
+        out[used++] = c;
+    }
+    out[used] = '\0';
+}
+
+/* A dump of node with flags (to be freed with free()). */
+static char *dump_of(const amark_node_t *node, uint32_t flags)
+{
+    amark_buffer_t *buffer = NULL;
+    char *text = NULL;
+
+    if (amark_buffer_create(&buffer) != AMARK_ERROR_NONE)
+    {
+        return NULL;
+    }
+    if (amark_node_dump(node, flags, buffer) == AMARK_ERROR_NONE)
+    {
+        size_t length = amark_buffer_length(buffer);
+
+        text = malloc(length + 1);
+        if (text != NULL)
+        {
+            memcpy(text, amark_buffer_data(buffer), length);
+            text[length] = '\0';
+        }
+    }
+    amark_buffer_destroy(buffer);
+    return text;
+}
+
+NAOS_TEST(msgstr_replaces_the_content_of_a_paragraph_in_a_list_in_a_block_quote)
+{
+    amark_document_t *document = new_document(msgstr_target_source);
+    amark_document_t *fragment_document = NULL;
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote;
+    amark_node_t *list;
+    amark_node_t *item;
+    amark_node_t *paragraph;
+    amark_node_t *other_item;
+    amark_node_t *other;
+    amark_node_t *fragment;
+    amark_node_t *emph;
+    amark_node_t *node;
+    amark_lossless_report_t report;
+    amark_spelling_state_t state;
+    char msgid[64];
+    char *fragment_before;
+    char *other_before;
+    amark_line_id_t first = 0;
+    uint32_t count = 0;
+    const char *bytes = NULL;
+    size_t length = 0;
+    size_t i;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, msgstr_target_tree);
+    quote = amark_node_first_child(root);
+    NAOS_REQUIRE_NOT_NULL(quote);
+    list = amark_node_first_child(quote);
+    NAOS_REQUIRE_NOT_NULL(list);
+    item = child_at(list, 0);
+    NAOS_REQUIRE_NOT_NULL(item);
+    other_item = child_at(list, 1);
+    NAOS_REQUIRE_NOT_NULL(other_item);
+    paragraph = amark_node_first_child(item);
+    NAOS_REQUIRE_NOT_NULL(paragraph);
+    other = amark_node_first_child(other_item);
+    NAOS_REQUIRE_NOT_NULL(other);
+    /* The unedited document is lossless and verbatim everywhere. */
+    CHECK_ASSEMBLED(document);
+    other_before = dump_of(other, ALL_FLAGS);
+    NAOS_REQUIRE_NOT_NULL(other_before);
+
+    /* 1. The msgid, from the content of the paragraph. */
+    make_msgid(paragraph, msgid, sizeof(msgid));
+    NAOS_CHECK_STR_EQ("one *two three* four", msgid);
+
+    /* 2. The msgstr parsed as an inline fragment in another document. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &fragment_document));
+    AMARK_CHECK_TREE_BUILD(fragment_document, NULL, msgstr_fragment_tree);
+    fragment = amark_node_first_child(amark_document_root(fragment_document));
+    NAOS_REQUIRE_NOT_NULL(fragment);
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(fragment));
+    CHECK_CONTENT(fragment, MSGSTR);
+    check_cover(fragment);
+    fragment_before = dump_of(fragment, ALL_FLAGS);
+    NAOS_REQUIRE_NOT_NULL(fragment_before);
+
+    /* 3. The content and the inlines of the paragraph are replaced. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(paragraph, fragment));
+    NAOS_CHECK_STR_EQ("none", amark_tree_violation_name(amark_tree_check(document, NULL)));
+
+    /* The line range, the margins of the ancestors and the styles are kept. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines(paragraph, &first, &count));
+    NAOS_CHECK_UINT_EQ(0, first);
+    NAOS_CHECK_UINT_EQ(2, count);
+    NAOS_CHECK_UINT_EQ(3, amark_block_margin_count(quote));
+    check_margin(quote, 0, AMARK_MARGIN_PRESENT, 0, 2, false);
+    check_margin(quote, 1, AMARK_MARGIN_PRESENT, 0, 2, false);
+    NAOS_CHECK_UINT_EQ(2, amark_block_margin_count(item));
+    check_margin(item, 0, AMARK_MARGIN_PRESENT, 2, 4, true);
+    check_margin(item, 1, AMARK_MARGIN_PRESENT, 2, 4, false);
+    CHECK_NUMBER(list, AMARK_LIST_BULLET, AMARK_LIST_BULLET_DASH);
+    CHECK_BOOL(list, AMARK_LIST_TIGHT, true);
+    memset(&state, 0, sizeof(state));
+    state.struct_size = sizeof(state);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_spelling_state(paragraph, &state));
+    NAOS_CHECK_TRUE(state.complete);
+    NAOS_CHECK_FALSE(amark_node_is_new(paragraph));
+    /* A block keeps its position from its line range. */
+    check_range(paragraph, 0, 28, 1, 1, 2, 15);
+
+    /* The content is free content holding the bytes of the translator, and the
+     * inlines keep their spelling on it: "*" is the byte the translator wrote. */
+    NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(paragraph));
+    NAOS_CHECK_UINT_EQ(0, amark_block_content_piece_count(paragraph));
+    CHECK_CONTENT(paragraph, MSGSTR);
+    CHECK_SHAPE(paragraph, "(paragraph (text) (emph (text)) (text))");
+    check_cover(paragraph);
+    emph = child_at(paragraph, 1);
+    NAOS_CHECK_UINT_EQ(2, amark_node_content_token_count(emph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(paragraph, &bytes, &length));
+    for (i = 0; i < 2; i++)
+    {
+        amark_content_token_t t;
+
+        memset(&t, 0, sizeof(t));
+        t.struct_size = sizeof(t);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_content_token_at(emph, i, &t));
+        NAOS_CHECK_INT_EQ(AMARK_SPELL_DELIMITER, t.kind);
+        NAOS_CHECK_UINT_EQ(t.start + 1, t.end);
+        NAOS_CHECK_TRUE((t.end <= length) && (bytes[t.start] == '*'));
+    }
+    CHECK_TEXT(child_at(paragraph, 0), AMARK_TEXT_LITERAL, ICHI " ");
+    CHECK_TEXT(child_at(emph, 0), AMARK_TEXT_LITERAL, NI " " SAN);
+    CHECK_TEXT(child_at(paragraph, 2), AMARK_TEXT_LITERAL, " " YON);
+    CHECK_NUMBER(emph, AMARK_EMPH_DELIMITER, AMARK_EMPH_DELIMITER_ASTERISK);
+    AMARK_CHECK_TREE_DUMP(paragraph, MSGSTR_FLAGS, msgstr_replaced_dump);
+    for (node = amark_node_first_child(paragraph); node != NULL;
+         node = (amark_node_t *)next_in(paragraph, node))
+    {
+        memset(&state, 0, sizeof(state));
+        state.struct_size = sizeof(state);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_spelling_state(node, &state));
+        NAOS_CHECK_TRUE(state.has_spelling);
+        NAOS_CHECK_TRUE(state.complete);
+        /* Free content is on no line: no position, not in the original lines. */
+        NAOS_CHECK_FALSE(has_position(node));
+        NAOS_CHECK_FALSE(verbatim(node));
+    }
+
+    /* The judgments: the paragraph and its ancestors cannot be output in their
+     * original spelling; the other paragraph (and its item) still can. */
+    NAOS_CHECK_FALSE(content_verbatim(paragraph));
+    NAOS_CHECK_FALSE(verbatim(paragraph));
+    NAOS_CHECK_FALSE(verbatim(item));
+    NAOS_CHECK_FALSE(verbatim(list));
+    NAOS_CHECK_FALSE(verbatim(quote));
+    NAOS_CHECK_FALSE(verbatim(root));
+    NAOS_CHECK_TRUE(verbatim(other_item));
+    NAOS_CHECK_TRUE(verbatim(other));
+    NAOS_CHECK_TRUE(content_verbatim(other));
+    AMARK_CHECK_TREE_DUMP(other, ALL_FLAGS, other_before);
+
+    /* The source bytes of the old content [4,end) of L0 and L1 have no owner
+     * any more: the first gap is at column 4 of L0. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NOT_LOSSLESS, check_lossless(document, &report));
+    NAOS_CHECK_INT_EQ(AMARK_LOSSLESS_GAP, report.problem);
+    NAOS_CHECK_UINT_EQ(0, report.line);
+    NAOS_CHECK_UINT_EQ(4, report.column);
+    NAOS_CHECK_PTR_EQ(NULL, report.leaf);
+
+    /* The fragment is not changed, and the target does not depend on it. */
+    AMARK_CHECK_TREE_DUMP(fragment, ALL_FLAGS, fragment_before);
+    NAOS_CHECK_STR_EQ("none",
+                      amark_tree_violation_name(amark_tree_check(fragment_document, NULL)));
+    amark_document_destroy(fragment_document);
+    AMARK_CHECK_TREE_DUMP(paragraph, MSGSTR_FLAGS, msgstr_replaced_dump);
+    check_cover(paragraph);
+    NAOS_CHECK_TRUE(verbatim(other_item));
+    NAOS_CHECK_FALSE(verbatim(root));
+    CHECK_TREE_OK(document);
+    free(fragment_before);
+    free(other_before);
+    amark_document_destroy(document);
+}
+
+/* ---- Moving a block (11.4, 11.5) ------------------------------------------------------------ */
+
+/* L0 "> quoted", L1 "- item": a paragraph in a block quote, and a list. */
+static const char move_tree[] =
+    "(block_quote :lines (0 1) :margins ((0 0 2 present))\n"
+    "  (paragraph :lines (0 1) :content laid ((0 2 8))\n"
+    "    (text :spelling ((text 0 6 :facet literal)))))\n"
+    "(list :type bullet :tight true :style (:bullet \"-\") :lines (1 1)\n"
+    "  (item :lines (1 1) :margins ((1 0 2 present first))\n"
+    "    (paragraph :lines (1 1) :content laid ((1 2 6))\n"
+    "      (text :spelling ((text 0 4 :facet literal))))))";
+
+NAOS_TEST(a_paragraph_moved_from_a_block_quote_into_an_item_keeps_its_own_spelling)
+{
+    amark_document_t *document = new_document("> quoted\n- item\n");
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote;
+    amark_node_t *list;
+    amark_node_t *item;
+    amark_node_t *moved;
+    amark_node_t *stayed;
+    amark_node_t *ancestor;
+    amark_lossless_report_t report;
+    char *moved_before;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, move_tree);
+    quote = child_at(root, 0);
+    NAOS_REQUIRE_NOT_NULL(quote);
+    list = child_at(root, 1);
+    NAOS_REQUIRE_NOT_NULL(list);
+    item = amark_node_first_child(list);
+    NAOS_REQUIRE_NOT_NULL(item);
+    moved = amark_node_first_child(quote);
+    NAOS_REQUIRE_NOT_NULL(moved);
+    stayed = amark_node_first_child(item);
+    NAOS_REQUIRE_NOT_NULL(stayed);
+    CHECK_ASSEMBLED(document);
+    NAOS_CHECK_TRUE(has_margin(quote, 0));
+    moved_before = dump_of(moved, ALL_FLAGS);
+    NAOS_REQUIRE_NOT_NULL(moved_before);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(item, moved));
+    CHECK_SHAPE(root, "(document (block_quote) (list (item (paragraph (text)) "
+                      "(paragraph (text)))))");
+    CHECK_TREE_OK(document);
+
+    /* The moved paragraph keeps its own spelling, its content in its original
+     * lines, its value and its position. */
+    NAOS_CHECK_TRUE(verbatim(moved));
+    NAOS_CHECK_TRUE(content_verbatim(moved));
+    NAOS_CHECK_TRUE(verbatim(amark_node_first_child(moved)));
+    CHECK_TEXT(amark_node_first_child(moved), AMARK_TEXT_LITERAL, "quoted");
+    check_range(moved, 2, 8, 1, 3, 1, 8);
+    AMARK_CHECK_TREE_DUMP(moved, ALL_FLAGS, moved_before);
+
+    /* No ancestor at its destination has a margin on its line (11.5): the item
+     * has one on its own line only, the list and the document are not
+     * containers. */
+    for (ancestor = amark_node_parent(moved); ancestor != NULL;
+         ancestor = amark_node_parent(ancestor))
+    {
+        NAOS_CHECK_FALSE(has_margin(ancestor, 0));
+    }
+    NAOS_CHECK_TRUE(has_margin(item, 1));
+    /* The margin of the block quote stays with the block quote. */
+    NAOS_CHECK_TRUE(has_margin(quote, 0));
+
+    /* The ancestors at the destination cannot be output in their original
+     * spelling; the paragraph that was in the item still can. */
+    NAOS_CHECK_FALSE(verbatim(item));
+    NAOS_CHECK_FALSE(verbatim(list));
+    NAOS_CHECK_FALSE(verbatim(root));
+    NAOS_CHECK_TRUE(verbatim(stayed));
+    /* The block quote left without its paragraph does not cover its line. */
+    NAOS_CHECK_FALSE(verbatim(quote));
+
+    /* Every byte still has exactly one owner: the margin of the block quote and
+     * the content of the moved paragraph. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, check_lossless(document, &report));
+
+    /* Moving it back restores the original spelling of every node. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(quote, moved));
+    CHECK_ASSEMBLED(document);
+    free(moved_before);
+    amark_document_destroy(document);
+}
+
+NAOS_SUITE(msgstr_insertion,
+    NAOS_ADD_TEST(msgstr_replaces_the_content_of_a_paragraph_in_a_list_in_a_block_quote),
+    NAOS_ADD_TEST(a_paragraph_moved_from_a_block_quote_into_an_item_keeps_its_own_spelling)
+)
+
 NAOS_MAIN(
-    NAOS_ADD_SUITE(inline_assembly)
+    NAOS_ADD_SUITE(inline_assembly),
+    NAOS_ADD_SUITE(input_examples),
+    NAOS_ADD_SUITE(msgstr_insertion)
 )
