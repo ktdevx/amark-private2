@@ -36,3 +36,8 @@ amark_add_test(structure_edit_test SOURCES structure_edit_test.c INTERNAL)
 # Syntax tokens: the checks of each kind, the order, removal, transfer and access
 # (checks the invariants and reads the internal counter and token arrays).
 amark_add_test(token_test SOURCES token_test.c INTERNAL)
+
+# Literals and the setting of inline text: the string helpers, the literal modes,
+# the records, the tokens kept and the out-of-memory sweeps (calls the internal
+# helpers and checks the invariants).
+amark_add_test(literal_attr_test SOURCES literal_attr_test.c INTERNAL)

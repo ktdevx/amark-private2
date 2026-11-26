@@ -144,6 +144,43 @@ bool amark_node_allows_child(const amark_node_t *parent, const amark_node_type_d
  */
 void amark_node_link_child(amark_node_t *parent, amark_node_t *before, amark_node_t *node);
 
+/* --- literal.c ---------------------------------------------------------------- */
+
+/*
+ * The string helpers of the literals and the string attributes (attr.c). A line
+ * ending is LF, CR or CRLF (one line ending); a blank line is a line between two
+ * line endings that holds only spaces and tabs (the empty line included).
+ */
+
+/*
+ * The common check of every string that is set: AMARK_ERROR_INVALID_ARGUMENT when
+ * text is NULL with a length other than 0, is not valid UTF-8 (amark_utf8_validate)
+ * or contains NUL; AMARK_ERROR_NONE otherwise (NULL with length 0 is "").
+ */
+amark_error_t amark_text_check(const char *text, size_t length);
+
+/* Whether text holds a line ending (LF or CR). */
+bool amark_text_has_line_ending(const char *text, size_t length);
+
+/* Whether text holds a blank line. */
+bool amark_text_has_blank_line(const char *text, size_t length);
+
+/*
+ * Writes to *out_text a NUL-terminated copy of text, allocated with amark_malloc,
+ * whose line endings are LF, ending with an LF that is added when final_lf is true,
+ * the copy is not empty and does not end with one; and its length to *out_length.
+ * An empty copy is NULL (nothing allocated). A text without CR is copied as it
+ * is, so this is also the copy of the strings that hold no line ending. Returns
+ * AMARK_ERROR_OVERFLOW or AMARK_ERROR_OUT_OF_MEMORY on failure, writing NULL and
+ * 0.
+ */
+amark_error_t amark_text_normalize(const char *text, size_t length, bool final_lf,
+                                   char **out_text, size_t *out_length);
+
+/* Whether the strings a and b (each NULL only with length 0) hold the same
+ * bytes. */
+bool amark_text_equal(const char *a, size_t a_length, const char *b, size_t b_length);
+
 /* --- tree_check.c ------------------------------------------------------------- */
 
 /*
