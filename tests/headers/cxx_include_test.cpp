@@ -507,6 +507,45 @@ NAOS_TEST(block_stage_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(verbatim_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *text = NULL;
+    amark_source_id_t source = 0;
+    amark_content_token_t token;
+    amark_spelling_state_t state;
+    bool out = false;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, "ab\n", 3,
+                                                  AMARK_SOURCE_FINISHED, &source));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    NAOS_CHECK_TRUE(amark_node_is_new(paragraph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_set_lines(paragraph, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(paragraph, text));
+    std::memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.start = 0;
+    token.end = 2;
+    token.kind = AMARK_SPELL_TEXT;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_add_content_token(text, paragraph, &token));
+    NAOS_CHECK_FALSE(amark_node_is_new(paragraph));
+    std::memset(&state, 0, sizeof(state));
+    state.struct_size = sizeof(state);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_spelling_state(text, &state));
+    NAOS_CHECK_TRUE(state.has_spelling);
+    NAOS_CHECK_TRUE(state.complete);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_verbatim(paragraph, &out));
+    NAOS_CHECK_TRUE(out);
+    amark_node_destroy(paragraph);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -525,7 +564,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(layout_functions_link),
     NAOS_ADD_TEST(content_functions_link),
     NAOS_ADD_TEST(content_token_functions_link),
-    NAOS_ADD_TEST(block_stage_functions_link)
+    NAOS_ADD_TEST(block_stage_functions_link),
+    NAOS_ADD_TEST(verbatim_functions_link)
 )
 
 NAOS_MAIN(

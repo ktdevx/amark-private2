@@ -303,6 +303,67 @@ amark_error_t amark_tree_content_free_copy(const amark_tree_content_t *source,
  * Allocates nothing. */
 void amark_tree_leaf_replace_content(amark_node_t *leaf, amark_tree_content_t *content);
 
+/* ---- Verbatim (verbatim.c) ---------------------------------------------------- */
+
+/* The kinds of the first inconsistency of the coverage of a content
+ * (amark_tree_content_cover). */
+typedef enum amark_tree_cover_problem
+{
+    /* The tokens cover the content exactly once. */
+    AMARK_TREE_COVER_NONE = 0,
+    /* A byte of the content is covered by no token. */
+    AMARK_TREE_COVER_GAP,
+    /* A byte of the content is covered by more than one token. */
+    AMARK_TREE_COVER_OVERLAP,
+    /* A token is on another content object than the content of the leaf. */
+    AMARK_TREE_COVER_FOREIGN
+} amark_tree_cover_problem_t;
+
+/* The result of amark_tree_content_cover. */
+typedef struct amark_tree_cover
+{
+    /* The tokens cover the content exactly once, all on the content of the
+     * leaf (problem is AMARK_TREE_COVER_NONE). */
+    bool covered;
+    amark_tree_cover_problem_t problem;
+    /* The position of the first inconsistency: the byte of the content not
+     * covered once, or the start of the foreign token (on its own base); 0
+     * when covered. */
+    size_t offset;
+    /* The node of the foreign token; NULL for the other problems. */
+    const amark_node_t *node;
+} amark_tree_cover_t;
+
+/* The scratch of amark_tree_content_cover: an array of counts that grows to the
+ * longest content it was used for, so that a walk of many leaves (13.2, the
+ * lossless check) allocates it once. Zero-initialize it; release it with
+ * amark_tree_cover_scratch_free. */
+typedef struct amark_tree_cover_scratch
+{
+    int32_t *counts;
+    size_t capacity;
+} amark_tree_cover_scratch_t;
+
+/* Frees the array of scratch and leaves it empty (NULL does nothing). */
+void amark_tree_cover_scratch_free(amark_tree_cover_scratch_t *scratch);
+
+/*
+ * The coverage of the content of leaf (a block with content) by the content
+ * tokens of leaf and of its descendants (11.3, 10.2): whether each byte of the
+ * content is covered by exactly one token and every token is on the content of
+ * leaf. *out receives the first inconsistency in the order of the content
+ * positions: a gap or an overlap at its byte, or a foreign token at its start
+ * (on its own base; a foreign token comes first at the same position). Content
+ * that is none counts as empty, every token then being foreign. The counts are a
+ * difference array in scratch (grown when the content is longer than it); the
+ * time is proportional to the length of the content, the tokens and the nodes
+ * under leaf. AMARK_ERROR_OUT_OF_MEMORY when scratch cannot grow (*out is then
+ * not written). The arguments are not NULL.
+ */
+amark_error_t amark_tree_content_cover(const amark_node_t *leaf,
+                                       amark_tree_cover_scratch_t *scratch,
+                                       amark_tree_cover_t *out);
+
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
 /* The states of the storage of a facet (amark_tree_facet_t.state). */

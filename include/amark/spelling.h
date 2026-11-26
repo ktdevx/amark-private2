@@ -456,6 +456,57 @@ AMARK_API amark_error_t amark_node_content_base(const amark_node_t *node, const 
                                                size_t *length, amark_content_state_t *state,
                                                bool *is_own_leaf_content);
 
+/* ---- Spelling state and verbatim output ------------------------------------------ */
+
+/* The state of the own spelling of a node (11.1). The caller sets struct_size to
+ * sizeof(amark_spelling_state_t). */
+typedef struct amark_spelling_state
+{
+    size_t struct_size;
+    /* The node has a record other than its line range (a margin, a blank line, a
+     * layout token, laid content) or a content token. */
+    bool has_spelling;
+    /* No spelling of the node was dropped (dropped_facets is 0 and
+     * structure_dropped is false). */
+    bool complete;
+    /* Bit n is set when the spelling of facet n was dropped (by setting or
+     * unsetting the facet, or by dropping its spelling). */
+    uint32_t dropped_facets;
+    /* The structural spelling of the node (its margins, blank lines and layout
+     * tokens) was dropped (amark_node_discard_spelling,
+     * amark_block_discard_margin). */
+    bool structure_dropped;
+} amark_spelling_state_t;
+
+/* Reads the spelling state of node into *out (whose struct_size the caller
+ * sets). AMARK_ERROR_INVALID_ARGUMENT for NULL and a struct_size below
+ * sizeof(amark_spelling_state_t). */
+AMARK_API amark_error_t amark_node_spelling_state(const amark_node_t *node,
+                                                  amark_spelling_state_t *out);
+
+/*
+ * Whether the content of leaf can be output in its original lines (11.3): *out
+ * is true exactly when
+ *   - the content of leaf is laid;
+ *   - neither leaf nor any of its inline descendants dropped any spelling;
+ *   - every inline descendant has content tokens, and the tokens of leaf and of
+ *     its descendants are on the current content of leaf;
+ *   - those tokens cover each byte of the content exactly once;
+ *   - the nesting order is kept: the range of the tokens of each inline node
+ *     (from its first token to its last) lies within the range of its parent (the
+ *     whole content for the children of leaf), the ranges of siblings follow
+ *     each other in the order of the siblings without overlap, and no token of
+ *     a node falls within the range of one of its children.
+ * Allocates nothing; runs in time proportional to the tokens and the nodes under
+ * leaf. AMARK_ERROR_INVALID_ARGUMENT for NULL arguments and a node that is not a
+ * block with content (AMARK_NODE_TYPE_CONTENT).
+ */
+AMARK_API amark_error_t amark_block_content_verbatim(const amark_node_t *leaf, bool *out);
+
+/* Whether node is a new node (11.6): it has no line range, no record, no content
+ * token and no dropped mark of its structural spelling (false for NULL). */
+AMARK_API bool amark_node_is_new(const amark_node_t *node);
+
 AMARK_END_DECLS
 
 #endif /* AMARK_SPELLING_H */
