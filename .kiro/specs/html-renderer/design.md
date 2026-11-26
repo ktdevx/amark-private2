@@ -234,7 +234,7 @@ graph TB
 | 3.5 | 拡張の生の HTML | HtmlOutput | `amark_html_write_raw` | — |
 | 3.6 | 常にエスケープ | HtmlOutput, CoreHtml | `amark_html_write_escaped` | — |
 | 4.1, 4.2 | sourcepos | HtmlOutput, CoreHtml | `amark_html_write_sourcepos` | — |
-| 4.3–4.5 | ソフトブレーク | CoreHtml | `AMARK_HTML_HARDBREAKS`, `AMARK_HTML_NOBREAKS` | — |
+| 4.3–4.5 | ソフトブレーク | CoreHtml | `amark_html_softbreak_t`, `amark_html_softbreak` | — |
 | 4.6, 4.7 | 未知のオプション、既定 | HtmlEngine | `amark_html_options_t` | 1 回の出力 |
 | 5.1–5.4 | ユーティリティ | HtmlEscape | `amark_html_escape`, `amark_html_escape_href`, `amark_html_url_is_safe` | — |
 | 6.1, 6.7, 6.8 | ノード型ごとのスロット | HtmlDispatch | `amark_html_node_slot_t` | 処理の選び方 |
@@ -427,7 +427,7 @@ typedef struct amark_html_hooks_slot {
 | Requirements | 1.1, 1.4–1.7, 4.6, 4.7, 6.3–6.5, 7.3–7.9, 8.1–8.5, 8.8, 11.2–11.5 |
 
 **Responsibilities & Constraints**
-- 入口：`node` と出力先を検査する（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`options` が NULL なら既定（フラグ 0）。`struct_size` が v1 の最小未満か、未知のフラグのビットがあれば `AMARK_ERROR_INVALID_ARGUMENT` で何も出力しない。文脈は呼び出し側のスタックに置き、確保はグローバルのアロケータ（`amark_malloc` など）だけで行う。
+- 入口：`node` と出力先を検査する（NULL は `AMARK_ERROR_INVALID_ARGUMENT`）。`options` が NULL なら既定（フラグ 0、`softbreak` は LF）。`struct_size` が v1 の最小未満か、未知のフラグのビットがあるか、`softbreak` が既知の値でなければ `AMARK_ERROR_INVALID_ARGUMENT` で何も出力しない。文脈は呼び出し側のスタックに置き、確保はグローバルのアロケータ（`amark_malloc` など）だけで行う。
 - 手順：連鎖の表とフックの一覧の構築 → 状態の確保（すべて 0 で埋める）→ `begin` を構文セットの順 → 部分木の出力 → `end` を逆の順 → `finish` を逆の順（成否にかかわらず、状態の確保に成功していれば全スロット）→ 解放 → 中継のバッファの残りを渡す。失敗した時点で以降の `begin` / たどり / `end` を飛ばし、`finish` と解放は行う。
 - たどり：親・最初の子・次の兄弟のリンクで反復する（`amark_iter_t` は使わない）。根の部分木の外へ出ない。各ノードで入るとき（子を持てる型も葉も）と出るときに処理を呼ぶ。子の省略が求められたら、子へ降りずに出るときへ進む。
 - 深さごとの文脈：動的な配列（倍々に伸ばす）に `{tight_children}` を持つ。`amark_html_tight` は親の要素の値、部分木の根では false。入れ子の出力は配列の新しい基点から始め、外側の値を見ない。
@@ -441,16 +441,23 @@ typedef struct amark_html_hooks_slot {
 ```c
 /* include/amark/html.h */
 #define AMARK_HTML_SOURCEPOS  0x01u   /* ブロックの要素に data-sourcepos を出す */
-#define AMARK_HTML_HARDBREAKS 0x02u   /* ソフトブレークを <br /> に */
-#define AMARK_HTML_NOBREAKS   0x04u   /* ソフトブレークを空白に（HARDBREAKS が優先） */
-#define AMARK_HTML_UNSAFE     0x08u   /* 生の HTML と危険な URL を出す */
+#define AMARK_HTML_UNSAFE     0x02u   /* 生の HTML と危険な URL を出す */
+
+/* ソフトブレークの出し方。三者択一なので enum にする（cmark の CMARK_OPT_HARDBREAKS は BR、
+   CMARK_OPT_NOBREAKS は SPACE に当たる）。0 は既定の LF */
+typedef enum amark_html_softbreak {
+    AMARK_HTML_SOFTBREAK_LF = 0,      /* 改行のまま */
+    AMARK_HTML_SOFTBREAK_BR = 1,      /* <br /> と改行 */
+    AMARK_HTML_SOFTBREAK_SPACE = 2    /* 空白 1 つ */
+} amark_html_softbreak_t;
 
 typedef struct amark_html_options {
     size_t struct_size;
     uint32_t flags;
+    amark_html_softbreak_t softbreak;
 } amark_html_options_t;
 
-AMARK_API void amark_html_options_init(amark_html_options_t *options);   /* struct_size を設定し、flags を 0 に */
+AMARK_API void amark_html_options_init(amark_html_options_t *options);   /* struct_size を設定し、flags を 0、softbreak を LF に */
 
 AMARK_API amark_error_t amark_render_html(const amark_node_t *node, const amark_html_options_t *options,
                                           amark_buffer_t *out);
@@ -459,6 +466,7 @@ AMARK_API amark_error_t amark_render_html_to(const amark_node_t *node, const ama
 
 /* 出力の文脈 */
 AMARK_API uint32_t amark_html_flags(const amark_html_context_t *ctx);
+AMARK_API amark_html_softbreak_t amark_html_softbreak(const amark_html_context_t *ctx);
 AMARK_API const amark_node_t *amark_html_root(const amark_html_context_t *ctx);     /* 利用者が指定した部分木の根 */
 AMARK_API amark_error_t amark_html_render_next(amark_html_context_t *ctx, const amark_node_t *node, bool entering);
 AMARK_API amark_error_t amark_html_render_plain_next(amark_html_context_t *ctx, const amark_node_t *node);
@@ -479,7 +487,7 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 - Invariants：出力は同じ木・構文セット・オプションに対して決定的（構文セットの順と木の順だけで決まる）。
 
 ##### State Management
-- State model：`{document, root, flags, dispatch（連鎖の表、フックの一覧と状態）, output（HtmlOutput の状態）, depth の配列, plain_owner, call（現在の呼び出しの文脈）, nesting, error}`。1 回の出力の呼び出しの中だけに存在する。
+- State model：`{document, root, flags, softbreak, dispatch（連鎖の表、フックの一覧と状態）, output（HtmlOutput の状態）, depth の配列, plain_owner, call（現在の呼び出しの文脈）, nesting, error}`。1 回の出力の呼び出しの中だけに存在する。
 - Concurrency strategy：文脈は呼び出しごとに独立。共有するのは凍結した構文セットと `const` の静的データ（`amark.core.html` の表、エスケープの表）と、グローバルのアロケータの設定だけ。
 
 **Implementation Notes**
@@ -513,7 +521,7 @@ AMARK_API void *amark_html_state(amark_html_context_t *ctx, const amark_extensio
 | thematic_break | `cr` `<hr` sp ` />\n` | なし | なし |
 | link_definition | 何も出さず、子を省く | なし | なし |
 | text | リテラルのエスケープ | なし | リテラルのエスケープ |
-| softbreak | HARDBREAKS なら `<br />\n`、NOBREAKS なら空白、それ以外は LF | なし | 空白 |
+| softbreak | `softbreak` が BR なら `<br />\n`、SPACE なら空白、LF なら LF | なし | 空白 |
 | linebreak | `<br />\n` | なし | 空白 |
 | code | `<code>` リテラルのエスケープ `</code>` | なし | リテラルのエスケープ |
 | html_inline | `write_raw(リテラル)` | なし | リテラルのエスケープ |
@@ -544,7 +552,7 @@ extern const amark_html_node_slot_t amark_html_slot_document;   /* … 19 の型
 - スロットの種類を「ノード型ごとの出力」と「出力の前後のフックとフィルタ」の 2 つにし、ノード型は名前で指定する。
 - 同じ型の処理は構文セットの順に連鎖し、最後のものを使う。前の処理は文脈の `render_next` で呼ぶ。処理を持たない型は自身を出さずに子を出す。
 - 出力の文脈は不透明で、呼び出しの間だけ有効。子の省略、入れ子の出力（上限つき）、拡張ごとの 1 回の出力の間の状態、`begin`（構文セットの順）／`end`・`finish`（逆の順）を持つ。
-- 入口は `amark_render_<format>(node, options, amark_buffer_t *)` と `amark_render_<format>_to(node, options, amark_write_fn_t, user_data)`。オプションは `struct_size` と `flags` を持ち、未知のビットを拒否する。
+- 入口は `amark_render_<format>(node, options, amark_buffer_t *)` と `amark_render_<format>_to(node, options, amark_write_fn_t, user_data)`。オプションは `struct_size` と `flags` を持ち、未知のビットを拒否する。閉じた選択肢（HTML のソフトブレークの出し方など）は `flags` のビットにせず enum のフィールドにし、範囲外の値を拒否する。
 - 出力の形式が求める固有の文脈（HTML のタイトさとテキストだけのモード、Markdown の接頭辞など）は、各レンダラが文脈の API として足す。
 
 ### Test
@@ -585,7 +593,7 @@ extern const amark_html_node_slot_t amark_html_slot_document;   /* … 19 の型
 
 #### HtmlTests / HtmlFuzz
 - 内容は Testing Strategy を参照する。`tests/html/CMakeLists.txt` は `amark_add_test` でテストごとの実行ファイルを、`amark_add_generated_tests(html_builtin GENERATOR gen_html_cases.cmake DATA data/block_cases.txt data/inline_cases.txt SOURCES support/html_test_support.c …)` で生成テストを登録する（すべて公開 API だけを使い、`INTERNAL` を要さない）。
-- `data/*_cases.txt` の形式：`### <name> [<flag>...]` の行、S 式の行、`---` の行、期待する HTML の行、`===` の行。フラグは `unsafe`、`hardbreaks`、`nobreaks`。CommonMark の spec.txt の文章は写さず、この spec の表から作る。
+- `data/*_cases.txt` の形式：`### <name> [<option>...]` の行、S 式の行、`---` の行、期待する HTML の行、`===` の行。オプションの語は `unsafe`（`AMARK_HTML_UNSAFE`）と `softbreak=lf|br|space`（`softbreak` のフィールド。省略時は `lf`）。CommonMark の spec.txt の文章は写さず、この spec の表から作る。
 - **共有のケースの生成スクリプト（契約）**：`gen_html_cases.cmake` は HTML に固有の知識を持たない汎用のスクリプトとして作り、`markdown-renderer` が `${PROJECT_SOURCE_DIR}/tests/html/gen_html_cases.cmake` をそのまま `GENERATOR` に指定して再利用する（`gen_md_cases.cmake` のような別の実装は作らない）。次をこのスクリプトの契約とし、変更は Revalidation Triggers に従う。
   - 形式：ケースは `### <name> [<option>...]` の見出しの行で始まり、S 式の行（1 行以上）、`---` の行、期待する出力の行（0 行以上）、`===` の行で終わる。見出しより前の行と、ケースの間の空行は読み飛ばす。`<name>` は `[A-Za-z0-9_]+` で、ファイルの中で重複しない（重複と形の崩れは生成の失敗にする）。期待する出力は、区切りの間の行を LF でつないだバイト列（最後の行の後にも LF）で、`AmarkTestGen.cmake` の 16 進の扱いでバイトを失わない。
   - オプション：見出しの `<name>` の後の語は、スクリプトが解釈せず、空白 1 つでつないだ文字列として検査関数に渡す（HTML のフラグ `unsafe` や Markdown の `bullet=*` のような `key=value` のどちらも同じに扱う）。未知の語の拒否は検査関数の責任。
@@ -642,6 +650,7 @@ struct amark_html_context {
     const amark_document_t *document;
     const amark_node_t *root;
     uint32_t flags;
+    amark_html_softbreak_t softbreak;
     amark_html_handler_t *handlers, *plain_handlers;
     amark_html_chain_t *chains; size_t chain_count;
     amark_html_hook_t *hooks; size_t hook_count;
@@ -682,7 +691,7 @@ struct amark_html_context {
 - **builtin（生成テスト）**：`data/block_cases.txt` と `data/inline_cases.txt` で、19 の型のすべての分岐（ul/ol/start=1/start=0/start=7、空と空でない情報文字列と `language-` で始まる情報文字列とタブで区切った情報文字列、タイトとルーズのリスト、項目の中の段落と引用の中の段落、タイトルの有無、画像の代替テキストの中の強調・コード・リンク・改行・生の HTML、入れ子のリスト、リンク参照定義が何も出さないこと、文書の子だけが出ること）を、cmark の出力と同じ期待値で照合する（2.1–2.9、7.6）。
 - **render_entry**：バッファの既存の内容の後ろへの追加（1.2）、書き出しの関数の連結がバッファの出力と一致し 8 KiB を超える出力が複数回に分かれること（1.3）、書き出しの関数の失敗が直ちに返ること（1.4）、処理の失敗でバッファが元の長さに戻ること（1.5）、出力の前後で木のダンプが同じこと（1.6）、2 回の出力が同じバイト列になること（1.7）、木の途中のノードと切り離したノードの出力（1.1）。
 - **safe_mode**：既定で html_block と html_inline がコメントになること（3.1）、`javascript:`、`JAVASCRIPT:`、`vbscript:`、`file:`、`data:text/html`、`data:image/svg+xml` が空の宛先、`data:image/png` などが残ること（3.2、3.4）、`AMARK_HTML_UNSAFE` での生の出力と危険な URL のエスケープ（3.3）、拡張の `write_raw` が同じ規則に従うこと（3.5）、テキスト・タイトル・情報文字列・代替テキストの `<"&>` がすべてエスケープされること（3.6）。
-- **options**：トークンを付けた木で、引用・リスト・項目・見出し・コードブロック・区切り線・段落の sourcepos の値（終わりの改行を除き、最後のバイトを含む列）（4.1）、トークンのないノードに属性が出ないこと（4.2）、HARDBREAKS・NOBREAKS・両方（4.3–4.5）、未知のビットと小さい `struct_size` の拒否で何も出ないこと（4.6）、NULL のオプションの既定（4.7）。
+- **options**：トークンを付けた木で、引用・リスト・項目・見出し・コードブロック・区切り線・段落の sourcepos の値（終わりの改行を除き、最後のバイトを含む列）（4.1）、トークンのないノードに属性が出ないこと（4.2）、`softbreak` の LF・BR・SPACE（4.3–4.5）、範囲外の `softbreak`・未知のビットと小さい `struct_size` の拒否で何も出ないこと（4.6）、NULL のオプションの既定（4.7）。
 - **escape**：0x00–0xFF の全バイトについて HTML のエスケープと href のエスケープの結果を表と照合（5.1、5.2）、危険な URL の判定の境界（`data:image/pn`、`javascript`、空）（5.3）、文書なしで使えること（5.4）、多バイトの UTF-8 の並びが HTML のエスケープで変わらないこと（11.6）。
 - **slot**：拡張の型の処理の登録（6.1）、後の拡張の処理が使われること（6.2）、`render_next` での包み込みと、最初の処理からの `render_next` が何もしないこと（6.3、9.3）、処理のない型が子だけを出すこと（6.4）、子の省略（6.5）、`render` が NULL・小さい `struct_size`・構文セットにない型の名前・1 つの拡張の 2 つのフックのスロットの拒否で何も出ないこと（6.6）、組み込みと拡張の型が同じ規則で連鎖すること（6.7）、HTML のスロットだけの拡張とパースの種類の偽のスロットを持つ拡張（6.8）、`amark.core.html` を含まない構文セットで組み込みの型が子だけを出すこと（9.4）。
 - **context**：各書き出しの分類と内容（7.1）、`cr` の振る舞い（出力の最初、LF の後）とオプションの問い合わせ（7.2）、独自のコンテナの型が設定したタイトさを子の段落が使い、孫が使わないこと（7.3）、独自の型がテキストだけのモードを開始し owner の出るときは通常で呼ばれること（7.4）、独自の型のテキストだけのモードの処理と、持たない型が子だけを出すこと（7.5）、切り離したノードの入れ子の出力が同じフィルタと状態を使うこと（7.7）、33 段の入れ子の出力で上限を超えること（7.8）、処理の外の操作・現在でないノードの `render_next`・別の文書のノードの拒否（7.9）。

@@ -249,6 +249,14 @@
 - **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
 - **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-26：ブロック構文の形を enum の `shape` にする
+- **Context**：全 spec の定数の集合を、開いた集合、ビットの印、閉じた選択肢の 3 つに分類し直した（steering の tech.md の規約）。ブロック構文の `flags` の `AMARK_BLOCK_SYNTAX_CONTAINER`、`PARAGRAPH`、`VERBATIM_LINES` は、1 つの構文が 1 つしか持てない（コンテナは子を持ち、段落の類と逐語の葉は持たない。段落の類は照合の後に開始を試すが、逐語の葉は試さない）。組み合わせると意味を持たず、組み合わせの検査もなかった。どれも持たない構文（見出し、区切り線）は「葉」という 4 つ目の選択肢だった。
+- **変更**：`typedef enum amark_block_shape { LEAF = 1, CONTAINER = 2, PARAGRAPH = 3, VERBATIM = 4 }` を足し、`amark_block_syntax_t` にフィールド `shape` を加えた。`flags` には形と独立に組み合わせる `IGNORE_BLANK`（0x01）、`FALLBACK`（0x02）、`AMARK_BLOCK_START_INTERRUPTS`（0x100）だけを残した（実装はまだなく、値を詰めた）。パーサの生成で、ブロック構文の `shape` が既知の値で `flags` が既知のビットだけであることを検査し、違反は `AMARK_ERROR_INVALID_ARGUMENT` にした。組み込みの構文の表に各構文の形を書いた。
+- **0 を不正にする理由**：葉を既定（0）にすると、コンテナや段落の類の構文で書き忘れたときに黙って葉として動く。`syntax-tree` の `node_class` と同じく、正しい既定値がない選択肢なので 0 を不正にした。
+- **名前**：スロットの基底の `kind` や構文トークンの種類と紛れないよう、`kind` でなく `shape`（ブロックの形）にした。
+- **変えないもの**：`AMARK_PARSE_NO_EDIT_TRACKING`、`AMARK_DECODE_*`、`AMARK_FRAGMENT_TARGET_DEFINITIONS` はビットの印、`AMARK_ROLE_ENGINE_*` は役割の番号（開いた集合）、`AMARK_SCAN_HTML_BLOCK_KIND_MIN` / `MAX` は CommonMark の 4.6 節の番号（1–7）の範囲で、正しい。
+- **Implications**：Selected pattern、Traceability、BlockEngine の各段階、ブロック構文の契約、組み込みの構文の表、エラー処理、テストの方針、タスク 6.2 を合わせた。要件の範囲は変わらない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — ブロック構造、タブ、不正な文字、リンク参照定義、付録の parsing strategy
 - [cmark](https://github.com/commonmark/cmark) — `blocks.c`、`inlines.c`、`utf8.c`（case fold）、`houdini_html_u.c`（文字参照）

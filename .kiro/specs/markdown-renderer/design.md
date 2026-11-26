@@ -517,17 +517,20 @@ AMARK_API amark_error_t amark_markdown_add_escape_chars(amark_markdown_context_t
 AMARK_API amark_error_t amark_markdown_set_encodings(amark_markdown_context_t *ctx, uint32_t encodings);
 
 /* 保護のフックの中だけ */
-#define AMARK_MARKDOWN_BYTE_TEXT 1u
-#define AMARK_MARKDOWN_BYTE_FIXED 2u
-#define AMARK_MARKDOWN_BYTE_MARKUP 3u
-#define AMARK_MARKDOWN_BYTE_DELIMITER 4u
+/* バイトの分類。1 つのバイトは 1 つの分類だけを持つ閉じた集合なので enum にする（kinds は 1 バイトずつ詰めて持つ） */
+typedef enum amark_markdown_byte_kind {
+    AMARK_MARKDOWN_BYTE_TEXT = 1,
+    AMARK_MARKDOWN_BYTE_FIXED = 2,
+    AMARK_MARKDOWN_BYTE_MARKUP = 3,
+    AMARK_MARKDOWN_BYTE_DELIMITER = 4
+} amark_markdown_byte_kind_t;
 #define AMARK_MARKDOWN_LINE_CONTENT_START 0x01u  /* 葉の中身の最初の行 */
 #define AMARK_MARKDOWN_LINE_BLOCK_GUARD   0x02u  /* 葉が BLOCK_GUARD を指定した */
 typedef struct amark_markdown_line {
     size_t struct_size;
     const char *text;                    /* 行の表示 */
     size_t length;
-    const unsigned char *kinds;          /* バイトごとの AMARK_MARKDOWN_BYTE_* */
+    const unsigned char *kinds;          /* バイトごとの amark_markdown_byte_kind_t の値（1 バイトに詰める） */
     uint32_t flags;
     const amark_node_t *leaf;
 } amark_markdown_line_t;
@@ -679,18 +682,18 @@ typedef enum amark_markdown_line_ending {
     AMARK_MARKDOWN_EOL_DOCUMENT = 0, AMARK_MARKDOWN_EOL_LF = 1, AMARK_MARKDOWN_EOL_CRLF = 2
 } amark_markdown_line_ending_t;
 
-typedef enum amark_markdown_problem {
-    AMARK_MARKDOWN_PROBLEM_NONE = 0,
-    AMARK_MARKDOWN_PROBLEM_NO_OUTPUT = 1,  /* 元の表記を使えないノードの型に出力の処理がない */
-    AMARK_MARKDOWN_PROBLEM_NO_SYNTAX = 2,  /* 必要な構文か符号化の手段が構文セットにない */
-    AMARK_MARKDOWN_PROBLEM_EMPTY = 3,      /* 空の中身では表せない（段落、強調、リンクの文字のない参照など） */
-    AMARK_MARKDOWN_PROBLEM_NESTING = 4,    /* 入れ子の文脈で表せない（リンクの中のリンク、ATX の改行） */
-    AMARK_MARKDOWN_PROBLEM_ADJACENT = 5,   /* 隣り合うノードを区別できない */
-    AMARK_MARKDOWN_PROBLEM_DELIMITER = 6,  /* 区切りの条件を満たせない */
-    AMARK_MARKDOWN_PROBLEM_LITERAL = 7,    /* リテラルが構文として成立しない */
-    AMARK_MARKDOWN_PROBLEM_ATTRIBUTE = 8,  /* 属性の組み合わせを表せない */
-    AMARK_MARKDOWN_PROBLEM_EXTENSION_FIRST = 0x100   /* これ以上は拡張が定める */
-} amark_markdown_problem_t;
+/* 問題の種類（報告の problem、amark_markdown_fail の problem）。拡張が 0x100 以上を定める開いた集合なので、
+   uint32_t に入れる #define にする（tech.md の規約）。0x100 未満はこの spec が定める */
+#define AMARK_MARKDOWN_PROBLEM_NONE            0u
+#define AMARK_MARKDOWN_PROBLEM_NO_OUTPUT       1u     /* 元の表記を使えないノードの型に出力の処理がない */
+#define AMARK_MARKDOWN_PROBLEM_NO_SYNTAX       2u     /* 必要な構文か符号化の手段が構文セットにない */
+#define AMARK_MARKDOWN_PROBLEM_EMPTY           3u     /* 空の中身では表せない（段落、強調、リンクの文字のない参照など） */
+#define AMARK_MARKDOWN_PROBLEM_NESTING         4u     /* 入れ子の文脈で表せない（リンクの中のリンク、ATX の改行） */
+#define AMARK_MARKDOWN_PROBLEM_ADJACENT        5u     /* 隣り合うノードを区別できない */
+#define AMARK_MARKDOWN_PROBLEM_DELIMITER       6u     /* 区切りの条件を満たせない */
+#define AMARK_MARKDOWN_PROBLEM_LITERAL         7u     /* リテラルが構文として成立しない */
+#define AMARK_MARKDOWN_PROBLEM_ATTRIBUTE       8u     /* 属性の組み合わせを表せない */
+#define AMARK_MARKDOWN_PROBLEM_EXTENSION_FIRST 0x100u /* これ以上は拡張が定める */
 
 typedef struct amark_markdown_report {
     size_t struct_size;

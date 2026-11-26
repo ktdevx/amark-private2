@@ -82,7 +82,7 @@ Amark では、CommonMark の構文も方言の構文も、同じ構文拡張の
 2. If ソース位置の属性の出力が指定されていて、ノードがソース上の位置を持たない（構文トークンを持たない）, then the Amark HTML Renderer shall そのノードの属性を出さない
 3. Where ソフトブレークをハードブレークとして出す指定がある, the Amark HTML Renderer shall ソフトブレークを改行の要素として出力する
 4. Where ソフトブレークを空白として出す指定がある, the Amark HTML Renderer shall ソフトブレークを 1 つの空白として出力する
-5. If ソフトブレークをハードブレークとして出す指定と空白として出す指定の両方がある, then the Amark HTML Renderer shall ハードブレークとして出す指定を優先する
+5. The Amark HTML Renderer shall ソフトブレークの扱いを、改行・ハードブレーク・空白のうち 1 つだけを選ぶ指定として受け付ける
 6. If 利用者が未知のオプションを指定する, then the Amark HTML Renderer shall 不正な引数を返し、何も出力しない
 7. When 利用者がオプションを省略する, the Amark HTML Renderer shall 安全モード、ソース位置の属性なし、ソフトブレークは改行、の既定で出力する
 
