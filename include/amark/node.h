@@ -341,9 +341,14 @@ typedef struct amark_source_span
 
 /*
  * Writes in *out_span the range [start_offset, end_offset) of the source of the
- * first token of the subtree of node (in preorder) that the tokens of the subtree
- * in that source cover, with its lines and columns. Returns false when the
- * subtree has no token.
+ * first token of the subtree of node (in preorder, then in the order of the tokens
+ * of each node) that the tokens of the subtree in that source cover, with its lines
+ * and columns (amark_document_position; the end is the position of end_offset).
+ * The tokens of other sources are ignored; zero-length tokens (a lazy continuation)
+ * count as a position. node may be detached. Writes only struct_size bytes and
+ * keeps the struct_size of the caller. Returns false, and writes nothing, when the
+ * subtree has no token, node or out_span is NULL, or the struct_size of out_span is
+ * below that of version 1.
  */
 AMARK_API bool amark_node_source_span(const amark_node_t *node, amark_source_span_t *out_span);
 

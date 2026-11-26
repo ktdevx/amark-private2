@@ -2,7 +2,8 @@
  * Copyright (c) The Amark Authors */
 
 /*
- * The traversal (src/tree/iterator.c), through the public API.
+ * The traversal (src/tree/iterator.c) and the source span (src/tree/span.c),
+ * through the public API.
  *
  * Suite iter (3.2, 4.9): the events of a sample tree in document order (a
  * container is entered and exited, also without children; a leaf is only
@@ -17,6 +18,13 @@
  * traversal continues; amark_iter_reset to an ENTER or an EXIT; the rejections of
  * amark_iter_reset (a node outside the subtree of the root, of another document,
  * an EXIT on a leaf, NONE and DONE, NULL) leave the iterator unchanged.
+ * Suite span (3.5, 3.6): amark_node_source_span of a node whose tokens are only on
+ * its descendants; the source of the first token in preorder wins over the tokens
+ * of another source; a subtree without tokens (a new node, tokens only outside the
+ * subtree) gives false and writes nothing; lines and columns with LF and CRLF, up
+ * to the end of a source; a zero-length token counts as a position; a detached
+ * subtree; NULL arguments, a struct_size below version 1 (nothing written) and a
+ * larger struct_size (kept, the bytes after version 1 untouched).
  * Suite iter_oom: the out-of-memory sweep of amark_iter_create, which does not
  * sets *out_iter to NULL on a failure.
  */
@@ -25,6 +33,7 @@
 #include <amark/error.h>
 #include <amark/iterator.h>
 #include <amark/node.h>
+#include <amark/token.h>
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -718,6 +727,327 @@ NAOS_SUITE(iter_edit,
     NAOS_ADD_TEST(a_reset_after_the_end_or_before_the_start_continues),
     NAOS_ADD_TEST(the_invalid_resets_are_rejected))
 
+/* --- Suite span ---------------------------------------------------------------- */
+
+/* Adds to node a token of kind covering [offset, offset + length) of source. */
+static void add_token(amark_node_t *node, amark_token_kind_t kind, amark_source_id_t source,
+                      size_t offset, size_t length)
+{
+    amark_token_t token;
+
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.kind = kind;
+    token.source = source;
+    token.offset = offset;
+    token.length = length;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_add_token(node, &token));
+}
+
+/* Registers a source with the NUL-terminated text and returns its identifier. */
+static amark_source_id_t add_source(amark_document_t *document, const char *text)
+{
+    amark_source_id_t source = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_document_add_source(document, text, strlen(text), &source));
+
+    return source;
+}
+
+/* Returns whether span is (source, [start, end), start_line, start_column,
+ * end_line, end_column). */
+static bool span_is(const amark_source_span_t *span, amark_source_id_t source, size_t start,
+                    size_t end, size_t start_line, size_t start_column, size_t end_line,
+                    size_t end_column)
+{
+    return (span->source == source) && (span->start_offset == start) && (span->end_offset == end)
+           && (span->start_line == start_line) && (span->start_column == start_column)
+           && (span->end_line == end_line) && (span->end_column == end_column);
+}
+
+/* A span with struct_size set and the other fields filled with a marker. */
+static amark_source_span_t fresh_span(void)
+{
+    amark_source_span_t span;
+
+    memset(&span, 0x5a, sizeof(span));
+    span.struct_size = sizeof(span);
+
+    return span;
+}
+
+NAOS_TEST(a_node_with_tokens_only_on_descendants_spans_them)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph;
+    amark_node_t *a;
+    amark_node_t *emph;
+    amark_node_t *b;
+    amark_source_span_t span = fresh_span();
+    amark_source_id_t source;
+
+    /* "x *ab*\n": the paragraph has no token; its descendants cover [2, 6). */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    source = add_source(document, "x *ab*\n");
+    paragraph = add(document, amark_document_root(document), AMARK_NODE_PARAGRAPH);
+    a = add_text(document, paragraph, "a");
+    emph = add(document, paragraph, AMARK_NODE_EMPH);
+    b = add_text(document, emph, "b");
+    add_token(a, AMARK_TOKEN_TEXT, source, 3, 1);
+    add_token(emph, AMARK_TOKEN_MARKER, source, 2, 1);
+    add_token(emph, AMARK_TOKEN_MARKER, source, 5, 1);
+    add_token(b, AMARK_TOKEN_TEXT, source, 4, 1);
+
+    NAOS_CHECK_TRUE(amark_node_source_span(paragraph, &span));
+    NAOS_CHECK_TRUE(span_is(&span, source, 2, 6, 1, 3, 1, 7));
+    NAOS_CHECK_UINT_EQ(sizeof(span), span.struct_size);
+
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(amark_document_root(document), &span));
+    NAOS_CHECK_TRUE(span_is(&span, source, 2, 6, 1, 3, 1, 7));
+
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(b, &span));
+    NAOS_CHECK_TRUE(span_is(&span, source, 4, 5, 1, 5, 1, 6));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_source_of_the_first_token_in_preorder_wins)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph;
+    amark_node_t *first;
+    amark_node_t *second;
+    amark_node_t *third;
+    amark_source_span_t span = fresh_span();
+    amark_source_id_t zero;
+    amark_source_id_t one;
+
+    /* The first token in preorder is in source one (on the first text); the tokens
+     * of source zero, even those before it in source order, are ignored. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    zero = add_source(document, "abcdefghij");
+    one = add_source(document, "0123456789");
+    paragraph = add(document, amark_document_root(document), AMARK_NODE_PARAGRAPH);
+    first = add_text(document, paragraph, "a");
+    second = add_text(document, paragraph, "b");
+    third = add_text(document, paragraph, "c");
+    add_token(first, AMARK_TOKEN_TEXT, one, 4, 2);
+    add_token(second, AMARK_TOKEN_TEXT, zero, 0, 10);
+    add_token(second, AMARK_TOKEN_TEXT, one, 2, 1);
+    add_token(third, AMARK_TOKEN_TEXT, one, 7, 2);
+    add_token(third, AMARK_TOKEN_TEXT, zero, 9, 1);
+
+    NAOS_CHECK_TRUE(amark_node_source_span(paragraph, &span));
+    NAOS_CHECK_TRUE(span_is(&span, one, 2, 9, 1, 3, 1, 10));
+
+    /* Within one node the tokens are in source order: the first is of source
+     * zero. */
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(second, &span));
+    NAOS_CHECK_TRUE(span_is(&span, zero, 0, 10, 1, 1, 1, 11));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_subtree_without_tokens_has_no_span)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph;
+    amark_node_t *text;
+    amark_node_t *sibling;
+    amark_source_span_t span = fresh_span();
+    amark_source_span_t before;
+    amark_source_id_t source;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    source = add_source(document, "ab");
+
+    /* A new node, and a new subtree whose tokens are only on a sibling (outside
+     * the subtree) or the parent. */
+    paragraph = add(document, amark_document_root(document), AMARK_NODE_PARAGRAPH);
+    text = add_text(document, paragraph, "a");
+    sibling = add_text(document, paragraph, "b");
+    add_token(sibling, AMARK_TOKEN_TEXT, source, 1, 1);
+    add_token(paragraph, AMARK_TOKEN_TEXT, source, 0, 1);
+    before = span;
+    NAOS_CHECK_FALSE(amark_node_source_span(text, &span));
+    NAOS_CHECK_TRUE(memcmp(&before, &span, sizeof(span)) == 0);
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_EMPH, &text));
+    NAOS_CHECK_FALSE(amark_node_source_span(text, &span));
+    NAOS_CHECK_TRUE(memcmp(&before, &span, sizeof(span)) == 0);
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_lines_and_columns_follow_lf_and_crlf)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *quote;
+    amark_node_t *paragraph;
+    amark_node_t *text;
+    amark_source_span_t span = fresh_span();
+    amark_source_id_t lf;
+    amark_source_id_t crlf;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    lf = add_source(document, "> ab\n> cd\nxy");
+    crlf = add_source(document, "> ab\r\n> cd\r\n");
+
+    /* LF: [0, 10) is from line 1 column 1 to line 3 column 1 (after the LF). */
+    quote = add(document, amark_document_root(document), AMARK_NODE_BLOCK_QUOTE);
+    paragraph = add(document, quote, AMARK_NODE_PARAGRAPH);
+    text = add_text(document, paragraph, "ab");
+    add_token(quote, AMARK_TOKEN_MARKER, lf, 0, 1);
+    add_token(quote, AMARK_TOKEN_MARKER, lf, 5, 1);
+    add_token(text, AMARK_TOKEN_TEXT, lf, 2, 2);
+    add_token(paragraph, AMARK_TOKEN_LINE_ENDING, lf, 4, 1);
+    add_token(text, AMARK_TOKEN_TEXT, lf, 7, 2);
+    add_token(paragraph, AMARK_TOKEN_LINE_ENDING, lf, 9, 1);
+    NAOS_CHECK_TRUE(amark_node_source_span(quote, &span));
+    NAOS_CHECK_TRUE(span_is(&span, lf, 0, 10, 1, 1, 3, 1));
+
+    /* The second line only: [7, 9) is line 2, columns 3 to 5. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    add_token(text, AMARK_TOKEN_TEXT, lf, 7, 2);
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(text, &span));
+    NAOS_CHECK_TRUE(span_is(&span, lf, 7, 9, 2, 3, 2, 5));
+
+    /* CRLF: the CR and the LF of a line ending are on its line; the end of the
+     * source (offset 12) is on line 3. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    add_token(text, AMARK_TOKEN_TEXT, crlf, 2, 2);
+    add_token(text, AMARK_TOKEN_LINE_ENDING, crlf, 4, 2);
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(text, &span));
+    NAOS_CHECK_TRUE(span_is(&span, crlf, 2, 6, 1, 3, 2, 1));
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    add_token(text, AMARK_TOKEN_TEXT, crlf, 8, 2);
+    add_token(text, AMARK_TOKEN_LINE_ENDING, crlf, 10, 2);
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(text, &span));
+    NAOS_CHECK_TRUE(span_is(&span, crlf, 8, 12, 2, 3, 3, 1));
+
+    /* A token that ends with the LF source ([10, 12) of "xy") ends on line 3,
+     * column 3. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    add_token(text, AMARK_TOKEN_TEXT, lf, 10, 2);
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(text, &span));
+    NAOS_CHECK_TRUE(span_is(&span, lf, 10, 12, 3, 1, 3, 3));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_zero_length_token_marks_a_position)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *quote;
+    amark_node_t *text;
+    amark_source_span_t span = fresh_span();
+    amark_source_id_t source;
+
+    /* A lazy continuation (length 0) counts: alone it gives an empty span, and it
+     * extends the span of the other tokens. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    source = add_source(document, "> a\nb");
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_BLOCK_QUOTE, &quote));
+    add_token(quote, AMARK_TOKEN_LAZY_CONTINUATION, source, 4, 0);
+    NAOS_CHECK_TRUE(amark_node_source_span(quote, &span));
+    NAOS_CHECK_TRUE(span_is(&span, source, 4, 4, 2, 1, 2, 1));
+
+    text = add(document, quote, AMARK_NODE_PARAGRAPH);
+    add_token(text, AMARK_TOKEN_TEXT, source, 2, 1);
+    span = fresh_span();
+    NAOS_CHECK_TRUE(amark_node_source_span(quote, &span));
+    NAOS_CHECK_TRUE(span_is(&span, source, 2, 4, 1, 3, 2, 1));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_detached_subtree_has_its_span)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph;
+    amark_node_t *emph;
+    amark_node_t *text;
+    amark_node_t *after;
+    amark_source_span_t span = fresh_span();
+    amark_source_id_t source;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    source = add_source(document, "a *b* c");
+    paragraph = add(document, amark_document_root(document), AMARK_NODE_PARAGRAPH);
+    emph = add(document, paragraph, AMARK_NODE_EMPH);
+    text = add_text(document, emph, "b");
+    after = add_text(document, paragraph, "c");
+    add_token(text, AMARK_TOKEN_TEXT, source, 3, 1);
+    add_token(after, AMARK_TOKEN_TEXT, source, 6, 1);
+    add_token(paragraph, AMARK_TOKEN_TEXT, source, 0, 1);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_unlink(emph));
+
+    NAOS_CHECK_TRUE(amark_node_source_span(emph, &span));
+    NAOS_CHECK_TRUE(span_is(&span, source, 3, 4, 1, 4, 1, 5));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_struct_size_and_null_arguments_are_handled)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *text;
+    amark_source_id_t source;
+    amark_source_span_t span = fresh_span();
+    amark_source_span_t before;
+    unsigned char larger[sizeof(amark_source_span_t) + 16];
+    amark_source_span_t *large = (amark_source_span_t *)(void *)larger;
+    size_t i;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    source = add_source(document, "ab\ncd");
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    add_token(text, AMARK_TOKEN_TEXT, source, 3, 2);
+
+    NAOS_CHECK_FALSE(amark_node_source_span(NULL, &span));
+    NAOS_CHECK_FALSE(amark_node_source_span(text, NULL));
+
+    /* A struct_size below version 1 is rejected and nothing is written. */
+    span.struct_size = sizeof(span) - 1;
+    before = span;
+    NAOS_CHECK_FALSE(amark_node_source_span(text, &span));
+    NAOS_CHECK_TRUE(memcmp(&before, &span, sizeof(span)) == 0);
+
+    /* A larger struct_size is kept, and the bytes after version 1 are not
+     * written. */
+    memset(larger, 0xa5, sizeof(larger));
+    large->struct_size = sizeof(larger);
+    NAOS_CHECK_TRUE(amark_node_source_span(text, large));
+    NAOS_CHECK_UINT_EQ(sizeof(larger), large->struct_size);
+    NAOS_CHECK_TRUE(span_is(large, source, 3, 5, 2, 1, 2, 3));
+    for (i = sizeof(amark_source_span_t); i < sizeof(larger); i++)
+    {
+        NAOS_CHECK_UINT_EQ(0xa5u, larger[i]);
+    }
+
+    amark_document_destroy(document);
+}
+
+NAOS_SUITE(span,
+    NAOS_SET_TEARDOWN(restore),
+    NAOS_ADD_TEST(a_node_with_tokens_only_on_descendants_spans_them),
+    NAOS_ADD_TEST(the_source_of_the_first_token_in_preorder_wins),
+    NAOS_ADD_TEST(a_subtree_without_tokens_has_no_span),
+    NAOS_ADD_TEST(the_lines_and_columns_follow_lf_and_crlf),
+    NAOS_ADD_TEST(a_zero_length_token_marks_a_position),
+    NAOS_ADD_TEST(a_detached_subtree_has_its_span),
+    NAOS_ADD_TEST(the_struct_size_and_null_arguments_are_handled))
+
 /* --- Suite iter_oom ------------------------------------------------------------ */
 
 static amark_error_t create_scenario(void *context)
@@ -772,5 +1102,6 @@ NAOS_SUITE(iter_oom,
 NAOS_MAIN(
     NAOS_ADD_SUITE(iter),
     NAOS_ADD_SUITE(iter_edit),
+    NAOS_ADD_SUITE(span),
     NAOS_ADD_SUITE(iter_oom)
 )
