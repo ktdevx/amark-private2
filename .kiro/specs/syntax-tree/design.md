@@ -45,6 +45,7 @@
 
 ### Revalidation Triggers
 - 構文トークンの種類・印・フィールドの追加や意味の変更 → `block-parser`、`inline-parser`、`markdown-renderer`
+- ロスレス性の検証の結果の形（`AMARK_ERROR_NOT_LOSSLESS`、`amark_token_report_t`、`amark_token_problem_t`）の変更 → `block-parser`、`inline-parser`（テストの補助が呼ぶ）、`foundation`（エラーコード）
 - 編集の記録のビットの追加や伝播の規則の変更 → `markdown-renderer`
 - 組み込みのノード型の追加、属性・リテラルの規則（LF の正規化、検査）の変更 → すべての下流の spec
 - 包含の規則、`amark_node_type_desc_t` / `amark_extension_t` / `amark_slot_t` の形、識別子の割り当て規則、スロットの番号の範囲と種類の一覧の変更 → すべての下流の spec と利用者の拡張
@@ -287,7 +288,7 @@ graph TB
 
 ### 共通の規約
 - `foundation` の規約に従う：失敗しうる関数は `amark_error_t` を返し、出力引数は最後で `out_` で始める。失敗時は対象を変えない（強い保証）。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。解放の関数は NULL を受け付ける。問い合わせの関数は値を直接返し、NULL のノードには「なし」（NULL、0、false、空文字列）を返す。
-- 公開の構造体は先頭に `size_t struct_size` を持つ。ライブラリが値を書く構造体（`amark_token_t`、`amark_source_span_t`、`amark_token_check_t`）は、呼び出し側が `struct_size` を設定し、ライブラリはその大きさまでだけ書く。
+- 公開の構造体は先頭に `size_t struct_size` を持つ。ライブラリが値を書く構造体（`amark_token_t`、`amark_source_span_t`、`amark_token_report_t`）は、呼び出し側が `struct_size` を設定し、ライブラリはその大きさまでだけ書く。
 - 文字列を返す関数は NUL 終端の文字列を返し、長さを `out_length`（NULL でもよい）で返す。返した文字列は、そのノードの次の変更か解放まで有効。
 - ノードを受け取る関数で、ノードが別の文書のもの、または型が合わないときは `AMARK_ERROR_INVALID_ARGUMENT`。
 
@@ -303,7 +304,7 @@ graph TB
   typedef uint32_t amark_source_id_t;
   ```
 - `document.h` は `node.h`、`token.h` は `document.h`、`iterator.h` は `node.h`、`dump.h` は `node.h` と `buffer.h`、`extension.h` は `node.h`、`dump.h` を include する。各ヘッダは `AMARK_BEGIN_DECLS` / `AMARK_END_DECLS` で宣言を囲み、ガードは `AMARK_<NAME>_H`。
-- `amark_node_source_span` と `amark_source_span_t` は `node.h`、`amark_token_check_t` は `document.h` に置く。
+- `amark_node_source_span` と `amark_source_span_t` は `node.h`、`amark_token_report_t` は `document.h` に置く。
 
 ### Registry
 
@@ -854,25 +855,34 @@ AMARK_API amark_error_t amark_node_import_children(amark_node_t *parent, amark_n
   - `GAP`：どのトークンにも覆われないバイトがある。
   - `OVERLAP`：同じバイトを 2 つ以上のトークンが覆う（部分的なタブを除く）。
   - `TAB_COLUMNS`：部分的なタブの列が 0 から連続しないか、合計がそのタブの幅と一致しないか、部分的なタブと通常のトークンが同じタブを覆う。
-- 確保（整列の作業領域）が失敗したら `AMARK_ERROR_OUT_OF_MEMORY`。
+- 結果（`markdown-renderer` の `AMARK_ERROR_UNREPRESENTABLE` と報告の構造体と同じ形）：
+  - 不整合がなければ `AMARK_ERROR_NONE`。
+  - 不整合があれば `AMARK_ERROR_NOT_LOSSLESS`（`foundation` の 10.10）を返し、`out_report` が NULL でなければ最初の不整合の種類・位置・所有者を書く。失敗のコードを返すときに出力引数を書くのは、この関数の文書化した例外（`foundation` の規約は失敗時の出力引数を関数ごとに定める）。
+  - `out_report` は NULL でもよい（成功したかどうかだけを知りたい呼び出し側のため）。NULL でも検査は行い、同じコードを返す。
+  - `AMARK_ERROR_NOT_LOSSLESS` 以外を返すとき、`out_report` が NULL でなければ `problem` を `NONE`、`offset` を 0、`node` を NULL にする。
+  - 確保（整列の作業領域）が失敗したら `AMARK_ERROR_OUT_OF_MEMORY`。`document` が NULL、ソースが未登録、`out_report` の `struct_size` が v1 の最小未満なら `AMARK_ERROR_INVALID_ARGUMENT`。
+- 範囲：この関数が調べるのは、トークンがソースのバイトを過不足なく覆うか（ロスレス性）だけとする。個々のトークンの種類とバイトの一致は追加時の検査（TokenStore）が担う。トークンの意味が文脈に合うかなど、覆い方でない検査を足すときは、この関数と `AMARK_ERROR_NOT_LOSSLESS` に含めず、別の関数とする。種類の値（`amark_token_problem_t`）の追加は、覆い方の問題に限る。
 
 **Contracts**: Service [x]
 ```c
 /* include/amark/document.h（続き） */
-typedef enum amark_token_check_error {
-    AMARK_TOKEN_CHECK_OK = 0, AMARK_TOKEN_CHECK_GAP = 1, AMARK_TOKEN_CHECK_OVERLAP = 2,
-    AMARK_TOKEN_CHECK_TAB_COLUMNS = 3
-} amark_token_check_error_t;
+typedef enum amark_token_problem {
+    AMARK_TOKEN_PROBLEM_NONE = 0,         /* 不整合なし（または検査が不整合以外の理由で終わった） */
+    AMARK_TOKEN_PROBLEM_GAP = 1,          /* どのトークンにも覆われないバイトがある */
+    AMARK_TOKEN_PROBLEM_OVERLAP = 2,      /* 同じバイトを 2 つ以上のトークンが覆う */
+    AMARK_TOKEN_PROBLEM_TAB_COLUMNS = 3   /* 部分的なタブの列が合わない */
+} amark_token_problem_t;
 
-typedef struct amark_token_check {
+typedef struct amark_token_report {
     size_t struct_size;
-    amark_token_check_error_t error;
+    amark_token_problem_t problem;
     size_t offset;              /* 最初の不整合のバイトの位置 */
     const amark_node_t *node;   /* 不整合に関わるトークンの所有者（GAP では直前のトークンの所有者。なければ NULL） */
-} amark_token_check_t;
+} amark_token_report_t;
 
+/* 不整合がなければ AMARK_ERROR_NONE、あれば AMARK_ERROR_NOT_LOSSLESS。out_report は NULL 可 */
 AMARK_API amark_error_t amark_document_check_tokens(const amark_document_t *document, amark_source_id_t source,
-                                                    amark_token_check_t *out_result);
+                                                    amark_token_report_t *out_report);
 ```
 
 #### SourceSpan
@@ -1109,6 +1119,7 @@ struct amark_document {
 ### Error Strategy
 - すべての公開の関数は `foundation` の規約に従う。表現できない値の設定、包含の規則の違反、循環、別の文書のノード、型の合わない操作は `AMARK_ERROR_INVALID_ARGUMENT` で、木を変えない。
 - 凍結した構文セットの変更、凍結していない構文セットでの文書の生成は `AMARK_ERROR_INVALID_STATE`。
+- ロスレス性の検証で見つかった不整合は `AMARK_ERROR_NOT_LOSSLESS`（`foundation` の 10.10）で、最初の不整合を報告の構造体に書く（TokenCheck）。
 - 構文セットの所有の受け渡しで、文書が使っていない構文セット、静的な構文セット、2 回目の受け渡しは `AMARK_ERROR_INVALID_ARGUMENT`（所有権は呼び出し側に残る）。
 - サイズの計算（トークンの配列、ソースの追加、リテラルの複製）は `amark_size_add` / `amark_size_mul` で検査し、桁あふれは `AMARK_ERROR_OVERFLOW`。
 - 確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`。複数の確保を伴う操作（一括設定、複製、取り込み、子をまとめた取り込み、凍結）は、確保をすべて先に行ってから木を変える。
@@ -1116,6 +1127,7 @@ struct amark_document {
 ### Error Categories and Responses
 - **利用者の誤り**：NULL の必須引数、範囲外の値、表現できない文字列、型の不一致、構造の規則の違反 → `INVALID_ARGUMENT`。
 - **状態の誤り**：凍結の前後の取り違え → `INVALID_STATE`。
+- **ロスレスでない文書**：トークンの抜け・重なり・タブの列の誤り → `NOT_LOSSLESS`（`amark_document_check_tokens` だけが返す）。
 - **資源の不足**：→ `OUT_OF_MEMORY` / `OVERFLOW`。
 - **規定しない使い方（文書化する）**：解放したノードの使用、構文セットや記述子の寿命の違反（所有を渡した構文セットを呼び出し側が解放する、所有する文書を同じ構文セットを使う他の文書より先に解放する、を含む）、走査中に現在のノードを動かした後の `next`、追跡を無効にした状態での利用者の編集（元の表記が古いまま出力されうる）。
 
@@ -1133,7 +1145,7 @@ struct amark_document {
 - **literal_attr**：NUL・不正な UTF-8 の拒否（5.2）、改行と空行の規則（5.3, 5.4）、LF への正規化と末尾の LF（5.5）、範囲外の属性とラベルの規則（5.6）、型の不一致（2.6）、一括設定の text と softbreak の並び（5.7）、トークンが残ること（5.8）。
 - **edit_tracking**：記録の種類ごとの場面（7.1–7.4）、祖先への伝播（7.5）、同じ値（7.6）、無効のとき（7.7）、未知のビットの規則を文書の注釈と一致させる（7.10）。
 - **token**：種類ごとの検査と不正なトークンの拒否（6.2, 6.8）、CRLF/CR/LF の区別（6.3）、接頭辞の印（6.4）、長さ 0 の遅延継続（6.5）、部分的なタブ（6.6）、順の保持・削除・移動（6.1, 6.7）。
-- **token_check**：手で組み立てたトークンで、`> a\n> b\r\n`（接頭辞と CRLF）、`> a\nb`（遅延継続）、`>\t\tfoo`（部分的なタブ）、`- a\n\n  b`（リストの続きのインデント）、BOM で始まる入力、NUL を含む入力、エスケープと文字参照がすべて OK になること、意図的な抜け・重なり・タブの列の誤りがそれぞれの位置で検出されること（6.9）。
+- **token_check**：手で組み立てたトークンで、`> a\n> b\r\n`（接頭辞と CRLF）、`> a\nb`（遅延継続）、`>\t\tfoo`（部分的なタブ）、`- a\n\n  b`（リストの続きのインデント）、BOM で始まる入力、NUL を含む入力、エスケープと文字参照がすべて `AMARK_ERROR_NONE` になること、意図的な抜け・重なり・タブの列の誤りがそれぞれ `AMARK_ERROR_NOT_LOSSLESS` と期待の種類・位置で検出されること、`out_report` が NULL でも同じコードを返すこと、成功とメモリ不足のときに報告が `NONE` になること（6.9）。
 - **copy_import**：複製が切り離され、記録とトークンを保つこと（4.6）、取り込みで元の文書を解放してもトークンのソースが読めること（4.7）、型のない構文セットへの取り込みの拒否（4.8）。子をまとめた取り込みで、子の順と位置（`before` が NULL と非 NULL）、複数の子が同じソースを参照してもソースが 1 回だけ追加されること、取り込み元の文書を解放した後もトークンのソースが読めること、根を `source_parent` にした文書の全体の取り込み、子のない `source_parent`、記録（親に `CHILDREN`、各子に `RELOCATED`）（4.10）、包含に反する子・型のない子・親の子でない `before` の拒否で何も挿入されないこと（4.11）。
 - **iterator_span**：イベントの並び（3.2）、走査中の text の変更と子の置き換え（3.3）、`reset`（3.4）、ソース上の範囲と行・列（3.5）、トークンなし（3.6）、関連付けたポインタ（3.7）、関係の参照（3.1）。
 - **equal_dump**：トークン・位置・記録を無視すること（9.1）、テキストの正規化（9.2）、ダンプの決定性と例（9.3）、エスケープ（9.4）、トークン・記録・位置の出力（9.5）。

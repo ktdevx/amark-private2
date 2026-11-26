@@ -1086,7 +1086,7 @@ typedef struct amark_test_parse_spec {
     uint32_t dump_flags;                  /* AMARK_DUMP_TOKENS など */
 } amark_test_parse_spec_t;
 
-/* input を一括でパースし、(1) amark_document_check_tokens が OK、(2) amark_tree_check が成功（INTERNAL のときだけ）、
+/* input を一括でパースし、(1) amark_document_check_tokens が AMARK_ERROR_NONE、(2) amark_tree_check が成功（INTERNAL のときだけ）、
    (3) 1 バイトずつ・2 分割・ランダムな区切りの逐次の入力のダンプ（spec->dump_flags）が一括と一致、を確かめる。
    すべて通れば AMARK_ERROR_NONE を返し、一括でパースした文書を *out_document に渡す（呼び出し側が amark_document_destroy で解放する）。
    パースが失敗したらそのエラーコードを、検査が失敗したら入力・失敗した検査・両方のダンプを表示して
