@@ -81,7 +81,8 @@ amark_add_test(msgstr_flow_test SOURCES msgstr_flow_test.c INTERNAL
   LIBRARIES amark_test_tree)
 
 # The out-of-memory sweep of every operation that changes a document.
-amark_add_test(oom_test SOURCES oom_test.c INTERNAL)
+amark_add_test(oom_test SOURCES oom_test.c INTERNAL
+  LIBRARIES amark_test_tree)
 
 # Deep trees (100000 levels) and the complexity counters.
 amark_add_test(scale_test SOURCES scale_test.c INTERNAL)
