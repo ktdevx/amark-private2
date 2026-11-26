@@ -1,0 +1,898 @@
+/* SPDX-License-Identifier: MIT
+ * Copyright (c) The Amark Authors */
+
+/*
+ * Documents and the node core (src/tree/document.c, src/tree/node.c).
+ *
+ * Suite document (1.1, 1.2, 1.3, 1.9, 7.8, 8.7): a new document holds only its
+ * root, uses amark_syntax_set_core() for a NULL syntax set or the frozen set it is
+ * given, rejects a set that is not frozen, starts with edit tracking off and can
+ * switch it; its destruction frees every node (the detached ones too, with their
+ * literals, tokens and type data); two documents used in turn do not interfere;
+ * and the out-of-memory sweep of the creation leaves nothing behind.
+ *
+ * Suite node (2.4, 3.1, 3.7, 4.1, 8.12): amark_node_create makes a detached node of
+ * the document with no relation, rejects the document type, unknown types and
+ * NULL arguments; the queries return "nothing" for NULL; the associated pointer;
+ * the type data (NULL without data, aligned, zero-filled before init); the
+ * function table of an extension type (init, its failure, deinit, can_contain);
+ * amark_node_destroy_subtree frees a deep subtree without recursion; and the
+ * out-of-memory sweep of the creation.
+ */
+#include "tree/syntax_set.h"
+#include "tree/tree.h"
+
+#include <amark/allocator.h>
+#include <amark/document.h>
+#include <amark/error.h>
+#include <amark/extension.h>
+#include <amark/node.h>
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <naos/naos.h>
+
+#include "test_allocator.h"
+
+/* The test allocator, set by the tests that count allocations; static so that no
+ * dangling pointer stays set if a test stops early. */
+static amark_test_allocator_t counting;
+
+NAOS_TEARDOWN(restore)
+{
+    amark_allocator_set(NULL);
+}
+
+/* Sets the counting test allocator and stops the test if that fails (it is then
+ * not set). While it is set, the tests use no NAOS_REQUIRE_*. */
+#define SET_COUNTING() \
+    do { \
+        amark_test_allocator_init(&counting); \
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, \
+                            amark_allocator_set(amark_test_allocator_activate(&counting))); \
+    } while (0)
+
+/* --- Helpers ---------------------------------------------------------------------- */
+
+/* Links child, a detached node, as the last child of parent, through the internal
+ * structure (the structural editing comes with structure_edit.c). Records
+ * nothing. */
+static void link_last(amark_node_t *parent, amark_node_t *child)
+{
+    child->parent = parent;
+    child->prev = parent->last_child;
+    child->next = NULL;
+    if (parent->last_child != NULL)
+    {
+        parent->last_child->next = child;
+    }
+    else
+    {
+        parent->first_child = child;
+    }
+
+    parent->last_child = child;
+}
+
+/* The number of nodes in the ring of document, or SIZE_MAX when a link of the ring
+ * is not symmetric or a node of the ring belongs to another document. */
+static size_t ring_count(const amark_document_t *document)
+{
+    const amark_node_t *node = document->ring;
+    size_t count = 0;
+
+    if (node == NULL)
+    {
+        return 0;
+    }
+
+    do
+    {
+        if ((node->ring_next->ring_prev != node) || (node->document != document))
+        {
+            return SIZE_MAX;
+        }
+
+        count++;
+        node = node->ring_next;
+    } while (node != document->ring);
+
+    return count;
+}
+
+/* Whether node is in the ring of its document. */
+static bool in_ring(const amark_node_t *node)
+{
+    const amark_node_t *current = node->document->ring;
+
+    if (current == NULL)
+    {
+        return false;
+    }
+
+    do
+    {
+        if (current == node)
+        {
+            return true;
+        }
+
+        current = current->ring_next;
+    } while (current != node->document->ring);
+
+    return false;
+}
+
+/* Gives node a literal and two tokens allocated with amark_malloc, as the literal
+ * and token functions will. */
+static bool give_literal_and_tokens(amark_node_t *node, const char *text)
+{
+    size_t length = strlen(text);
+
+    node->literal = amark_malloc(length + 1);
+    node->tokens = amark_malloc(2 * sizeof(amark_token_record_t));
+    if ((node->literal == NULL) || (node->tokens == NULL))
+    {
+        return false;
+    }
+
+    memcpy(node->literal, text, length + 1);
+    node->literal_length = length;
+    memset(node->tokens, 0, 2 * sizeof(amark_token_record_t));
+    node->token_count = 2;
+    node->token_capacity = 2;
+
+    return true;
+}
+
+/* Sets *s to a copy of text allocated with amark_malloc. */
+static bool give_string(amark_builtin_string_t *s, const char *text)
+{
+    size_t length = strlen(text);
+
+    s->text = amark_malloc(length + 1);
+    if (s->text == NULL)
+    {
+        return false;
+    }
+
+    memcpy(s->text, text, length + 1);
+    s->length = length;
+
+    return true;
+}
+
+/* The alignments the type data must have: those of long double and of a pointer. */
+typedef struct long_double_probe
+{
+    char c;
+    long double value;
+} long_double_probe_t;
+
+typedef struct pointer_probe
+{
+    char c;
+    void *value;
+} pointer_probe_t;
+
+/* Whether p has the alignment of long double and of pointers. */
+static bool is_max_aligned(const void *p)
+{
+    return (((uintptr_t)p % offsetof(long_double_probe_t, value)) == 0)
+           && (((uintptr_t)p % offsetof(pointer_probe_t, value)) == 0);
+}
+
+/* --- An extension type ------------------------------------------------------------ */
+
+/* The type data of test.box: a pointer and a long double, which need the
+ * alignment of the type data, and a flag init sets. */
+typedef struct box_data
+{
+    long double number;
+    void *pointer;
+    char *owned;
+    bool initialized;
+} box_data_t;
+
+/* The calls of the function table of test.box, and whether init fails. */
+static size_t box_inits;
+static size_t box_deinits;
+static bool box_init_fails;
+static bool box_init_saw_zeros;
+
+static amark_error_t box_init(amark_node_t *node, void *data)
+{
+    box_data_t *box = data;
+
+    box_inits++;
+    box_init_saw_zeros = (amark_node_data(node) == data) && (box->number == 0.0L)
+                         && (box->pointer == NULL) && (box->owned == NULL) && !box->initialized;
+    if (box_init_fails)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+
+    box->owned = amark_malloc(16);
+    if (box->owned == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+
+    box->initialized = true;
+
+    return AMARK_ERROR_NONE;
+}
+
+static void box_deinit(amark_node_t *node, void *data)
+{
+    box_data_t *box = data;
+
+    (void)node;
+    box_deinits++;
+    amark_free(box->owned);
+    box->owned = NULL;
+}
+
+/* test.box holds only paragraphs, by can_contain, though it accepts nothing. */
+static bool box_can_contain(const amark_node_type_desc_t *self,
+                            const amark_node_type_desc_t *child)
+{
+    (void)self;
+
+    return child == amark_builtin_types[AMARK_NODE_PARAGRAPH];
+}
+
+static const amark_node_type_desc_t box_type = {
+    sizeof(amark_node_type_desc_t), "test.box", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK, 0,
+    AMARK_LITERAL_NONE, sizeof(box_data_t), box_can_contain, NULL, box_init, box_deinit, NULL,
+    NULL, NULL, NULL
+};
+
+static const amark_node_type_desc_t *const test_types[] = { &box_type };
+
+static const amark_extension_t test_extension = {
+    sizeof(amark_extension_t), "test", test_types, 1, NULL, 0, NULL
+};
+
+/* Creates in *out_set a frozen set with test_extension (test.box is 256). */
+static amark_error_t create_test_set(amark_syntax_set_t **out_set)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_error_t err;
+
+    *out_set = NULL;
+    err = amark_syntax_set_create(&set);
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_syntax_set_append(set, &test_extension);
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_syntax_set_freeze(set);
+    }
+
+    if (err != AMARK_ERROR_NONE)
+    {
+        amark_syntax_set_destroy(set);
+        return err;
+    }
+
+    *out_set = set;
+    return AMARK_ERROR_NONE;
+}
+
+/* --- Suite document -------------------------------------------------------------- */
+
+NAOS_TEST(a_new_document_holds_only_its_root)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *root;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    root = amark_document_root(document);
+    NAOS_REQUIRE_NOT_NULL(root);
+
+    NAOS_CHECK_PTR_EQ(amark_syntax_set_core(), amark_document_syntax_set(document));
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_DOCUMENT, amark_node_get_type(root));
+    NAOS_CHECK_STR_EQ("document", amark_node_type_name(root));
+    NAOS_CHECK_PTR_EQ(amark_builtin_types[AMARK_NODE_DOCUMENT], amark_node_desc(root));
+    NAOS_CHECK_PTR_EQ(document, amark_node_document(root));
+    NAOS_CHECK_NULL(amark_node_parent(root));
+    NAOS_CHECK_NULL(amark_node_first_child(root));
+    NAOS_CHECK_NULL(amark_node_last_child(root));
+    NAOS_CHECK_NULL(amark_node_next(root));
+    NAOS_CHECK_NULL(amark_node_previous(root));
+    NAOS_CHECK_UINT_EQ(0, amark_node_edits(root));
+    NAOS_CHECK_UINT_EQ(1, ring_count(document));
+    NAOS_CHECK_FALSE(amark_document_edit_tracking(document));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_document_uses_the_frozen_set_it_is_given)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_node_t *box = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, create_test_set(&set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &document));
+
+    NAOS_CHECK_PTR_EQ(set, amark_document_syntax_set(document));
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_DOCUMENT, amark_node_get_type(amark_document_root(document)));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, 256, &box));
+    NAOS_CHECK_STR_EQ("test.box", amark_node_type_name(box));
+    NAOS_CHECK_PTR_EQ(&box_type, amark_node_desc(box));
+
+    amark_document_destroy(document);
+    amark_syntax_set_destroy(set);
+}
+
+NAOS_TEST(a_set_that_is_not_frozen_is_an_invalid_state)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_syntax_set_create(&set));
+
+    /* Not NULL before the call, to see that a failure sets it to NULL. */
+    document = (amark_document_t *)&document;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_STATE, amark_document_create(set, &document));
+    NAOS_CHECK_NULL(document);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_document_create(NULL, NULL));
+
+    amark_syntax_set_destroy(set);
+}
+
+NAOS_TEST(edit_tracking_starts_off_and_can_be_switched)
+{
+    amark_document_t *document = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+
+    NAOS_CHECK_FALSE(amark_document_edit_tracking(document));
+    amark_document_set_edit_tracking(document, true);
+    NAOS_CHECK_TRUE(amark_document_edit_tracking(document));
+    amark_document_set_edit_tracking(document, false);
+    NAOS_CHECK_FALSE(amark_document_edit_tracking(document));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(null_documents_give_nothing)
+{
+    amark_document_destroy(NULL);
+    amark_document_set_edit_tracking(NULL, true);
+
+    NAOS_CHECK_NULL(amark_document_root(NULL));
+    NAOS_CHECK_NULL(amark_document_syntax_set(NULL));
+    NAOS_CHECK_FALSE(amark_document_edit_tracking(NULL));
+}
+
+NAOS_TEST(destroying_a_document_frees_every_node)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *root = NULL;
+    amark_node_t *nodes[AMARK_BUILTIN_TYPE_COUNT + 1] = { NULL };
+    amark_node_t *loose = NULL;
+    amark_node_t *loose_child = NULL;
+    amark_link_definition_data_t *definition;
+    amark_code_block_data_t *code_block;
+    amark_node_type_t type;
+    bool ok = true;
+    size_t live_after;
+
+    SET_COUNTING();
+
+    /* A node of each type: the blocks under the root, the inlines in a detached
+     * paragraph (with a detached text of its own), and literals, tokens and string
+     * attributes in the type data. */
+    ok = (amark_document_create(NULL, &document) == AMARK_ERROR_NONE);
+    if (ok)
+    {
+        root = amark_document_root(document);
+    }
+
+    for (type = AMARK_NODE_BLOCK_QUOTE; ok && (type <= AMARK_BUILTIN_TYPE_COUNT); type++)
+    {
+        ok = (amark_node_create(document, type, &nodes[type]) == AMARK_ERROR_NONE);
+    }
+
+    ok = ok && (amark_node_create(document, AMARK_NODE_PARAGRAPH, &loose) == AMARK_ERROR_NONE);
+    ok = ok && (amark_node_create(document, AMARK_NODE_TEXT, &loose_child) == AMARK_ERROR_NONE);
+    if (ok)
+    {
+        link_last(root, nodes[AMARK_NODE_PARAGRAPH]);
+        link_last(root, nodes[AMARK_NODE_CODE_BLOCK]);
+        link_last(root, nodes[AMARK_NODE_LINK_DEFINITION]);
+        link_last(nodes[AMARK_NODE_PARAGRAPH], nodes[AMARK_NODE_TEXT]);
+        link_last(nodes[AMARK_NODE_PARAGRAPH], nodes[AMARK_NODE_LINK]);
+        link_last(loose, loose_child);
+        code_block = amark_node_data(nodes[AMARK_NODE_CODE_BLOCK]);
+        definition = amark_node_data(nodes[AMARK_NODE_LINK_DEFINITION]);
+        ok = give_literal_and_tokens(nodes[AMARK_NODE_TEXT], "text")
+             && give_literal_and_tokens(nodes[AMARK_NODE_CODE_BLOCK], "code\n")
+             && give_literal_and_tokens(loose_child, "loose")
+             && give_string(&code_block->info, "c")
+             && give_string(&definition->label, "label")
+             && give_string(&definition->link.destination, "/url")
+             && give_string(&definition->link.title, "title");
+    }
+
+    live_after = counting.live_blocks;
+    amark_document_destroy(document);
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_TRUE(ok);
+    NAOS_CHECK_UINT_GT(live_after, (size_t)AMARK_BUILTIN_TYPE_COUNT + 2);
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+}
+
+NAOS_TEST(destroying_a_document_runs_the_deinit_of_each_node)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_node_t *attached = NULL;
+    amark_node_t *detached = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, create_test_set(&set));
+    box_inits = 0;
+    box_deinits = 0;
+    box_init_fails = false;
+    SET_COUNTING();
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &document));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, 256, &attached));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, 256, &detached));
+    if ((attached != NULL) && (detached != NULL))
+    {
+        link_last(amark_document_root(document), attached);
+    }
+
+    amark_document_destroy(document);
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_UINT_EQ(2, box_inits);
+    NAOS_CHECK_UINT_EQ(2, box_deinits);
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+
+    amark_syntax_set_destroy(set);
+}
+
+NAOS_TEST(two_documents_used_in_turn_do_not_interfere)
+{
+    amark_document_t *a = NULL;
+    amark_document_t *b = NULL;
+    amark_node_t *a_nodes[4] = { NULL };
+    amark_node_t *b_nodes[4] = { NULL };
+    amark_node_t *late = NULL;
+    size_t i;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &a));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &b));
+    amark_document_set_edit_tracking(b, true);
+
+    /* Creations in turn: each node goes to its own document, and only b
+     * records. */
+    for (i = 0; i < 4; i++)
+    {
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                          amark_node_create(a, AMARK_NODE_PARAGRAPH, &a_nodes[i]));
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_create(b, AMARK_NODE_TEXT, &b_nodes[i]));
+        NAOS_CHECK_PTR_EQ(a, amark_node_document(a_nodes[i]));
+        NAOS_CHECK_PTR_EQ(b, amark_node_document(b_nodes[i]));
+        NAOS_CHECK_UINT_EQ(0, amark_node_edits(a_nodes[i]));
+        NAOS_CHECK_UINT_EQ(AMARK_EDIT_CREATED, amark_node_edits(b_nodes[i]));
+    }
+
+    NAOS_CHECK_UINT_EQ(5, ring_count(a));
+    NAOS_CHECK_UINT_EQ(5, ring_count(b));
+    NAOS_CHECK_FALSE(amark_document_edit_tracking(a));
+
+    /* Destroying a leaves b whole and usable. */
+    amark_document_destroy(a);
+    NAOS_CHECK_UINT_EQ(5, ring_count(b));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_create(b, AMARK_NODE_EMPH, &late));
+    NAOS_CHECK_UINT_EQ(6, ring_count(b));
+    NAOS_CHECK_PTR_EQ(b, amark_node_document(late));
+    NAOS_CHECK_PTR_EQ(b, amark_node_document(amark_document_root(b)));
+
+    amark_document_destroy(b);
+}
+
+/* Creates and destroys a document with the core set; a failure must leave
+ * *out_document NULL. */
+static amark_error_t document_create_scenario(void *context)
+{
+    bool *unchanged = context;
+    amark_document_t *document = NULL;
+    amark_error_t err;
+
+    err = amark_document_create(NULL, &document);
+    if ((err != AMARK_ERROR_NONE) && (document != NULL))
+    {
+        *unchanged = false;
+    }
+
+    amark_document_destroy(document);
+
+    return err;
+}
+
+NAOS_TEST(document_creation_passes_the_out_of_memory_sweep)
+{
+    bool unchanged = true;
+
+    AMARK_CHECK_OOM_SWEEP(document_create_scenario, &unchanged);
+    NAOS_CHECK_TRUE(unchanged);
+}
+
+NAOS_SUITE(document,
+    NAOS_SET_TEARDOWN(restore),
+    NAOS_ADD_TEST(a_new_document_holds_only_its_root),
+    NAOS_ADD_TEST(a_document_uses_the_frozen_set_it_is_given),
+    NAOS_ADD_TEST(a_set_that_is_not_frozen_is_an_invalid_state),
+    NAOS_ADD_TEST(edit_tracking_starts_off_and_can_be_switched),
+    NAOS_ADD_TEST(null_documents_give_nothing),
+    NAOS_ADD_TEST(destroying_a_document_frees_every_node),
+    NAOS_ADD_TEST(destroying_a_document_runs_the_deinit_of_each_node),
+    NAOS_ADD_TEST(two_documents_used_in_turn_do_not_interfere),
+    NAOS_ADD_TEST(document_creation_passes_the_out_of_memory_sweep))
+
+/* --- Suite node --------------------------------------------------------------------- */
+
+NAOS_TEST(a_new_node_is_detached_in_its_document)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *node = NULL;
+    amark_node_type_t type;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+
+    for (type = AMARK_NODE_BLOCK_QUOTE; type <= AMARK_BUILTIN_TYPE_COUNT; type++)
+    {
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, type, &node));
+        NAOS_CHECK_UINT_EQ(type, amark_node_get_type(node));
+        NAOS_CHECK_STR_EQ(amark_builtin_types[type]->name, amark_node_type_name(node));
+        NAOS_CHECK_PTR_EQ(amark_builtin_types[type], amark_node_desc(node));
+        NAOS_CHECK_PTR_EQ(document, amark_node_document(node));
+        NAOS_CHECK_NULL(amark_node_parent(node));
+        NAOS_CHECK_NULL(amark_node_first_child(node));
+        NAOS_CHECK_NULL(amark_node_last_child(node));
+        NAOS_CHECK_NULL(amark_node_next(node));
+        NAOS_CHECK_NULL(amark_node_previous(node));
+        NAOS_CHECK_NULL(amark_node_user_data(node));
+        NAOS_CHECK_UINT_EQ(0, amark_node_edits(node));
+        NAOS_CHECK_UINT_EQ(0, node->literal_length);
+        NAOS_CHECK_UINT_EQ(0, node->token_count);
+        NAOS_CHECK_TRUE(in_ring(node));
+    }
+
+    NAOS_CHECK_UINT_EQ(AMARK_BUILTIN_TYPE_COUNT, ring_count(document));
+    NAOS_CHECK_NULL(amark_node_first_child(amark_document_root(document)));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(creation_rejects_the_document_type_and_unknown_types)
+{
+    static const amark_node_type_t rejected[] = {
+        AMARK_NODE_NONE, AMARK_NODE_DOCUMENT, AMARK_BUILTIN_TYPE_COUNT + 1, AMARK_NODE_BUILTIN_LAST,
+        AMARK_NODE_DYNAMIC_FIRST, AMARK_NODE_DYNAMIC_FIRST + 1, UINT32_MAX
+    };
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *core = NULL;
+    amark_document_t *extended = NULL;
+    amark_node_t *node;
+    size_t i;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, create_test_set(&set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &core));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &extended));
+
+    for (i = 0; i < (sizeof(rejected) / sizeof(rejected[0])); i++)
+    {
+        node = (amark_node_t *)&node;
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                          amark_node_create(core, rejected[i], &node));
+        NAOS_CHECK_NULL(node);
+    }
+
+    /* 256 exists only in the extended set. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_create(extended, AMARK_NODE_DOCUMENT, &node));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_node_create(extended, 257, &node));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_create(extended, 256, &node));
+
+    node = (amark_node_t *)&node;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_create(NULL, AMARK_NODE_PARAGRAPH, &node));
+    NAOS_CHECK_NULL(node);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_create(core, AMARK_NODE_PARAGRAPH, NULL));
+    NAOS_CHECK_UINT_EQ(1, ring_count(core));
+    NAOS_CHECK_UINT_EQ(2, ring_count(extended));
+
+    amark_document_destroy(extended);
+    amark_document_destroy(core);
+    amark_syntax_set_destroy(set);
+}
+
+NAOS_TEST(null_nodes_give_nothing)
+{
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_NONE, amark_node_get_type(NULL));
+    NAOS_CHECK_STR_EQ("", amark_node_type_name(NULL));
+    NAOS_CHECK_NULL(amark_node_desc(NULL));
+    NAOS_CHECK_NULL(amark_node_document(NULL));
+    NAOS_CHECK_NULL(amark_node_parent(NULL));
+    NAOS_CHECK_NULL(amark_node_first_child(NULL));
+    NAOS_CHECK_NULL(amark_node_last_child(NULL));
+    NAOS_CHECK_NULL(amark_node_next(NULL));
+    NAOS_CHECK_NULL(amark_node_previous(NULL));
+    NAOS_CHECK_FALSE(amark_node_is_block(NULL));
+    NAOS_CHECK_FALSE(amark_node_is_inline(NULL));
+    NAOS_CHECK_FALSE(amark_node_can_have_children(NULL));
+    NAOS_CHECK_FALSE(amark_node_can_contain(NULL, AMARK_NODE_PARAGRAPH));
+    NAOS_CHECK_NULL(amark_node_user_data(NULL));
+    NAOS_CHECK_NULL(amark_node_data(NULL));
+    NAOS_CHECK_NULL(amark_node_data_const(NULL));
+    NAOS_CHECK_UINT_EQ(0, amark_node_edits(NULL));
+
+    amark_node_set_user_data(NULL, &counting);
+    amark_node_mark_edited(NULL);
+}
+
+NAOS_TEST(the_relations_follow_the_links)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *root;
+    amark_node_t *paragraph = NULL;
+    amark_node_t *first = NULL;
+    amark_node_t *second = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    root = amark_document_root(document);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &first));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &second));
+    link_last(root, paragraph);
+    link_last(paragraph, first);
+    link_last(paragraph, second);
+
+    NAOS_CHECK_PTR_EQ(paragraph, amark_node_first_child(root));
+    NAOS_CHECK_PTR_EQ(paragraph, amark_node_last_child(root));
+    NAOS_CHECK_PTR_EQ(root, amark_node_parent(paragraph));
+    NAOS_CHECK_PTR_EQ(first, amark_node_first_child(paragraph));
+    NAOS_CHECK_PTR_EQ(second, amark_node_last_child(paragraph));
+    NAOS_CHECK_PTR_EQ(second, amark_node_next(first));
+    NAOS_CHECK_PTR_EQ(first, amark_node_previous(second));
+    NAOS_CHECK_NULL(amark_node_previous(first));
+    NAOS_CHECK_NULL(amark_node_next(second));
+    NAOS_CHECK_PTR_EQ(paragraph, amark_node_parent(second));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_associated_pointer_is_kept_and_records_nothing)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *node = NULL;
+    int value = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &node));
+    amark_document_set_edit_tracking(document, true);
+
+    amark_node_set_user_data(node, &value);
+    NAOS_CHECK_PTR_EQ(&value, amark_node_user_data(node));
+    NAOS_CHECK_UINT_EQ(0, amark_node_edits(node));
+    amark_node_set_user_data(amark_document_root(document), node);
+    NAOS_CHECK_PTR_EQ(node, amark_node_user_data(amark_document_root(document)));
+    NAOS_CHECK_UINT_EQ(0, amark_node_edits(amark_document_root(document)));
+    amark_node_set_user_data(node, NULL);
+    NAOS_CHECK_NULL(amark_node_user_data(node));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(the_type_data_is_null_without_data_and_aligned_with_it)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *node = NULL;
+    amark_node_type_t type;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_CHECK_NULL(amark_node_data(amark_document_root(document)));
+
+    for (type = AMARK_NODE_BLOCK_QUOTE; type <= AMARK_BUILTIN_TYPE_COUNT; type++)
+    {
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, type, &node));
+        if (amark_builtin_types[type]->data_size == 0)
+        {
+            NAOS_CHECK_NULL(amark_node_data(node));
+            NAOS_CHECK_NULL(amark_node_data_const(node));
+        }
+        else
+        {
+            NAOS_CHECK_NOT_NULL(amark_node_data(node));
+            NAOS_CHECK_PTR_EQ(amark_node_data(node), amark_node_data_const(node));
+            /* After the header, at the alignment of long double and pointers. */
+            NAOS_CHECK_TRUE((const char *)amark_node_data(node)
+                            >= ((const char *)node + sizeof(*node)));
+            NAOS_CHECK_TRUE(is_max_aligned(amark_node_data(node)));
+        }
+    }
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(an_extension_type_gets_its_function_table)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_node_t *box = NULL;
+    amark_node_t *other = NULL;
+    box_data_t *data;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, create_test_set(&set));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(set, &document));
+    box_inits = 0;
+    box_deinits = 0;
+    box_init_fails = false;
+    box_init_saw_zeros = false;
+
+    /* init sees the zero-filled data, at the place amark_node_data gives. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, 256, &box));
+    data = amark_node_data(box);
+    NAOS_REQUIRE_NOT_NULL(data);
+    NAOS_CHECK_UINT_EQ(1, box_inits);
+    NAOS_CHECK_TRUE(box_init_saw_zeros);
+    NAOS_CHECK_TRUE(data->initialized);
+    NAOS_CHECK_TRUE(is_max_aligned(data));
+    data->pointer = &data;
+    NAOS_CHECK_PTR_EQ(&data, ((const box_data_t *)amark_node_data_const(box))->pointer);
+
+    /* can_contain decides alone: test.box accepts nothing but holds paragraphs. */
+    NAOS_CHECK_TRUE(amark_node_is_block(box));
+    NAOS_CHECK_FALSE(amark_node_is_inline(box));
+    NAOS_CHECK_TRUE(amark_node_can_have_children(box));
+    NAOS_CHECK_TRUE(amark_node_can_contain(box, AMARK_NODE_PARAGRAPH));
+    NAOS_CHECK_FALSE(amark_node_can_contain(box, AMARK_NODE_HEADING));
+    NAOS_CHECK_FALSE(amark_node_can_contain(box, 256));
+    NAOS_CHECK_FALSE(amark_node_can_contain(box, 257));
+    /* The root accepts blocks, test.box among them. */
+    NAOS_CHECK_TRUE(amark_node_can_contain(amark_document_root(document), 256));
+
+    /* A failing init: the error, no node and nothing left. */
+    box_init_fails = true;
+    other = (amark_node_t *)&other;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_OUT_OF_MEMORY, amark_node_create(document, 256, &other));
+    NAOS_CHECK_NULL(other);
+    NAOS_CHECK_UINT_EQ(2, box_inits);
+    NAOS_CHECK_UINT_EQ(0, box_deinits);
+    NAOS_CHECK_UINT_EQ(2, ring_count(document));
+    box_init_fails = false;
+
+    amark_document_destroy(document);
+    NAOS_CHECK_UINT_EQ(1, box_deinits);
+
+    amark_syntax_set_destroy(set);
+}
+
+NAOS_TEST(a_deep_detached_subtree_is_destroyed_without_recursion)
+{
+    enum
+    {
+        DEPTH = 100000
+    };
+    amark_document_t *document = NULL;
+    amark_node_t *top = NULL;
+    amark_node_t *bottom = NULL;
+    amark_node_t *child = NULL;
+    amark_node_t *kept = NULL;
+    bool ok;
+    size_t i;
+
+    SET_COUNTING();
+
+    /* A chain of DEPTH block quotes, each also with a text sibling of the next,
+     * and a node outside the subtree. */
+    ok = (amark_document_create(NULL, &document) == AMARK_ERROR_NONE)
+         && (amark_node_create(document, AMARK_NODE_PARAGRAPH, &kept) == AMARK_ERROR_NONE)
+         && (amark_node_create(document, AMARK_NODE_BLOCK_QUOTE, &top) == AMARK_ERROR_NONE);
+    bottom = top;
+    for (i = 1; ok && (i < DEPTH); i++)
+    {
+        ok = (amark_node_create(document, AMARK_NODE_BLOCK_QUOTE, &child) == AMARK_ERROR_NONE);
+        if (ok)
+        {
+            link_last(bottom, child);
+            ok = (amark_node_create(document, AMARK_NODE_THEMATIC_BREAK, &child)
+                  == AMARK_ERROR_NONE);
+        }
+
+        if (ok)
+        {
+            link_last(bottom, child);
+            bottom = bottom->first_child;
+        }
+    }
+
+    if (ok)
+    {
+        amark_node_destroy_subtree(top);
+    }
+
+    amark_allocator_set(NULL);
+
+    NAOS_REQUIRE_TRUE(ok);
+    NAOS_CHECK_UINT_EQ(2, ring_count(document));
+    NAOS_CHECK_TRUE(in_ring(kept));
+    NAOS_CHECK_TRUE(in_ring(amark_document_root(document)));
+    /* The document and its 2 nodes. */
+    NAOS_CHECK_UINT_EQ(3, counting.live_blocks);
+
+    amark_allocator_set(amark_test_allocator_activate(&counting));
+    amark_document_destroy(document);
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+}
+
+/* Creates a document, then a node of each built-in type but document; a failure
+ * must leave *out_node NULL and the ring as before. */
+static amark_error_t node_create_scenario(void *context)
+{
+    bool *unchanged = context;
+    amark_document_t *document = NULL;
+    amark_node_t *node;
+    amark_node_type_t type;
+    amark_error_t err;
+
+    err = amark_document_create(NULL, &document);
+    for (type = AMARK_NODE_BLOCK_QUOTE;
+         (err == AMARK_ERROR_NONE) && (type <= AMARK_BUILTIN_TYPE_COUNT); type++)
+    {
+        node = (amark_node_t *)&node;
+        err = amark_node_create(document, type, &node);
+        if ((err != AMARK_ERROR_NONE)
+            && ((node != NULL) || (ring_count(document) != (size_t)(type - 1))))
+        {
+            *unchanged = false;
+        }
+    }
+
+    amark_document_destroy(document);
+
+    return err;
+}
+
+NAOS_TEST(node_creation_passes_the_out_of_memory_sweep)
+{
+    bool unchanged = true;
+
+    AMARK_CHECK_OOM_SWEEP(node_create_scenario, &unchanged);
+    NAOS_CHECK_TRUE(unchanged);
+}
+
+NAOS_SUITE(node,
+    NAOS_SET_TEARDOWN(restore),
+    NAOS_ADD_TEST(a_new_node_is_detached_in_its_document),
+    NAOS_ADD_TEST(creation_rejects_the_document_type_and_unknown_types),
+    NAOS_ADD_TEST(null_nodes_give_nothing),
+    NAOS_ADD_TEST(the_relations_follow_the_links),
+    NAOS_ADD_TEST(the_associated_pointer_is_kept_and_records_nothing),
+    NAOS_ADD_TEST(the_type_data_is_null_without_data_and_aligned_with_it),
+    NAOS_ADD_TEST(an_extension_type_gets_its_function_table),
+    NAOS_ADD_TEST(a_deep_detached_subtree_is_destroyed_without_recursion),
+    NAOS_ADD_TEST(node_creation_passes_the_out_of_memory_sweep))
+
+NAOS_MAIN(
+    NAOS_ADD_SUITE(document),
+    NAOS_ADD_SUITE(node)
+)

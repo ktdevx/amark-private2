@@ -11,11 +11,14 @@
  * order and no slot, the function tables are the expected ones, the defaults of
  * the type data, the comparison of list (start only when ordered), the copy,
  * comparison and release of the string attributes through the global allocator
- * (with the out-of-memory sweep of the copies), and the literal check of code.
+ * (with the out-of-memory sweep of the copies), the literal check of code, and the
+ * nodes created in a document (4.1): their level, leaves, containment and default
+ * type data.
  */
 #include "tree/syntax_set.h"
 
 #include <amark/allocator.h>
+#include <amark/document.h>
 #include <amark/error.h>
 #include <amark/extension.h>
 #include <amark/node.h>
@@ -347,6 +350,93 @@ NAOS_TEST(zero_filled_strings_are_empty_and_release_nothing)
     }
 }
 
+/* --- Created nodes ----------------------------------------------------------------- */
+
+/* Whether the string attributes of the type data of node (a type with strings) are
+ * all "" (NULL, length 0). */
+static bool strings_are_empty(const amark_node_t *node)
+{
+    const string_data_t *data = amark_node_data_const(node);
+
+    switch (amark_node_get_type(node))
+    {
+    case AMARK_NODE_CODE_BLOCK:
+        return (data->code_block.info.text == NULL) && (data->code_block.info.length == 0);
+    case AMARK_NODE_LINK:
+    case AMARK_NODE_IMAGE:
+        return (data->link.destination.text == NULL) && (data->link.destination.length == 0)
+               && (data->link.title.text == NULL) && (data->link.title.length == 0);
+    case AMARK_NODE_LINK_DEFINITION:
+        return (data->link_definition.link.destination.text == NULL)
+               && (data->link_definition.link.destination.length == 0)
+               && (data->link_definition.link.title.text == NULL)
+               && (data->link_definition.link.title.length == 0)
+               && (data->link_definition.label.text == NULL)
+               && (data->link_definition.label.length == 0);
+    default:
+        return false;
+    }
+}
+
+NAOS_TEST(created_nodes_have_the_defaults_and_the_rules_of_their_row)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *nodes[AMARK_BUILTIN_TYPE_COUNT + 1] = { NULL };
+    const amark_list_data_t *list;
+    const amark_heading_data_t *heading;
+    size_t i;
+    size_t j;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    nodes[AMARK_NODE_DOCUMENT] = amark_document_root(document);
+    for (i = 1; i < EXPECTED_COUNT; i++)
+    {
+        NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                            amark_node_create(document, expected_types[i].id,
+                                              &nodes[expected_types[i].id]));
+    }
+
+    /* The level, the leaves and the containment of each row (2.4). */
+    for (i = 0; i < EXPECTED_COUNT; i++)
+    {
+        const expected_type_t *row = &expected_types[i];
+        const amark_node_t *node = nodes[row->id];
+
+        NAOS_CHECK_STR_EQ(row->name, amark_node_type_name(node));
+        NAOS_CHECK_INT_EQ(row->level == AMARK_NODE_LEVEL_BLOCK, amark_node_is_block(node));
+        NAOS_CHECK_INT_EQ(row->level == AMARK_NODE_LEVEL_INLINE, amark_node_is_inline(node));
+        NAOS_CHECK_INT_EQ(row->accepts != 0, amark_node_can_have_children(node));
+        for (j = 0; j < EXPECTED_COUNT; j++)
+        {
+            NAOS_CHECK_INT_EQ((row->accepts & expected_types[j].provides) != 0,
+                              amark_node_can_contain(node, expected_types[j].id));
+        }
+
+        NAOS_CHECK_FALSE(amark_node_can_contain(node, AMARK_NODE_NONE));
+        NAOS_CHECK_FALSE(amark_node_can_contain(node, AMARK_NODE_DYNAMIC_FIRST));
+        if (row->data_size == 0)
+        {
+            NAOS_CHECK_NULL(amark_node_data_const(node));
+        }
+        else if (has_strings(row->id))
+        {
+            NAOS_CHECK_TRUE(strings_are_empty(node));
+        }
+    }
+
+    /* The defaults of list and heading (4.1). */
+    list = amark_node_data_const(nodes[AMARK_NODE_LIST]);
+    heading = amark_node_data_const(nodes[AMARK_NODE_HEADING]);
+    NAOS_REQUIRE_NOT_NULL(list);
+    NAOS_REQUIRE_NOT_NULL(heading);
+    NAOS_CHECK_INT_EQ(AMARK_LIST_BULLET, list->type);
+    NAOS_CHECK_INT_EQ(1, list->start);
+    NAOS_CHECK_TRUE(list->tight);
+    NAOS_CHECK_INT_EQ(1, heading->level);
+
+    amark_document_destroy(document);
+}
+
 /* --- list equal ------------------------------------------------------------------ */
 
 NAOS_TEST(list_equal_compares_start_only_when_ordered)
@@ -614,6 +704,7 @@ NAOS_SUITE(builtin_types,
     NAOS_ADD_TEST(list_defaults_to_a_tight_bullet_list_from_one),
     NAOS_ADD_TEST(heading_defaults_to_level_one),
     NAOS_ADD_TEST(zero_filled_strings_are_empty_and_release_nothing),
+    NAOS_ADD_TEST(created_nodes_have_the_defaults_and_the_rules_of_their_row),
     NAOS_ADD_TEST(list_equal_compares_start_only_when_ordered),
     NAOS_ADD_TEST(link_definition_copy_equal_and_deinit),
     NAOS_ADD_TEST(string_equal_compares_each_attribute),

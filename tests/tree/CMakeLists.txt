@@ -14,3 +14,12 @@ amark_add_test(builtin_types_test SOURCES builtin_types_test.c INTERNAL)
 # Syntax sets: the order of the extensions, the checks, freezing, the lookups, the
 # slot index and the static core set (reads the internal struct and tables).
 amark_add_test(syntax_set_test SOURCES syntax_set_test.c INTERNAL)
+
+# Documents and the node core: creation and destruction (every node, the detached
+# ones too), the queries, the type data, the subtree destruction (links nodes and
+# reads the ring through the internal structs).
+amark_add_test(document_test SOURCES document_test.c INTERNAL)
+
+# Edit records and their propagation (links nodes and reads the counter through the
+# internal structs).
+amark_add_test(edit_tracking_test SOURCES edit_tracking_test.c INTERNAL)

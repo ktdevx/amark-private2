@@ -28,7 +28,7 @@
   - _Requirements: 1.2, 1.9, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 8.10, 8.11, 8.13_
 
 - [ ] 3. 文書とノードの中核
-- [ ] 3.1 編集の記録の仕組み、ノードの中核、文書の生成と解放を実装する
+- [x] 3.1 編集の記録の仕組み、ノードの中核、文書の生成と解放を実装する
   - 編集の記録の関数を、追跡が無効なら何もせず、有効ならビットを付けて「子孫の変更」を持つ祖先で止まるまで伝播する形で作り、拡張の設定関数が使う「内容の変更」の通知を公開する
   - ノードをヘッダと型のデータの 1 回の確保で作り、データを 0 で埋めて初期化の関数を呼び、文書の全ノードの環に加え、追跡中なら「新規」を記録する。document 型の生成は拒否する
   - 切り離された部分木を後順に反復で解放する内部関数（型の解放の関数、リテラル、トークン、環からの除去）を作る
@@ -191,3 +191,5 @@
 - 2.1: 組み込みの型の `dump` は NULL。組み込みの属性は dump.c（6.2）が、syntax_set.h の型のデータの配置（`amark_builtin_string_t`（NULL は ""）、`amark_list_data_t`、`amark_heading_data_t`、`amark_code_block_data_t`、`amark_link_data_t`、`amark_link_definition_data_t`（先頭が link の配置））を読んで設計の順に書く。attr.c（4.4）も同じ配置を使う
 - 2.1: 組み込みの `copy` は `dst_data` を上書きし、失敗時は確保したものを解放してすべての文字列を "" に戻す（その後の `deinit` は安全）。heading（`equal` なし）と list（`copy` なし）はバイトの比較・複製に任せる
 - 2.2: 名前の規則 `[a-z0-9][a-z0-9_.-]*` は拡張の型の名前にも適用する。凍結済みの構文セットの凍結は INVALID_STATE。`amark_syntax_slot_entry_t` に整列の第 2 キーの `order` を加えた。静的な core の構文セット（`is_static`）は const のデータだけで、`destroy` は何も書かない。`amark_syntax_set_node_type_of` は線形の探索（定数時間は `amark_syntax_set_desc` だけ）
+- 3.1: 包含の規則（`can_contain` の上書きを優先し、なければ `accepts & provides`）は、依存の方向のため node.c の公開の `amark_node_can_contain`（型の識別子）と structure_edit.c の `amark_node_allows_child`（記述子、4.1）の 2 か所に書く。4.1 で、組み込みのすべての型の組と上書きする拡張の型で両者の結果が一致するテストを置く。3.3 の検査器と 5.2/5.5 の取り込みは `amark_node_allows_child` を使う
+- 3.1: `amark_document_destroy` は環のノードから根の方向へたどった先の部分木を丸ごと解放する（全体で線形）。解放の順（ノード、ソース、`owned_syntax`、文書）はすでに実装済みで、3.4 は `amark_document_take_syntax_set` を加えるだけでよい
