@@ -270,6 +270,34 @@ AMARK_API amark_error_t amark_node_import_children(amark_node_t *target_parent,
                                                    amark_node_t *before,
                                                    const amark_node_t *source_parent);
 
+/* ---- Comparison (13.1-13.3) ------------------------------------------------------ */
+
+/* Includes the styles in the comparison (13.2). */
+#define AMARK_EQUAL_STYLE 0x01u
+/* Compares adjacent text nodes as one text and ignores empty text nodes (13.3). */
+#define AMARK_EQUAL_NORMALIZE_TEXT 0x02u
+
+/*
+ * Whether the subtrees of a and b have the same meaning (13.1): the same type
+ * (by name), the same value facets as amark_node_get reads them, the same
+ * extension data (the equal function of the type, or the bytes when the type
+ * has none; 12.13) and, in order, equal children. a and b may belong to
+ * different documents. The styles, the layout, the spelling, the source
+ * positions and the user pointers are ignored. The destination and the title
+ * of a link or an image of a reference form are compared as each one resolves
+ * in its own document, and their label is not compared. flags:
+ *   - AMARK_EQUAL_STYLE also compares the style facets (UNSET included), such
+ *     as the form of a link or an image, and the label of a link or an image
+ *     (13.2);
+ *   - AMARK_EQUAL_NORMALIZE_TEXT compares each run of adjacent text siblings as
+ *     the concatenation of their literals, and ignores a run whose literals
+ *     are all empty (13.3).
+ * The subtrees are walked without recursion. Reading a value can allocate (a
+ * derived value, the update of the definition index); when it fails, the
+ * result is false. false also for a NULL argument.
+ */
+AMARK_API bool amark_node_equal(const amark_node_t *a, const amark_node_t *b, uint32_t flags);
+
 /* ---- User pointers and extension data (4.5) ------------------------------------ */
 
 /* The pointer the application associated with node (NULL until set, and for a

@@ -238,6 +238,7 @@ NAOS_TEST(structural_edit_functions_link)
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import(document, c, &b));
     NAOS_REQUIRE_NOT_NULL(b);
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_import_children(b, NULL, c));
+    NAOS_CHECK_TRUE(amark_node_equal(c, b, AMARK_EQUAL_STYLE | AMARK_EQUAL_NORMALIZE_TEXT));
     amark_document_destroy(document);
 }
 
