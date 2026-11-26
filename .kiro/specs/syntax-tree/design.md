@@ -495,7 +495,7 @@ AMARK_API const amark_slot_t *amark_syntax_set_slot_at(const amark_syntax_set_t 
 | 18 | link | INLINE | INLINE | INLINE | NONE | destination、title（""） |
 | 19 | image | INLINE | INLINE | INLINE | NONE | destination、title（""） |
 
-- 文字列の属性を持つ型は、`deinit` / `copy` / `equal` / `dump` の関数表で、`amark_malloc` などで確保した文字列を管理する。`equal` は list の start を type が ordered のときだけ比べる。
+- 文字列の属性を持つ型は、`deinit` / `copy` / `equal` の関数表で、`amark_malloc` などで確保した文字列を管理する。組み込みの属性は Dump が属性の順に従って書くため、組み込みの型は `dump` を持たない（NULL）。`equal` は list の start を type が ordered のときだけ比べる。
 - `document` 型のノードは文書の生成時に 1 つだけ作る。`amark_node_create` で document を指定すると `AMARK_ERROR_INVALID_ARGUMENT`。
 
 **Contracts**: Service [x]

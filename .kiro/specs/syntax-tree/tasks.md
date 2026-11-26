@@ -10,9 +10,9 @@
   - _Requirements: 10.1, 10.2_
 
 - [ ] 2. 拡張のレジストリ
-- [ ] 2.1 組み込みのノード型の記述子と、それをまとめた core の拡張を定義する
+- [x] 2.1 組み込みのノード型の記述子と、それをまとめた core の拡張を定義する
   - 19 の型（リンク参照定義を含む）の記述子を、設計の表どおりの識別子・名前・ブロック/インライン・分類・受け入れる分類・リテラルの方式・型のデータで定義する
-  - 文字列の属性を持つ型（code_block、link、image、link_definition）に、公開の確保の関数（グローバルのアロケータ）で文字列を管理する解放・複製・比較・ダンプの関数表を与え、list の比較では開始番号を順序付きのときだけ比べる
+  - 文字列の属性を持つ型（code_block、link、image、link_definition）に、公開の確保の関数（グローバルのアロケータ）で文字列を管理する解放・複製・比較の関数表を与え（組み込みの属性のダンプは dump.c が書くので、組み込みの型は `dump` を持たない）、list の比較では開始番号を順序付きのときだけ比べる
   - code の空のリテラルを拒否するリテラルの検査を与える
   - 19 の記述子を識別子の順に持ち、スロットを持たない core の拡張を、拡張と同じ記述子の形式で定義する
   - 内部用のテストで、表の各行（名前、識別子、分類、葉かどうか、リテラルの方式）が設計の表と一致することを確かめられる
@@ -188,3 +188,5 @@
 ## Implementation Notes
 - 1.1: 設計にない内部の名前として、`amark_node_create_with_desc`（tree.h。document.c が根を作るのと、複製・取り込みで使う）、`amark_core_extension` と `AMARK_BUILTIN_TYPE_COUNT`（19u）、識別子で添字にするポインタの配列 `amark_builtin_types[]`（`[0]` は NULL。core の `node_types` は `&amark_builtin_types[1]`）を宣言した。`struct amark_syntax_set` の配列は const の要素を指し、ヒープの構文セットは realloc/free のときにキャストする
 - 1.1: `tests/headers/cxx_include_test.cpp` はまだ新しい 6 つのヘッダの関数を呼んでいない（未実装でリンクできないため）。7.5 で各ヘッダの関数の呼び出しを加える
+- 2.1: 組み込みの型の `dump` は NULL。組み込みの属性は dump.c（6.2）が、syntax_set.h の型のデータの配置（`amark_builtin_string_t`（NULL は ""）、`amark_list_data_t`、`amark_heading_data_t`、`amark_code_block_data_t`、`amark_link_data_t`、`amark_link_definition_data_t`（先頭が link の配置））を読んで設計の順に書く。attr.c（4.4）も同じ配置を使う
+- 2.1: 組み込みの `copy` は `dst_data` を上書きし、失敗時は確保したものを解放してすべての文字列を "" に戻す（その後の `deinit` は安全）。heading（`equal` なし）と list（`copy` なし）はバイトの比較・複製に任せる

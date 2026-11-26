@@ -7,3 +7,6 @@
 # AMARK_BUILD_TESTS is off, and define nothing here that depends on Naos.
 # Tests that include the internal headers of src/tree/ (tree/tree.h,
 # tree/syntax_set.h) use INTERNAL.
+
+# The descriptors of the built-in node types and amark.core (internal tables).
+amark_add_test(builtin_types_test SOURCES builtin_types_test.c INTERNAL)

@@ -73,6 +73,56 @@ extern const amark_node_type_desc_t *const amark_builtin_types[AMARK_BUILTIN_TYP
  * Defined in tree/builtin_types.c. */
 extern const amark_extension_t amark_core_extension;
 
+/*
+ * The type data of the built-in types that have attributes. The function tables
+ * of tree/builtin_types.c manage them; tree/attr.c gets and sets the attributes,
+ * and tree/dump.c writes them, through these layouts.
+ */
+
+/* A string attribute: NUL-terminated text allocated with amark_malloc, owned by the
+ * node, or NULL for "" (length 0). */
+typedef struct amark_builtin_string
+{
+    char *text;
+    size_t length;
+} amark_builtin_string_t;
+
+/* list: the type (AMARK_LIST_BULLET or AMARK_LIST_ORDERED), the start number (used
+ * only when ordered) and the tightness. Default: bullet, 1, true. */
+typedef struct amark_list_data
+{
+    amark_list_type_t type;
+    long start;
+    bool tight;
+} amark_list_data_t;
+
+/* heading: the level, 1-6. Default: 1. */
+typedef struct amark_heading_data
+{
+    int level;
+} amark_heading_data_t;
+
+/* code_block: the info string. Default: "". */
+typedef struct amark_code_block_data
+{
+    amark_builtin_string_t info;
+} amark_code_block_data_t;
+
+/* link and image: the destination and the title. Default: "", "". */
+typedef struct amark_link_data
+{
+    amark_builtin_string_t destination;
+    amark_builtin_string_t title;
+} amark_link_data_t;
+
+/* link_definition: the destination and the title (the layout of amark_link_data_t,
+ * first) and the label. Default: "", "", "". */
+typedef struct amark_link_definition_data
+{
+    amark_link_data_t link;
+    amark_builtin_string_t label;
+} amark_link_definition_data_t;
+
 /* Returns the descriptor of type in the frozen set, in constant time, or NULL for
  * an unknown type. */
 const amark_node_type_desc_t *amark_syntax_set_desc(const amark_syntax_set_t *set,
