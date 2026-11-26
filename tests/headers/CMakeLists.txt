@@ -14,8 +14,8 @@
 #
 # cxx_include_test (only when a C++ compiler is available, check_language(CXX)):
 #   a C++11 Naos test, cxx_include_test.cpp, that includes only <amark/amark.h> and
-#   calls a function of every public header, linked with amark (static or shared as
-#   configured), so the functions must link with their C names. The same generated
+#   calls a function of every public header that declares one, linked with amark
+#   (static or shared as configured), so the functions must link with their C names. The same generated
 #   per-header sources are also compiled into it as C++, so that each header
 #   compiles on its own as C++ as well. Without a C++ compiler it is not built and
 #   a status message says so.

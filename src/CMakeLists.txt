@@ -29,20 +29,24 @@ target_sources(amark_objects PRIVATE
   base/utf8.c
   base/unicode.c
   base/buffer.c
-  # syntax-tree, in the dependency order of its design (a file calls no function
-  # of the files after it).
+  base/entity.c
+  # syntax-tree, in the order of the File Structure Plan of its design.
+  tree/registry.c
   tree/builtin_types.c
-  tree/syntax_set.c
-  tree/edit_tracking.c
-  tree/node.c
   tree/document.c
-  tree/token.c
-  tree/structure_edit.c
-  tree/literal.c
-  tree/attr.c
+  tree/line_table.c
+  tree/node.c
+  tree/structure.c
+  tree/facet.c
+  tree/derive.c
+  tree/layout.c
+  tree/content.c
+  tree/label.c
+  tree/def_index.c
   tree/copy_import.c
-  tree/token_check.c
-  tree/span.c
+  tree/position.c
+  tree/lossless.c
+  tree/verbatim.c
   tree/iterator.c
   tree/equal.c
   tree/dump.c

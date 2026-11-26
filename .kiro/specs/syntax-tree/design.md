@@ -201,7 +201,7 @@ tools/gen_entity_table.py         # 新規：entities.json から entity_tables.
 ### Modified Files
 - `src/CMakeLists.txt` — `src/tree/` と `src/base/` のソースの一覧を新しいファイルにする
 - `tests/tree/CMakeLists.txt`、`tests/base/CMakeLists.txt` — テストの登録を新しいファイルにする
-- `cmake/scripts/check_public_headers.cmake` — 正規の順を、foundation の組 `… utf8.h unicode.h entity.h version.h` と木の組 `node.h document.h value.h spelling.h iterator.h dump.h extension.h` にする（`token.h` を除く）
+- `cmake/scripts/check_public_headers.cmake` — 正規の順を、foundation の組 `… utf8.h unicode.h entity.h`（`entity.h` を `unicode.h` の後に入れ、ほかの位置は変えない） と木の組 `node.h document.h value.h spelling.h iterator.h dump.h extension.h` にする（`token.h` を除く）
 - `include/amark/amark.h` — 上の順で含める
 - `tests/headers/cxx_include_test.cpp` — 新しい公開関数を呼ぶ形にする（旧ヘッダの関数を除く）
 - `fuzz/CMakeLists.txt`、`fuzz/corpus/tree_edit/` — 新しい操作列の形式に合わせてコーパスを作り直す

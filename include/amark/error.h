@@ -54,10 +54,11 @@
  *                                 requested output format without changing its
  *                                 meaning (Markdown output, for example). The
  *                                 functions that return it document when.
- *   AMARK_ERROR_NOT_LOSSLESS      The syntax tokens of a document do not cover
- *                                 its source exactly once (a gap, an overlap or
- *                                 a tab split into wrong columns). The functions
- *                                 that return it document when.
+ *   AMARK_ERROR_NOT_LOSSLESS      The lossless verification of a document found
+ *                                 that its tree does not reproduce its source
+ *                                 exactly (a gap, an overlap or a character
+ *                                 split). The functions that return it document
+ *                                 when.
  */
 #define AMARK_ERROR_LIST(X)                             \
     X(AMARK_ERROR_NONE, "no error")                     \

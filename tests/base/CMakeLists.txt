@@ -17,6 +17,12 @@ amark_add_test(utf8_test SOURCES utf8_test.c)
 
 amark_add_test(unicode_test SOURCES unicode_test.c)
 
+# The Unicode case fold (amark_unicode_case_fold, unicode.h).
+amark_add_test(case_fold_test SOURCES case_fold_test.c)
+
+# The decoding of character references (entity.h).
+amark_add_test(entity_test SOURCES entity_test.c)
+
 # The public API (amark), and the embedding functions of the internal definition
 # (amark_internal).
 amark_add_test(buffer_test SOURCES buffer_test.c)
