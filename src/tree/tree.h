@@ -91,10 +91,27 @@ amark_error_t amark_syntax_set_require_frozen(const amark_syntax_set_t *set);
 
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
+/* The states of the storage of a facet (amark_tree_facet_t.state). */
+/* No value is stored: the getter returns the default value of a value facet
+ * (or, later, the derived value) and UNSET for a style. */
+#define AMARK_TREE_FACET_NONE 0u
+/* A value set by an edit (amark_node_set_*): for an OVERRIDABLE facet, the
+ * override. */
+#define AMARK_TREE_FACET_SET 1u
+/* A value recorded by a parser or an extension (amark_node_record_*). */
+#define AMARK_TREE_FACET_RECORDED 2u
+
 /*
- * The storage of one facet of a node. A new node has its facet array
- * zero-filled; what the fields mean (the state, the default values, the
- * derivation cache) belongs to Facets.
+ * The storage of one facet of a node (Facets, facet.c). A new node has its
+ * facet array zero-filled, so every facet starts in AMARK_TREE_FACET_NONE.
+ *   - state: AMARK_TREE_FACET_NONE, _SET or _RECORDED.
+ *   - number: the value of an INT, ENUM or BOOL facet that has one, within the
+ *     range of the facet; 0 otherwise.
+ *   - text, length: the value of a STRING facet that has one: an owned copy,
+ *     terminated by NUL, of valid UTF-8 without NUL, normalized to LF for a
+ *     LINES facet; NULL and 0 otherwise.
+ *   - cache, cache_length: the string derived from the tokens of the facet
+ *     (derive.c); NULL and 0 while there is none.
  */
 typedef struct amark_tree_facet
 {
@@ -356,7 +373,14 @@ typedef enum amark_tree_violation
      * numbers, identifiers; for given lines, their sequence), the index of the
      * tabs of a line does not list its tabs, or the default line ending is not
      * the one of the first line that has one. */
-    AMARK_TREE_VIOLATION_LINES
+    AMARK_TREE_VIOLATION_LINES,
+    /* The storage of the facets of a node: the facet array does not match the
+     * facet count of the type, a state is unknown, a number is outside the
+     * range of its facet or set without a value, a string is missing, not
+     * terminated at its length, holds NUL or invalid UTF-8, or is not
+     * normalized for a LINES facet, a value is held by a facet of another
+     * kind, or a cache length is set without a cache. */
+    AMARK_TREE_VIOLATION_FACETS
 } amark_tree_violation_t;
 
 /* The first violation found by amark_tree_check. */
@@ -380,7 +404,7 @@ typedef struct amark_tree_check_report
  * The checks run in order and stop at the first violation, so that a later
  * check can rely on the invariants of the earlier ones: the document node, the
  * ring, then a walk of every tree that runs the node checks on each node
- * (relations, containment, link in link, cache). A component that adds
+ * (relations, containment, link in link, cache, facets). A component that adds
  * records or caches adds its invariant as a node check or a document check in
  * tree_check.c.
  */

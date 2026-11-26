@@ -44,6 +44,80 @@ typedef struct amark_value
 } amark_value_t;
 
 /*
+ * Getting, setting, unsetting and recording the facets of a node. facet is a
+ * facet number of the type of node (1 to its facet count; the macros below for
+ * the built-in types). A NULL node, a facet the type does not have and a value
+ * of the wrong kind are AMARK_ERROR_INVALID_ARGUMENT, and the node is not
+ * changed (3.10).
+ */
+
+/*
+ * Reads the value of facet into *out. The caller sets out->struct_size to
+ * sizeof(amark_value_t). The value is, in order:
+ *   - the value set or recorded for the facet;
+ *   - for a value facet, the default value of its type (state PRESENT);
+ *   - for a style, the state UNSET (3.6).
+ * A PRESENT INT, ENUM or BOOL has its number and a NULL text; a PRESENT STRING
+ * has its text, terminated by NUL, and its length, and a number of 0. An UNSET
+ * value has a number of 0, a NULL text and a length of 0. The text belongs to
+ * the node or to its type: it stays valid until the next change of the facet
+ * or the release of the node, and the caller does not free it. On failure *out is not
+ * written; AMARK_ERROR_INVALID_ARGUMENT also for a NULL out and a struct_size
+ * smaller than sizeof(amark_value_t).
+ */
+AMARK_API amark_error_t amark_node_get(const amark_node_t *node, amark_facet_t facet,
+                                       amark_value_t *out);
+
+/*
+ * Set the value of facet (6.1-6.9): number for an INT, ENUM or BOOL facet,
+ * the length bytes at text for a STRING facet (text may be NULL when length is
+ * 0; the bytes are copied). In order:
+ *   1. The value is checked: an INT within the range of the facet, an ENUM
+ *      from 1 to its count of names, a BOOL 0 or 1; a STRING of valid UTF-8
+ *      without NUL, without a line break (LF or CR) for a NO_LINE_BREAK
+ *      facet, without a blank line (a line of only spaces and tabs between two
+ *      line breaks) for a NO_BLANK_LINE facet, and not empty for a NONEMPTY
+ *      facet; then the validate function of the facet, if any. An invalid
+ *      value is AMARK_ERROR_INVALID_ARGUMENT.
+ *   2. When the value equals the current value (amark_node_get), nothing
+ *      changes (6.9). For an OVERRIDABLE facet, only an override that holds
+ *      the same value is the same value: otherwise the value becomes the
+ *      override (6.11).
+ *   3. A LINES facet's value has its CRLF and CR changed to LF and, when not
+ *      empty, ends with LF (6.5).
+ *   4. The new value is prepared and the on_change function of the facet, if
+ *      any, is called with it; the node still holds the old value.
+ *   5. When on_change succeeds the value is committed; when it fails, the
+ *      prepared value is discarded and its error is returned.
+ * On failure (also AMARK_ERROR_OUT_OF_MEMORY and AMARK_ERROR_OVERFLOW) the
+ * value is not changed.
+ */
+AMARK_API amark_error_t amark_node_set_int(amark_node_t *node, amark_facet_t facet,
+                                           int64_t number);
+AMARK_API amark_error_t amark_node_set_string(amark_node_t *node, amark_facet_t facet,
+                                              const char *text, size_t length);
+
+/*
+ * Unsets facet: a style returns to UNSET, and an OVERRIDABLE facet loses its
+ * override and returns to its derived value (6.11). Calls no on_change.
+ * Unsetting a facet that has no value does nothing. Any other facet is
+ * AMARK_ERROR_INVALID_ARGUMENT.
+ */
+AMARK_API amark_error_t amark_node_unset(amark_node_t *node, amark_facet_t facet);
+
+/*
+ * Record the value of facet, for parsers and the implementers of extensions
+ * (6.14): the value is checked and normalized like a set value, but on_change
+ * is not called, the value is stored even when it equals the current one, and
+ * recording is not an edit (the spelling is kept). On failure the value is not
+ * changed.
+ */
+AMARK_API amark_error_t amark_node_record_int(amark_node_t *node, amark_facet_t facet,
+                                              int64_t number);
+AMARK_API amark_error_t amark_node_record_string(amark_node_t *node, amark_facet_t facet,
+                                                 const char *text, size_t length);
+
+/*
  * The facet numbers of the built-in node types (AMARK_<TYPE>_<FACET>) and the
  * values of their enumerations (AMARK_<TYPE>_<FACET>_<NAME>, from 1). V marks a
  * value, S a style. document, block_quote, item, paragraph and softbreak have no

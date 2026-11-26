@@ -11,7 +11,7 @@
  *      table;
  *   2. the walk visits each node of each tree once and runs the node checks
  *      (node_checks[]) on it: the relations, the containment rules, the link in
- *      link rule and the cache invariant.
+ *      link rule, the cache invariant and the storage of the facets.
  * A component that adds records or caches adds its invariant as a node check
  * (records of one node: facets, margins, tokens, content tokens) or as a
  * document check after the walk (whole-document counts: the owners of the
@@ -25,6 +25,8 @@
  * not in the ring, or that is reached twice, is seen without any allocation.
  */
 #include "tree/tree.h"
+
+#include <amark/utf8.h>
 
 #include <string.h>
 
@@ -136,6 +138,104 @@ static bool check_cache(check_context_t *context, const amark_node_t *node)
     return true;
 }
 
+/* Whether the stored string of a facet (desc) with a value is well formed: an
+ * owned text terminated by NUL at its length, of valid UTF-8 without NUL, and
+ * within the flags that the setters and the records enforce (no line break,
+ * not empty, normalized to LF and ending with LF for LINES). */
+static bool stored_string_ok(const amark_facet_desc_t *desc, const amark_tree_facet_t *slot)
+{
+    if (slot->text == NULL || slot->text[slot->length] != '\0' ||
+        memchr(slot->text, '\0', slot->length) != NULL ||
+        !amark_utf8_validate(slot->text, slot->length, NULL))
+    {
+        return false;
+    }
+    if ((desc->flags & AMARK_FACET_NONEMPTY) != 0 && slot->length == 0)
+    {
+        return false;
+    }
+    if ((desc->flags & (AMARK_FACET_NO_LINE_BREAK | AMARK_FACET_LINES)) != 0 &&
+        memchr(slot->text, '\r', slot->length) != NULL)
+    {
+        return false;
+    }
+    if ((desc->flags & AMARK_FACET_NO_LINE_BREAK) != 0 &&
+        memchr(slot->text, '\n', slot->length) != NULL)
+    {
+        return false;
+    }
+    return (desc->flags & AMARK_FACET_LINES) == 0 || slot->length == 0 ||
+           slot->text[slot->length - 1] == '\n';
+}
+
+/* Whether number is a value of an INT, ENUM or BOOL facet (desc). */
+static bool stored_number_ok(const amark_facet_desc_t *desc, int64_t number)
+{
+    switch (desc->kind)
+    {
+    case AMARK_FACET_INT:
+        return number >= desc->int_min && number <= desc->int_max;
+    case AMARK_FACET_ENUM:
+        return number >= 1 && (uint64_t)number <= (uint64_t)desc->enum_count;
+    case AMARK_FACET_BOOL:
+        return number == 0 || number == 1;
+    default:
+        return false;
+    }
+}
+
+/* The storage of the facets (Facets): one slot per facet of the type, each in
+ * a known state, holding a value of its kind only when it has one, and a cache
+ * length only with a cache (terminated by NUL). Linear in the stored bytes. */
+static bool check_facets(check_context_t *context, const amark_node_t *node)
+{
+    size_t count = node->desc->facet_count;
+    size_t i;
+
+    if ((count == 0) != (node->facets == NULL))
+    {
+        return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                    "the facet array does not match the facets of the type");
+    }
+    for (i = 0; i < count; i++)
+    {
+        const amark_facet_desc_t *desc = &node->desc->facets[i];
+        const amark_tree_facet_t *slot = &node->facets[i];
+        bool has_value = slot->state != AMARK_TREE_FACET_NONE;
+
+        if (slot->state != AMARK_TREE_FACET_NONE && slot->state != AMARK_TREE_FACET_SET &&
+            slot->state != AMARK_TREE_FACET_RECORDED)
+        {
+            return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                        "a facet has an unknown state");
+        }
+        if (desc->kind == AMARK_FACET_STRING)
+        {
+            if (slot->number != 0 ||
+                (has_value ? !stored_string_ok(desc, slot)
+                           : slot->text != NULL || slot->length != 0))
+            {
+                return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                            "a string facet holds a malformed value");
+            }
+        }
+        else if (slot->text != NULL || slot->length != 0 ||
+                 (has_value ? !stored_number_ok(desc, slot->number) : slot->number != 0))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                        "a number facet holds a value outside its range");
+        }
+        if (slot->cache == NULL ? slot->cache_length != 0
+                                : desc->kind != AMARK_FACET_STRING ||
+                                      slot->cache[slot->cache_length] != '\0')
+        {
+            return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                        "a facet has a malformed cache");
+        }
+    }
+    return true;
+}
+
 /* The checks of one node, in order. Add the invariants of the records and the
  * caches of a node here. */
 static const node_check_t node_checks[] = {
@@ -143,6 +243,7 @@ static const node_check_t node_checks[] = {
     check_containment,
     check_link_in_link,
     check_cache,
+    check_facets,
 };
 
 /* ---- The walk of the trees ----------------------------------------------------- */
@@ -533,6 +634,8 @@ const char *amark_tree_violation_name(amark_tree_violation_t kind)
         return "cache";
     case AMARK_TREE_VIOLATION_LINES:
         return "lines";
+    case AMARK_TREE_VIOLATION_FACETS:
+        return "facets";
     default:
         return "unknown";
     }

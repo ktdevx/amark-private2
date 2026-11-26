@@ -271,6 +271,32 @@ NAOS_TEST(source_and_line_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(facet_value_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *node = NULL;
+    amark_value_t value;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_LINK, &node));
+    std::memset(&value, 0, sizeof(value));
+    value.struct_size = sizeof(value);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_get(node, AMARK_LINK_FORM, &value));
+    NAOS_CHECK_INT_EQ(AMARK_VALUE_UNSET, value.state);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_string(node, AMARK_LINK_DESTINATION, "/a", 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_record_string(node, AMARK_LINK_TITLE, "t", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_set_int(node, AMARK_LINK_FORM, AMARK_LINK_FORM_INLINE));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_record_int(node, AMARK_LINK_ANGLE, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_unset(node, AMARK_LINK_FORM));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_get(node, AMARK_LINK_DESTINATION, &value));
+    NAOS_CHECK_INT_EQ(AMARK_VALUE_PRESENT, value.state);
+    NAOS_CHECK_STR_EQ("/a", value.text);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -282,7 +308,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(builtin_types_link),
     NAOS_ADD_TEST(document_and_node_functions_link),
     NAOS_ADD_TEST(structural_edit_functions_link),
-    NAOS_ADD_TEST(source_and_line_functions_link)
+    NAOS_ADD_TEST(source_and_line_functions_link),
+    NAOS_ADD_TEST(facet_value_functions_link)
 )
 
 NAOS_MAIN(
