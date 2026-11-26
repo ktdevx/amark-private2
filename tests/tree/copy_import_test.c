@@ -6,7 +6,8 @@
  * (5.6), with the content objects shared and copied on write (Content, 6.3),
  * the copied definitions in the definition index, and the extension data
  * copied by the copy function of the type (12.13), the import from another
- * document and of the children of a node (5.7–5.9).
+ * document and of the children of a node (5.7–5.9), and the replacement of
+ * the content of a leaf (Content, 8.6).
  */
 #include "tree/tree.h"
 
@@ -1396,6 +1397,407 @@ NAOS_TEST(a_deep_subtree_is_imported_without_recursion)
     amark_document_destroy(target);
 }
 
+/* ---- Replacing the content of a leaf (8.6) ------------------------------------------ */
+
+/* A fragment as a parser makes it from a msgstr: a paragraph with free content
+ * and its inline children spelled on it. */
+static const char fragment_tree[] =
+    "(paragraph :content free \"un *deux*\\ntrois\"\n"
+    "  (text :spelling ((text 0 3 :facet literal)) \"un \")\n"
+    "  (emph :style (:delimiter \"_\")\n"
+    "        :spelling ((delimiter 3 4 :role 1) (delimiter 8 9 :role 2))\n"
+    "    (text :spelling ((text 4 8 :facet literal)) \"deux\"))\n"
+    "  (softbreak :spelling ((line_break 9 10)))\n"
+    "  (text :spelling ((text 10 15 :facet literal)) \"trois\"))\n";
+
+static const char fragment_bytes[] = "un *deux*\ntrois";
+
+/* The fingerprint of the children of leaf, each subtree in turn (to be freed
+ * with free()). */
+static char *children_fingerprint(const amark_node_t *leaf)
+{
+    text_buffer_t buffer = {NULL, 0, 0};
+    const amark_node_t *child;
+
+    for (child = amark_node_first_child(leaf); child != NULL; child = amark_node_next(child))
+    {
+        char *part = fingerprint(child);
+
+        append(&buffer, "%s", part);
+        free(part);
+    }
+    append(&buffer, "%s", "");
+    return buffer.data;
+}
+
+/* The types and the content tokens of the nodes below leaf in preorder (to be
+ * freed with free()). */
+static char *tokens_fingerprint(const amark_node_t *leaf)
+{
+    text_buffer_t buffer = {NULL, 0, 0};
+    const amark_node_t *node;
+    size_t i;
+
+    for (node = amark_node_first_child(leaf); node != NULL; node = preorder_next(leaf, node))
+    {
+        append(&buffer, "(%s", amark_node_type_desc(node)->name);
+        for (i = 0; i < amark_node_content_token_count(node); i++)
+        {
+            amark_content_token_t token;
+
+            token.struct_size = sizeof(token);
+            NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_content_token_at(node, i, &token));
+            append(&buffer, " c(%zu %zu %d %u %u)", token.start, token.end, (int)token.kind,
+                   (unsigned)token.facet, (unsigned)token.role);
+        }
+        append(&buffer, "%s", ")");
+    }
+    append(&buffer, "%s", "");
+    return buffer.data;
+}
+
+/* Checks that the content of leaf is new free content holding fragment_bytes,
+ * that its inline children have the spelling of those of fragment (another
+ * leaf) on it, and that every token of the children is on it. */
+static void check_replaced(const amark_node_t *leaf, const amark_node_t *fragment)
+{
+    const amark_node_t *node;
+    const char *bytes = NULL;
+    size_t length = 0;
+    char *expected = children_fingerprint(fragment);
+    char *actual = children_fingerprint(leaf);
+
+    NAOS_CHECK_UINT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(leaf));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(leaf, &bytes, &length));
+    NAOS_CHECK_UINT_EQ(strlen(fragment_bytes), length);
+    NAOS_CHECK_STR_EQ(fragment_bytes, bytes);
+    NAOS_REQUIRE_NOT_NULL(leaf->content);
+    if (leaf != fragment)
+    {
+        NAOS_CHECK_TRUE(leaf->content != fragment->content);
+    }
+    NAOS_CHECK_UINT_EQ(1, leaf->content->owners);
+    NAOS_CHECK_UINT_EQ(2, leaf->content->line_count);
+    NAOS_CHECK_STR_EQ(expected, actual);
+    free(expected);
+    free(actual);
+    NAOS_CHECK_UINT_EQ(subtree_size(fragment), subtree_size(leaf));
+    for (node = amark_node_first_child(leaf); node != NULL; node = preorder_next(leaf, node))
+    {
+        NAOS_CHECK_TRUE(node->document == leaf->document);
+        if (node->content_tokens != NULL)
+        {
+            NAOS_CHECK_PTR_EQ(leaf->content, node->content_tokens->base);
+        }
+    }
+    /* One base per child with tokens: text, emph, text, softbreak, text. */
+    NAOS_CHECK_UINT_EQ(5, leaf->content->bases);
+}
+
+NAOS_TEST(replacing_content_from_another_document_keeps_the_inline_spelling)
+{
+    amark_document_t *target = new_document(input_3_1_source);
+    amark_document_t *source = new_document("");
+    amark_node_t *quote;
+    amark_node_t *paragraph;
+    amark_node_t *fragment;
+    amark_node_t *item;
+    amark_tree_content_t *old;
+    amark_line_id_t first = 0;
+    uint32_t count = 0;
+    size_t nodes;
+    size_t lines;
+    uint64_t generation;
+    char *fragment_before;
+    bool verbatim = true;
+
+    AMARK_CHECK_TREE_BUILD(target, NULL, input_3_1_tree);
+    AMARK_CHECK_TREE_BUILD(source, NULL, fragment_tree);
+    quote = amark_node_first_child(amark_document_root(target));
+    paragraph = paragraph_of(quote);
+    item = amark_node_parent(paragraph);
+    fragment = amark_node_first_child(amark_document_root(source));
+    old = paragraph->content;
+    nodes = target->node_count;
+    lines = amark_document_line_count(target);
+    generation = target->structure_generation;
+    fragment_before = fingerprint(amark_document_root(source));
+    /* The judgment before, so that the replacement must drop it. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(quote, &verbatim));
+    NAOS_CHECK_TRUE(verbatim);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(paragraph, fragment));
+    for (item = amark_node_first_child(paragraph); item != NULL; item = amark_node_next(item))
+    {
+        check_no_cache(item);
+    }
+    item = amark_node_parent(paragraph);
+    check_replaced(paragraph, fragment);
+    /* The paragraph keeps its line range; the old content and its 6 inline
+     * nodes are gone, and the 5 of the fragment are new. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines(paragraph, &first, &count));
+    NAOS_CHECK_UINT_EQ(0, first);
+    NAOS_CHECK_UINT_EQ(2, count);
+    NAOS_CHECK_TRUE(paragraph->content != old);
+    NAOS_CHECK_UINT_EQ(nodes - 1, target->node_count);
+    /* Free content refers to no line: nothing is imported. */
+    NAOS_CHECK_UINT_EQ(lines, amark_document_line_count(target));
+    NAOS_CHECK_TRUE(target->structure_generation > generation);
+    /* The margins of the ancestors are kept; the paragraph is no longer
+     * verbatim, so neither are they. */
+    NAOS_CHECK_UINT_EQ(2, amark_block_margin_count(item));
+    NAOS_CHECK_UINT_EQ(2, amark_block_margin_count(quote));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_verbatim(quote, &verbatim));
+    NAOS_CHECK_FALSE(verbatim);
+    CHECK_TREE_OK(target);
+
+    /* The source is unchanged. */
+    CHECK_FINGERPRINT(fragment_before, amark_document_root(source));
+    free(fragment_before);
+    CHECK_TREE_OK(source);
+    amark_document_destroy(source);
+    /* The replaced paragraph does not depend on the source. */
+    check_replaced(paragraph, paragraph);
+    CHECK_TREE_OK(target);
+    amark_document_destroy(target);
+}
+
+NAOS_TEST(replacing_content_with_laid_content_imports_no_line)
+{
+    amark_document_t *source = new_document(input_3_1_source);
+    amark_document_t *target = new_document("x\n");
+    amark_node_t *paragraph;
+    amark_node_t *original;
+    amark_value_t value;
+    const char *bytes = NULL;
+    size_t length = 0;
+    amark_line_id_t first = 0;
+    uint32_t count = 0;
+    char *expected;
+    char *actual;
+
+    AMARK_CHECK_TREE_BUILD(source, NULL, input_3_1_tree);
+    AMARK_CHECK_TREE_BUILD(target, NULL,
+                           "(paragraph :lines (0 1) :content laid ((0 0 1))\n"
+                           "  (text :spelling ((text 0 1 :facet literal)) \"x\"))\n");
+    original = paragraph_of(amark_node_first_child(amark_document_root(source)));
+    paragraph = amark_node_first_child(amark_document_root(target));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(paragraph, original));
+    /* The content is free, with the bytes of the laid content; the tokens on
+     * it are rebased, so the lines of its pieces are not imported. */
+    NAOS_CHECK_UINT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(paragraph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(paragraph, &bytes, &length));
+    NAOS_CHECK_STR_EQ("one *two\nthree* four", bytes);
+    NAOS_CHECK_UINT_EQ(0, amark_block_content_piece_count(paragraph));
+    NAOS_CHECK_UINT_EQ(1, amark_document_line_count(target));
+    NAOS_CHECK_UINT_EQ(1, amark_document_source_count(target));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_lines(paragraph, &first, &count));
+    NAOS_CHECK_UINT_EQ(0, first);
+    NAOS_CHECK_UINT_EQ(1, count);
+    NAOS_CHECK_UINT_EQ(subtree_size(original), subtree_size(paragraph));
+    NAOS_CHECK_UINT_EQ(6, paragraph->content->bases);
+    memset(&value, 0, sizeof(value));
+    value.struct_size = sizeof(value);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_get(amark_node_first_child(child_at(paragraph, 1)),
+                                     AMARK_TEXT_LITERAL, &value));
+    NAOS_CHECK_STR_EQ("two", value.text);
+    /* The same tokens as the original. */
+    expected = tokens_fingerprint(original);
+    actual = tokens_fingerprint(paragraph);
+    NAOS_CHECK_STR_EQ(expected, actual);
+    free(expected);
+    free(actual);
+    CHECK_TREE_OK(target);
+    CHECK_TREE_OK(source);
+    amark_document_destroy(source);
+    amark_document_destroy(target);
+}
+
+NAOS_TEST(replacing_content_within_the_same_document_copies_the_children)
+{
+    amark_document_t *document = new_document(input_3_1_source);
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *paragraph;
+    amark_node_t *fragment;
+    amark_tree_content_t *fragment_content;
+    char *fragment_before;
+    size_t nodes;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_1_tree);
+    AMARK_CHECK_TREE_BUILD(document, NULL, fragment_tree);
+    paragraph = paragraph_of(amark_node_first_child(root));
+    fragment = amark_node_last_child(root);
+    fragment_content = fragment->content;
+    fragment_before = fingerprint(fragment);
+    nodes = document->node_count;
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(paragraph, fragment));
+    check_replaced(paragraph, fragment);
+    NAOS_CHECK_UINT_EQ(nodes - 1, document->node_count);
+    /* The fragment keeps its content and children. */
+    NAOS_CHECK_PTR_EQ(fragment_content, fragment->content);
+    NAOS_CHECK_UINT_EQ(1, fragment_content->owners);
+    NAOS_CHECK_UINT_EQ(5, fragment_content->bases);
+    CHECK_FINGERPRINT(fragment_before, fragment);
+    free(fragment_before);
+    CHECK_TREE_OK(document);
+
+    /* Destroying the fragment leaves the replaced paragraph whole. */
+    amark_node_destroy(fragment);
+    check_replaced(paragraph, paragraph);
+    CHECK_TREE_OK(document);
+
+    /* A leaf replaced from itself gets free content with the same spelling. */
+    fragment_before = children_fingerprint(paragraph);
+    fragment_content = paragraph->content;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(paragraph, paragraph));
+    NAOS_CHECK_TRUE(paragraph->content != fragment_content);
+    check_replaced(paragraph, paragraph);
+    {
+        char *after = children_fingerprint(paragraph);
+
+        NAOS_CHECK_STR_EQ(fragment_before, after);
+        free(after);
+    }
+    free(fragment_before);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(replacing_content_keeps_the_own_spelling_and_values_of_the_leaf)
+{
+    amark_document_t *document = new_document("```c\nold\n```\n");
+    amark_document_t *source = new_document("");
+    amark_node_t *code;
+    amark_node_t *fragment;
+    amark_tree_content_t *old;
+    amark_value_t value;
+    const char *bytes = NULL;
+    size_t length = 0;
+    bool own = true;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL,
+                           "(code_block :style (:form fenced)\n"
+                           "  :lines (0 3)\n"
+                           "  :tokens ((marker 0 0 3) (text 0 3 4 :facet info) (marker 2 0 3))\n"
+                           "  :content laid ((1 0 3))\n"
+                           "  :spelling ((text 0 3 :facet literal)))\n");
+    AMARK_CHECK_TREE_BUILD(source, NULL, "(paragraph :content free \"new\\ntext\")\n");
+    code = amark_node_first_child(amark_document_root(document));
+    fragment = amark_node_first_child(amark_document_root(source));
+    old = code->content;
+    NAOS_REQUIRE_NOT_NULL(old);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(code, fragment));
+    /* The literal is the new content; the info string, the fence and the
+     * layout tokens are kept. */
+    memset(&value, 0, sizeof(value));
+    value.struct_size = sizeof(value);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_get(code, AMARK_CODE_BLOCK_LITERAL, &value));
+    NAOS_CHECK_STR_EQ("new\ntext\n", value.text);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_get(code, AMARK_CODE_BLOCK_INFO, &value));
+    NAOS_CHECK_STR_EQ("c", value.text);
+    NAOS_CHECK_UINT_EQ(3, amark_block_token_count(code));
+    NAOS_CHECK_UINT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(code));
+    /* The own content tokens of the leaf keep their base, the old content. */
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(code));
+    NAOS_CHECK_PTR_EQ(old, code->content_tokens->base);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_content_base(code, &bytes, &length, NULL, &own));
+    NAOS_CHECK_STR_EQ("old", bytes);
+    NAOS_CHECK_FALSE(own);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(source);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(a_replaced_definition_is_put_on_the_dirty_list)
+{
+    amark_document_t *document = new_document("");
+    amark_document_t *source = new_document("");
+    amark_node_t *definition;
+    amark_node_t *fragment;
+    amark_value_t value;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL,
+                           "(link_definition :label \"Foo\" :destination \"/a\" :title \"\"\n"
+                           "  :content free \"[Foo]: /a\")\n");
+    AMARK_CHECK_TREE_BUILD(source, NULL, "(paragraph :content free \"[Foo]: /b\")\n");
+    definition = amark_node_first_child(amark_document_root(document));
+    fragment = amark_node_first_child(amark_document_root(source));
+    NAOS_CHECK_PTR_EQ(definition, find(document, "foo"));
+    NAOS_CHECK_UINT_EQ(0, document->def_index.dirty_count);
+    NAOS_CHECK_FALSE(definition->def_dirty);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(definition, fragment));
+    NAOS_CHECK_TRUE(definition->def_dirty);
+    NAOS_CHECK_UINT_EQ(1, document->def_index.dirty_count);
+    /* The values are kept. */
+    memset(&value, 0, sizeof(value));
+    value.struct_size = sizeof(value);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_get(definition, AMARK_LINK_DEFINITION_DESTINATION, &value));
+    NAOS_CHECK_STR_EQ("/a", value.text);
+    NAOS_CHECK_PTR_EQ(definition, find(document, "FOO"));
+    NAOS_CHECK_UINT_EQ(0, document->def_index.dirty_count);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(source);
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(refused_replacements_change_nothing)
+{
+    amark_document_t *document = new_document(input_3_1_source);
+    amark_document_t *source = new_document("");
+    amark_node_t *root = amark_document_root(document);
+    amark_node_t *quote;
+    amark_node_t *paragraph;
+    amark_node_t *code = NULL;
+    amark_node_t *fragment;
+    amark_node_t *with_link;
+    target_state_t state;
+    char *before;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_1_tree);
+    AMARK_CHECK_TREE_BUILD(document, NULL, "(code_block :content free \"x\")\n");
+    AMARK_CHECK_TREE_BUILD(source, NULL, fragment_tree);
+    AMARK_CHECK_TREE_BUILD(source, NULL,
+                           "(paragraph :content free \"a\" (link :destination \"z\" :title \"\"))\n");
+    quote = amark_node_first_child(root);
+    paragraph = paragraph_of(quote);
+    code = amark_node_last_child(root);
+    fragment = amark_node_first_child(amark_document_root(source));
+    with_link = amark_node_last_child(amark_document_root(source));
+    before = fingerprint(root);
+    state = state_of(document);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_replace_content(NULL, fragment));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_replace_content(paragraph, NULL));
+    /* Leaves without content: the target, the source. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_replace_content(quote, fragment));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_replace_content(paragraph, amark_node_first_child(fragment)));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_replace_content(paragraph, amark_document_root(source)));
+    /* Children the target cannot contain. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_replace_content(code, fragment));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_replace_content(code, paragraph));
+    NAOS_CHECK_TRUE(same_state(document, state));
+    CHECK_FINGERPRINT(before, root);
+    free(before);
+    CHECK_TREE_OK(document);
+    CHECK_TREE_OK(source);
+
+    /* A link fits in a paragraph. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(paragraph, with_link));
+    NAOS_CHECK_UINT_EQ(AMARK_NODE_LINK, amark_node_get_type(amark_node_first_child(paragraph)));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(source);
+    amark_document_destroy(document);
+}
+
 /* ---- Out of memory --------------------------------------------------------------------- */
 
 typedef struct oom_context
@@ -1564,6 +1966,114 @@ NAOS_TEST(out_of_memory_in_an_import_leaves_both_documents_unchanged)
     amark_document_destroy(document);
 }
 
+/* The replacement of the content under out of memory, from another document
+ * and from the same one, on a copy of the paragraph of INPUT.md 3.1: each
+ * refused replacement leaves the copy and both documents as they were. */
+typedef struct replace_context
+{
+    amark_document_t *document;
+    amark_node_t *paragraph;
+    amark_node_t *same_fragment;
+    amark_node_t *other_fragment;
+} replace_context_t;
+
+/* Replaces the content of leaf from source; on failure, checks that leaf and
+ * its document are unchanged (AMARK_ERROR_INVALID_STATE otherwise). */
+static amark_error_t replace_or_keep(amark_node_t *leaf, const amark_node_t *source)
+{
+    amark_document_t *document = amark_node_document(leaf);
+    amark_tree_content_t *content = leaf->content;
+    size_t owners = content->owners;
+    size_t bases = content->bases;
+    amark_node_t *first = amark_node_first_child(leaf);
+    size_t size = subtree_size(leaf);
+    target_state_t state = state_of(document);
+    amark_error_t error = amark_block_replace_content(leaf, source);
+
+    if (error == AMARK_ERROR_NONE)
+    {
+        if ((amark_block_content_state(leaf) != AMARK_CONTENT_FREE) ||
+            (subtree_size(leaf) != subtree_size(source)))
+        {
+            error = AMARK_ERROR_INVALID_STATE;
+        }
+    }
+    else if ((leaf->content != content) || (content->owners != owners) ||
+             (content->bases != bases) || (amark_node_first_child(leaf) != first) ||
+             (subtree_size(leaf) != size) || !same_state(document, state))
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    if (amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE)
+    {
+        error = AMARK_ERROR_INVALID_STATE;
+    }
+    return error;
+}
+
+static amark_error_t replace_oom_scenario(void *context)
+{
+    replace_context_t *c = (replace_context_t *)context;
+    amark_document_t *document = c->document;
+    amark_tree_content_t *content = c->paragraph->content;
+    size_t owners = content->owners;
+    size_t bases = content->bases;
+    size_t nodes = document->node_count;
+    size_t lines = document->line_count;
+    amark_node_t *copy = NULL;
+    amark_error_t error;
+
+    error = amark_node_copy(c->paragraph, &copy);
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = replace_or_keep(copy, c->other_fragment);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = replace_or_keep(copy, c->same_fragment);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = replace_or_keep(copy, copy);
+    }
+    amark_node_destroy(copy);
+    if ((document->node_count != nodes) || (document->line_count != lines) ||
+        (content->owners != owners) || (content->bases != bases) ||
+        (amark_tree_check(document, NULL) != AMARK_TREE_VIOLATION_NONE))
+    {
+        return AMARK_ERROR_INVALID_STATE;
+    }
+    return error;
+}
+
+NAOS_TEST(out_of_memory_in_a_replacement_changes_nothing)
+{
+    amark_document_t *document = new_document(input_3_1_source);
+    amark_document_t *source = new_document("");
+    replace_context_t context;
+    char *before;
+    char *source_before;
+
+    AMARK_CHECK_TREE_BUILD(document, NULL, input_3_1_tree);
+    AMARK_CHECK_TREE_BUILD(document, NULL, fragment_tree);
+    AMARK_CHECK_TREE_BUILD(source, NULL, fragment_tree);
+    context.document = document;
+    context.paragraph = paragraph_of(amark_node_first_child(amark_document_root(document)));
+    context.same_fragment = amark_node_last_child(amark_document_root(document));
+    context.other_fragment = amark_node_first_child(amark_document_root(source));
+    before = fingerprint(amark_document_root(document));
+    source_before = fingerprint(amark_document_root(source));
+    AMARK_CHECK_OOM_SWEEP(replace_oom_scenario, &context);
+    CHECK_FINGERPRINT(before, amark_document_root(document));
+    CHECK_FINGERPRINT(source_before, amark_document_root(source));
+    free(before);
+    free(source_before);
+    CHECK_TREE_OK(document);
+    CHECK_TREE_OK(source);
+    amark_document_destroy(source);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(copy_import,
     NAOS_ADD_TEST(invalid_arguments_change_nothing),
     NAOS_ADD_TEST(the_copy_reproduces_the_subtree_detached_with_shared_content),
@@ -1583,7 +2093,14 @@ NAOS_SUITE(copy_import,
     NAOS_ADD_TEST(refused_imports_change_nothing),
     NAOS_ADD_TEST(an_import_within_the_same_document_is_a_copy),
     NAOS_ADD_TEST(a_deep_subtree_is_imported_without_recursion),
-    NAOS_ADD_TEST(out_of_memory_in_an_import_leaves_both_documents_unchanged)
+    NAOS_ADD_TEST(out_of_memory_in_an_import_leaves_both_documents_unchanged),
+    NAOS_ADD_TEST(replacing_content_from_another_document_keeps_the_inline_spelling),
+    NAOS_ADD_TEST(replacing_content_with_laid_content_imports_no_line),
+    NAOS_ADD_TEST(replacing_content_within_the_same_document_copies_the_children),
+    NAOS_ADD_TEST(replacing_content_keeps_the_own_spelling_and_values_of_the_leaf),
+    NAOS_ADD_TEST(a_replaced_definition_is_put_on_the_dirty_list),
+    NAOS_ADD_TEST(refused_replacements_change_nothing),
+    NAOS_ADD_TEST(out_of_memory_in_a_replacement_changes_nothing)
 )
 
 NAOS_MAIN(

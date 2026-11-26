@@ -24,6 +24,12 @@
  *     ones and copies each content object once, so that two nodes sharing one
  *     in the source share its copy in the target.
  *
+ * The replacement of the content of a leaf (Content, 8.6) copies or imports
+ * the inline children of the source leaf the same way, except that the
+ * content tokens on the content of the source leaf go on the new free content
+ * of the target (made from its bytes), which is neither gathered nor copied,
+ * so the lines of its pieces are not imported.
+ *
  * All or nothing: every check and every allocation is done on nodes that are
  * built but not committed (not in the ring, no reference counted), the lines
  * are added last (they cannot be taken back), and then the nodes are
@@ -75,6 +81,12 @@ typedef struct import
     content_pair_t *contents;
     size_t content_count;
     size_t content_capacity;
+    /* The replacement of a content (amark_block_replace_content): the content
+     * tokens on rebase_from (the content of the source leaf) go on rebase_to
+     * (the new content of the target), which is neither gathered nor copied;
+     * NULL otherwise. */
+    amark_tree_content_t *rebase_from;
+    amark_tree_content_t *rebase_to;
     /* A link among the copied nodes. */
     bool has_link;
     /* The built copies of the top nodes, linked by next and prev. */
@@ -154,7 +166,7 @@ static amark_error_t push_content(import_t *import, amark_tree_content_t *conten
     void *array = import->contents;
     amark_error_t error;
 
-    if (content == NULL)
+    if ((content == NULL) || (content == import->rebase_from))
     {
         return AMARK_ERROR_NONE;
     }
@@ -328,12 +340,17 @@ static amark_line_id_t map_line(const import_t *import, amark_line_id_t line)
 }
 
 /* The content object of the target for content of the source document (the
- * same one for a copy; NULL for NULL). */
+ * same one for a copy; the new content of a replacement for the content of its
+ * source leaf; NULL for NULL). */
 static amark_tree_content_t *map_content(const import_t *import, amark_tree_content_t *content)
 {
     size_t low = 0;
     size_t high = import->content_count;
 
+    if ((content != NULL) && (content == import->rebase_from))
+    {
+        return import->rebase_to;
+    }
     if (import->same || (content == NULL))
     {
         return content;
@@ -1097,6 +1114,77 @@ static void insert_tops(import_t *import, amark_node_t *parent, amark_node_t *be
 }
 
 /*
+ * Builds the copies of the subtree of first (and, with siblings, of each of its
+ * next siblings) for import->target, set by the caller with the rebase pair: a
+ * copy when the target is the document of first, else an import. parent, when
+ * not NULL, is where the copies are to be inserted (checked for containment).
+ * On success the lines are added to the target (last: they cannot be taken
+ * back) and the copies, built but not committed, are import->first_top to
+ * import->last_top; commit_tops commits them. On failure nothing is left.
+ */
+static amark_error_t prepare(import_t *import, const amark_node_t *first, bool siblings,
+                             const amark_node_t *parent)
+{
+    char *bytes = NULL;
+    size_t length = 0;
+    amark_tree_line_range_t *ranges = NULL;
+    amark_source_id_t id = 0;
+    amark_error_t error;
+    size_t i;
+
+    import->source = first->document;
+    import->same = (import->target == first->document);
+    error = scan(import, first, siblings, parent);
+    if ((error == AMARK_ERROR_NONE) && !import->same)
+    {
+        error = plan_lines(import);
+    }
+    for (i = 0; (error == AMARK_ERROR_NONE) && (i < import->content_count); i++)
+    {
+        error = copy_content(import, import->contents[i].from, &import->contents[i].to);
+    }
+    if (error == AMARK_ERROR_NONE)
+    {
+        error = build(import, first, siblings);
+    }
+    if ((error == AMARK_ERROR_NONE) && (import->line_count > 0))
+    {
+        error = copy_lines(import, &bytes, &length, &ranges);
+        if (error == AMARK_ERROR_NONE)
+        {
+            /* Last: the lines added cannot be taken back. */
+            error = amark_line_table_append_lines(import->target, bytes, length, ranges,
+                                                  import->line_count, &id);
+        }
+        amark_free(bytes);
+        amark_free(ranges);
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        discard(import);
+    }
+    return error;
+}
+
+/* Commits the copies built by prepare. Allocates nothing. */
+static void commit_tops(import_t *import)
+{
+    amark_node_t *top;
+
+    for (top = import->first_top; top != NULL; top = top->next)
+    {
+        commit_built(top);
+    }
+}
+
+/* Frees the arrays of import. */
+static void finish(import_t *import)
+{
+    amark_free(import->spans);
+    amark_free(import->contents);
+}
+
+/*
  * Copies the subtree of first (and, with siblings, of each of its next
  * siblings) into target: a copy when target is the document of first, else an
  * import. With parent, the copies are inserted under parent before before;
@@ -1107,55 +1195,15 @@ static amark_error_t copy_subtrees(amark_document_t *target, const amark_node_t 
                                    amark_node_t **out)
 {
     import_t import;
-    char *bytes = NULL;
-    size_t length = 0;
-    amark_tree_line_range_t *ranges = NULL;
-    amark_source_id_t id = 0;
     amark_error_t error;
-    size_t i;
 
     memset(&import, 0, sizeof(import));
     import.target = target;
-    import.source = first->document;
-    import.same = (target == first->document);
-    error = scan(&import, first, siblings, parent);
-    if ((error == AMARK_ERROR_NONE) && !import.same)
-    {
-        error = plan_lines(&import);
-    }
-    for (i = 0; (error == AMARK_ERROR_NONE) && (i < import.content_count); i++)
-    {
-        error = copy_content(&import, import.contents[i].from, &import.contents[i].to);
-    }
+    error = prepare(&import, first, siblings, parent);
     if (error == AMARK_ERROR_NONE)
     {
-        error = build(&import, first, siblings);
-    }
-    if ((error == AMARK_ERROR_NONE) && (import.line_count > 0))
-    {
-        error = copy_lines(&import, &bytes, &length, &ranges);
-        if (error == AMARK_ERROR_NONE)
-        {
-            /* Last: the lines added cannot be taken back. */
-            error = amark_line_table_append_lines(target, bytes, length, ranges,
-                                                  import.line_count, &id);
-        }
-        amark_free(bytes);
-        amark_free(ranges);
-    }
-    if (error != AMARK_ERROR_NONE)
-    {
-        discard(&import);
-    }
-    else
-    {
-        amark_node_t *top;
-
         /* The commit allocates nothing. */
-        for (top = import.first_top; top != NULL; top = top->next)
-        {
-            commit_built(top);
-        }
+        commit_tops(&import);
         if (parent != NULL)
         {
             insert_tops(&import, parent, before);
@@ -1165,8 +1213,7 @@ static amark_error_t copy_subtrees(amark_document_t *target, const amark_node_t 
             *out = import.first_top;
         }
     }
-    amark_free(import.spans);
-    amark_free(import.contents);
+    finish(&import);
     return error;
 }
 
@@ -1215,4 +1262,64 @@ amark_error_t amark_node_import_children(amark_node_t *target_parent, amark_node
     }
     return copy_subtrees(target_parent->document, source_parent->first_child, true,
                          target_parent, before, NULL);
+}
+
+amark_error_t amark_block_replace_content(amark_node_t *target, const amark_node_t *source_leaf)
+{
+    import_t import;
+    amark_tree_content_t *content = NULL;
+    amark_error_t error;
+
+    if ((target == NULL) || (source_leaf == NULL) ||
+        (target->desc->level != AMARK_NODE_LEVEL_BLOCK) ||
+        ((target->desc->flags & AMARK_NODE_TYPE_CONTENT) == 0) ||
+        (source_leaf->desc->level != AMARK_NODE_LEVEL_BLOCK) ||
+        ((source_leaf->desc->flags & AMARK_NODE_TYPE_CONTENT) == 0))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    /* The new content: free, with the bytes of the content of the source. */
+    if (source_leaf->content != NULL)
+    {
+        error = amark_tree_content_free_copy(source_leaf->content, &content);
+    }
+    else
+    {
+        error = amark_tree_content_from_value("", 0, &content);
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
+    memset(&import, 0, sizeof(import));
+    import.target = target->document;
+    import.rebase_from = source_leaf->content;
+    import.rebase_to = content;
+    if (source_leaf->first_child != NULL)
+    {
+        error = prepare(&import, source_leaf->first_child, true, target);
+    }
+    if (error != AMARK_ERROR_NONE)
+    {
+        finish(&import);
+        amark_tree_content_release(content, true);
+        return error;
+    }
+
+    /* The commit allocates nothing. The copies count their bases on the new
+     * content before the old children go (source_leaf may be target). */
+    commit_tops(&import);
+    while (target->first_child != NULL)
+    {
+        amark_node_destroy(target->first_child);
+    }
+    if (import.first_top != NULL)
+    {
+        insert_tops(&import, target, NULL);
+    }
+    finish(&import);
+    /* The own content tokens of target keep their base, the old content; a
+     * link_definition goes on the dirty list (amark_tree_changed). */
+    amark_tree_leaf_take_content(target, content);
+    return AMARK_ERROR_NONE;
 }

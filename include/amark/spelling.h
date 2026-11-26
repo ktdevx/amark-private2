@@ -456,6 +456,32 @@ AMARK_API amark_error_t amark_node_content_base(const amark_node_t *node, const 
                                                size_t *length, amark_content_state_t *state,
                                                bool *is_own_leaf_content);
 
+/*
+ * Replaces the content and the inline children of target with those of
+ * source_leaf, a block with content of the same document or of another one
+ * (8.6, the msgstr insertion):
+ *   - the content of target becomes new free content holding a copy of the
+ *     bytes of the content of source_leaf (empty when it has none);
+ *   - the children of target are destroyed, and the inline children of
+ *     source_leaf are copied (amark_node_copy) or, from another document,
+ *     imported (amark_node_import) in their place, with their spelling: their
+ *     content tokens on the content of source_leaf go to the new content of
+ *     target, those on another content object follow the rules of the copy
+ *     and the import;
+ *   - target keeps its line range, its layout records (margins, blank lines
+ *     and the layout tokens of its own spelling), its style and value facets,
+ *     and its own content tokens on their base, its previous content.
+ * source_leaf may be target itself; source_leaf is not changed. A replaced
+ * link_definition goes on the dirty list of the definition index.
+ * AMARK_ERROR_INVALID_ARGUMENT for NULL, a target or a source_leaf that is not
+ * a block with content, a child type of source_leaf that the syntax set of
+ * target does not have or that target cannot contain; AMARK_ERROR_LIMIT_EXCEEDED
+ * when the lines to import do not fit; AMARK_ERROR_OUT_OF_MEMORY. On failure
+ * nothing changes. The changes are notified.
+ */
+AMARK_API amark_error_t amark_block_replace_content(amark_node_t *target,
+                                                    const amark_node_t *source_leaf);
+
 /* ---- Spelling state and verbatim output ------------------------------------------ */
 
 /* The state of the own spelling of a node (11.1). The caller sets struct_size to

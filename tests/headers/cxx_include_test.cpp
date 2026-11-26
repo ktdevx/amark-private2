@@ -453,6 +453,9 @@ NAOS_TEST(content_functions_link)
     NAOS_CHECK_INT_EQ(AMARK_CONTENT_FREE, amark_block_content_state(code));
     NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(code, &bytes, &length));
     NAOS_CHECK_UINT_EQ(3, length);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_replace_content(code, code));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_content_bytes(code, &bytes, &length));
+    NAOS_CHECK_TRUE(std::memcmp(bytes, "a\nb", 3) == 0);
     amark_document_destroy(document);
 }
 
