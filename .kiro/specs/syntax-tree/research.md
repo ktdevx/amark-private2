@@ -109,3 +109,18 @@
 - Unicode 17.0.0 `CaseFolding.txt` — ラベルの正規化
 - WHATWG `entities.json` — 名前付き文字参照
 - cmark `blocks.c`（`S_advance_offset`、リスト項目の空行の扱い）— 列の数え方
+
+## 設計のレビューによる修正（2026-11-26）
+`/kiro-validate-design` で、独立したレビュアーの指摘を確かめ、次の 6 件を design と requirements に反映した。
+
+| 指摘 | 起きること | 修正 |
+|---|---|---|
+| list をコンテナに数えた | list は帯を持たないので、リストを含む文書の判定が常に偽になる。項目の間の空行の持ち主が決まらず、タイトが壊れる | 帯を持つ型を `AMARK_NODE_TYPE_MARGINS` で明示し、document と list は通り抜けのブロックにした。空行の持ち主の規則を定め（requirements 7.4）、タイトを list と直下の item の空行から導くようにした。遅延継続の帯の列を定めた |
+| link_definition が中身を持たない | 行の移し替えで中身の部分の行き先がない。複数行のタイトルの改行を綴れない | link_definition を CONTENT の葉にした。行の取り除きと中身の先頭の削りを足した（requirements 7.11） |
+| content オブジェクトをその場で変える | 複製の一方への操作が、もう一方の綴りと位置を変える | 書き込みのときの写しにした（requirements 5.6） |
+| 土台のバイトを読めない | 移したインラインの綴りを、markdown-renderer が出せない | `amark_node_content_base` を足した（requirements 8.8） |
+| 自由な中身の改行 | 複数行の msgstr のソフト改行を記録できない | 自由な中身は LF に揃え、LF を改行の位置にした（requirements 8.1、8.4） |
+| 取り込みで行を分け直す | 改行のない行や CR の行の次の行がつながり、行の番号が狂う | 行の範囲と改行の種類を明示して足す内部関数にした |
+| 索引の更新の漏れ | 複製・取り込みした定義と、トークンで綴ったラベルが索引に入らない | ラベルが変わりうる操作で汚れの印を付け、検索の前に付け替えるようにした |
+| list の on_change | 記号の幅が変わっても続く行のインデントが元のままで、項目から外れる | 影響する item の帯をすべて捨てるようにした |
+| code_block と html_block の literal | 設定した値と中身の 2 つが正になる（旧設計のリテラルの名残） | 項目の印 `AMARK_FACET_CONTENT` を足し、中身だけを正にした（requirements 8.7） |

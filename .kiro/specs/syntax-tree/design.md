@@ -262,8 +262,8 @@ stateDiagram-v2
 | 6.11 | タイトの上書き | Facets, Verbatim | `amark_node_set_int`、`amark_node_unset` | — |
 | 6.12 | テキストの一括設定 | Facets | `amark_node_set_inline_text` | — |
 | 6.13, 6.14 | 綴りを捨てる操作、記録は編集でない | Facets, Layout, Content | `amark_node_discard_spelling`、`amark_node_record_*` | 組み立て |
-| 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10 | 配置の記録 | Layout | `amark_block_set_lines`、`_add_margin`、`_add_blank_line`、`_add_token`、`_add_content`、`_move_lines` | 組み立て |
-| 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7 | 中身と綴り | Content | `amark_block_content_*`、`amark_node_add_content_token`、`_move_content_tokens`、`_split_content_token`、`amark_block_replace_content` | 差し込み |
+| 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10, 7.11 | 配置の記録 | Layout | `amark_block_set_lines`、`_add_margin`、`_add_blank_line`、`_add_token`、`_add_content`、`_move_lines`、`_remove_lines`、`_trim_content_start` | 組み立て |
+| 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8 | 中身と綴り | Content, Facets | `amark_block_content_*`、`amark_node_add_content_token`、`_move_content_tokens`、`_split_content_token`、`amark_block_replace_content`、`amark_node_content_base` | 差し込み |
 | 9.1, 9.2, 9.3, 9.4, 9.5, 9.6 | ラベルと定義の索引 | DefinitionIndex | `amark_label_normalize`、`amark_document_find_definition`、`amark_node_get` | — |
 | 10.1, 10.2, 10.3, 10.4, 10.5 | ロスレス性の検証 | LosslessCheck | `amark_document_check_lossless` | — |
 | 11.1, 11.2, 11.3, 11.4, 11.5, 11.6 | 元の表記を出せるか | Verbatim, Layout | `amark_node_spelling_state`、`amark_block_find_margin`、`amark_block_content_verbatim`、`amark_node_verbatim`、`amark_node_is_new` | キャッシュ |
@@ -286,8 +286,8 @@ stateDiagram-v2
 | LineTable | Tree | ソースと行 | 2.1–2.8 | foundation (P0) | Service, State |
 | NodeCore | Tree | ノード、関係、構造の編集、変更の通知 | 1.5, 1.6, 4.1, 4.5, 5.1–5.5, 5.10, 14.5 | Registry (P0) | Service |
 | Facets | Tree | 値と style の格納、導出、編集 | 3.2–3.6, 3.10, 6.1–6.14 | NodeCore (P0), CharRef (P0) | Service |
-| Layout | Tree | 配置の記録 | 7.1–7.10, 14.6 | LineTable (P0) | Service |
-| Content | Tree | 中身と中身のトークン | 8.1–8.7, 14.6 | Layout (P0) | Service |
+| Layout | Tree | 配置の記録 | 7.1–7.11, 14.6 | LineTable (P0) | Service |
+| Content | Tree | 中身と中身のトークン | 8.1–8.8, 5.6, 14.6 | Layout (P0) | Service |
 | DefinitionIndex | Tree | ラベルと定義の索引 | 9.1–9.6, 14.8 | Facets (P0), CaseFold (P0) | Service, State |
 | CopyImport | Tree | 複製と取り込み | 5.6–5.9 | Content (P0), LineTable (P0) | Service |
 | Position | Tree | ソース上の範囲 | 2.9–2.11 | Content (P0) | Service |
@@ -354,6 +354,7 @@ typedef enum amark_facet_kind
 #define AMARK_FACET_NO_BLANK_LINE    0x0010u /* 空行を含められない */
 #define AMARK_FACET_NONEMPTY         0x0020u /* 空の文字列を設定できない */
 #define AMARK_FACET_OVERRIDABLE      0x0040u /* 導出する値。設定は上書き、未設定にすると導出に戻る */
+#define AMARK_FACET_CONTENT          0x0080u /* 値の正は葉の中身（code_block と html_block の literal） */
 
 typedef struct amark_facet_desc
 {
@@ -377,6 +378,7 @@ typedef struct amark_facet_desc
 /* ノード型の印 */
 #define AMARK_NODE_TYPE_CONTENT     0x01u /* 葉が中身を持つ（paragraph、heading、code_block、html_block など） */
 #define AMARK_NODE_TYPE_SHARE_LINES 0x02u /* 子のブロックが同じ行を重ならない列で分け合える（7.8） */
+#define AMARK_NODE_TYPE_MARGINS     0x04u /* 覆う行ごとに帯を持つコンテナ（block_quote、item、拡張のコンテナ） */
 
 struct amark_node_type_desc
 {
@@ -398,7 +400,11 @@ struct amark_node_type_desc
     void *user_data;
 };
 ```
-- **コンテナ**：ブロックの子を受け入れるブロック型（`accepts` に BLOCK か LIST_ITEM を持つ）。帯と空行を持てる。それ以外のブロック型は葉で、中身は `AMARK_NODE_TYPE_CONTENT` のときだけ持つ。ブロック型はすべて、葉自身の表記（レイアウトのトークン）を持てる。
+- **ブロックの分類**：
+  - **ブロックの子を持てるブロック**（`accepts` に BLOCK か LIST_ITEM を持つ。document、list、block_quote、item、拡張の表など）：空行を持てる。
+  - **コンテナ**：そのうち `AMARK_NODE_TYPE_MARGINS` の型。覆う行ごとに帯を持つ。MARGINS でないもの（document、list）は帯を持たず、各行を子と空行にそのまま任せる（通り抜け）。
+  - **葉**：ブロックの子を持てないブロック。中身は `AMARK_NODE_TYPE_CONTENT` のときだけ持つ。
+  - ブロック型はすべて、自身の表記（レイアウトのトークン）を持てる。
 - **`on_change`**：項目を設定する関数（6.7–6.11）は、次の順で処理する。
   1. 新しい値を検査する（項目の印、`validate`）。
   2. 新しい値を確保して用意する。
@@ -440,12 +446,12 @@ struct amark_node_type_desc
 
 | 型 | 項目（番号：名前 種類 役割 印） | `on_change` の規則 |
 |---|---|---|
-| list | 1：type ENUM(bullet, ordered) V、2：start INT(0–999999999) V、3：tight BOOL V OVERRIDABLE、4：bullet ENUM(`-` `*` `+`) S、5：delimiter ENUM(`.` `)`) S | type、bullet、delimiter：すべての子の item の FIRST の帯を捨てる。start：最初の item の FIRST の帯を捨てる |
-| code_block | 1：info STRING V NO_LINE_BREAK、2：literal STRING V LINES、3：form ENUM(indented, fenced) S、4：fence_char ENUM(`` ` `` `~`) S、5：fence_length INT(3–) S | info を空でない値にするとき form が indented なら、form を fenced にする |
-| html_block | 1：literal STRING V LINES RAW | — |
+| list | 1：type ENUM(bullet, ordered) V、2：start INT(0–999999999) V、3：tight BOOL V OVERRIDABLE、4：bullet ENUM(`-` `*` `+`) S、5：delimiter ENUM(`.` `)`) S | type、bullet、delimiter：すべての子の item の帯を（FIRST だけでなく続く行も）すべて捨てる。start：最初の item の帯をすべて捨てる。記号の幅が変わると、続く行のインデントも合わなくなるため |
+| code_block | 1：info STRING V NO_LINE_BREAK、2：literal STRING V LINES CONTENT、3：form ENUM(indented, fenced) S、4：fence_char ENUM(`` ` `` `~`) S、5：fence_length INT(3–) S | info を空でない値にするとき form が indented なら、form を fenced にする |
+| html_block | 1：literal STRING V LINES RAW CONTENT | — |
 | heading | 1：level INT(1–6) V、2：form ENUM(atx, setext) S、3：closing BOOL S | level を 3 以上にするとき form が setext なら、form を atx にする |
 | thematic_break | 1：char ENUM(`*` `-` `_`) S、2：count INT(3–) S、3：spaced BOOL S | — |
-| link_definition | 1：label STRING V RAW NONEMPTY（CommonMark のラベルの検査）、2：destination STRING V NO_LINE_BREAK、3：title STRING V NO_BLANK_LINE、4：angle BOOL S、5：title_quote ENUM(`"` `'` `(`) S | label の変更で索引を更新する（DefinitionIndex） |
+| link_definition | 1：label STRING V RAW NONEMPTY（CommonMark のラベルの検査）、2：destination STRING V NO_LINE_BREAK、3：title STRING V NO_BLANK_LINE、4：angle BOOL S、5：title_quote ENUM(`"` `'` `(`) S | label の変更で索引のキーを汚れにする（DefinitionIndex） |
 | text | 1：literal STRING V NO_LINE_BREAK | — |
 | code | 1：literal STRING V NO_LINE_BREAK NONEMPTY FOLD_LINE_BREAKS、2：backticks INT(1–) S、3：padded BOOL S | — |
 | html_inline | 1：literal STRING V NO_BLANK_LINE RAW | — |
@@ -459,8 +465,9 @@ struct amark_node_type_desc
   - document と block_quote と item は、ブロックを受け入れる。
   - list は item だけを受け入れる。
   - paragraph と heading は、インラインを受け入れる（CONTENT）。
-  - code_block と html_block は CONTENT で、子を持たない。
-  - thematic_break と link_definition は、中身も子も持たない。
+  - code_block、html_block、link_definition は CONTENT で、子を持たない。link_definition のラベル、宛先、タイトルは、中身のトークン（項目 label、destination、title）で綴る。複数行にまたがるラベルとタイトルの改行は、LINE_BREAK のトークンになる。
+  - thematic_break は、中身も子も持たない。
+  - block_quote と item は MARGINS を持つ。
   - emph、strong、link、image はインラインを受け入れる。link は link を子孫に持てない（can_contain）。
 - 新しいノードの既定の値（3.4）は、次のとおり。それ以外の文字列は空、style はすべて未設定（3.6）。
   - level 1
@@ -533,6 +540,7 @@ AMARK_API amark_eol_t amark_document_default_eol(const amark_document_t *documen
 **Implementation Notes**
 - 行の記録は `{ source, number, offset, length, eol, width, tab_index }` の配列とする。`tab_index` は、タブを含む行についてだけ、最初の列の変換のときにタブのバイトの位置の配列を作る。
 - ソースの番号の中の行の番号は、ソースごとに数える。ソースごとの行の番号の配列も持ち、検証（LosslessCheck）がソースの行を順に引けるようにする。
+- 内部関数 `amark_line_table_append_lines`：CopyImport のために、バイト列と、各行の範囲と改行の種類の列を受け取り、分け直さずに 1 つの新しいソースと行を足す。失敗したら何も足さない。
 
 ### Tree：NodeCore
 
@@ -616,8 +624,9 @@ AMARK_API amark_error_t amark_node_discard_spelling(amark_node_t *node);
   1. 参照の形（full、collapsed、shortcut）の link と image の destination と title は、DefinitionIndex で解決する。定義がなければ `UNRESOLVED` を返す。
   2. OVERRIDABLE の項目（tight）は、上書きの値がなければ Verbatim の導出を返す。
   3. STRING の項目で、その項目を綴るトークンがあれば、トークンから導いた値を返す（下の表）。導いた値はキャッシュし、その項目のトークンが変わったら捨てる。
-  4. 設定か記録された値があれば、それを返す。
-  5. VALUE なら既定の値を、STYLE なら `UNSET` を返す。
+  4. CONTENT の項目で、その項目を綴るトークンがなければ、葉の中身のバイト列（LINES の規則で LF を足す）を返す。CONTENT の項目は、設定された値を別に持たない。
+  5. 設定か記録された値があれば、それを返す。
+  6. VALUE なら既定の値を、STYLE なら `UNSET` を返す。
 - **導出**（3.3）：項目を綴るトークンを、中身の上の順（レイアウトのトークンは行と列の順）に連結する。STRING の項目のトークンが、レイアウトのトークンと中身のトークンに混ざることはない（記録の検査で不正な引数にする）。
 
 | トークンの種類 | 導出への寄与 | RAW の項目 |
@@ -636,7 +645,7 @@ AMARK_API amark_error_t amark_node_discard_spelling(amark_node_t *node);
   2. 現在の値と同じなら、何もしない（6.9）。
   3. LINES の項目は、CRLF と CR を LF に揃える（6.5）。
   4. 新しい値を確保し、`on_change` を呼ぶ。
-  5. 値を確定し、`amark_node_discard_facet_spelling` と同じ処理で、その項目を綴るトークンだけを除いて、捨てた項目の印を立てる（6.7、6.8）。
+  5. 値を確定し、`amark_node_discard_facet_spelling` と同じ処理で、その項目を綴るトークンだけを除いて、捨てた項目の印を立てる（6.7、6.8）。CONTENT の項目は、下の「CONTENT の項目の設定」に従う。
   6. 変更を通知する。
 - **未設定にする操作**：STYLE の項目は未設定に戻し、その綴りを捨てる。OVERRIDABLE の項目は上書きを取り除く（6.11）。それ以外は不正な引数とする。
 - **記録**（6.14）：パーサと拡張の実装者のための操作。検査は設定と同じで、`on_change` を呼ばず、綴りを捨てず、状態を「記録済み」にする。shortcut と collapsed のリンクのラベルのように、トークンを持たない値に使う。
@@ -644,16 +653,21 @@ AMARK_API amark_error_t amark_node_discard_spelling(amark_node_t *node);
 - **ノードのすべての綴りを捨てる操作**（6.13）：
   1. 捨てる前に、トークンから導いていた STRING の値を、設定済みの値として写す（確保に失敗したら何も変えない）。
   2. ノード自身のレイアウトのトークン、中身のトークン、帯、空行を除く。
-  3. 中身が配置済みなら、バイト列を保ったまま自由な中身にする。
+  3. 中身が配置済みなら、同じバイト列を持つ新しい自由な content オブジェクトを作って葉の中身にする（共有している元のオブジェクトは変えない）。その葉の中身を土台にしていた、葉と子孫のトークンの土台を新しいオブジェクトに付け替える。
   4. 構造の綴りの印を立てる。行の範囲は残す（位置の問い合わせに使う）。
-- **コードブロックと HTML ブロックのリテラル**（8.7）：リテラルの設定は、中身を、設定した値をバイト列とする自由な中身に置き換える。葉自身の表記は残す。中身にトークンがなく、リテラルが設定済みのときは、中身のバイト列がリテラルの値である。
+- **CONTENT の項目の設定**（8.7）：code_block と html_block の literal の正は、葉の中身だけである。
+  - 設定するもの：新しい自由な content オブジェクトを葉の中身にする。中身は、LF に揃えた値の末尾の LF を 1 つ除いたものとする。その上に、行ごとの TEXT と、その間の LINE_BREAK のトークン（項目 literal）を置く。
+  - 残すもの：葉自身の表記（フェンスの行など）。
+  - 印：項目 literal の綴りを捨てた印を立てる（元の行の綴りではないため）。
+  
+  取得は常に中身から導く。`amark_block_set_free_content` と `amark_block_replace_content` で中身を変えたときも、次の取得から新しい中身の値になる。
 
 ### Tree：Layout
 
 | Field | Detail |
 |-------|--------|
 | Intent | ブロックの行の範囲、帯、空行、葉自身の表記を、行と列で記録・参照する |
-| Requirements | 7.1–7.10, 11.2, 14.6 |
+| Requirements | 7.1–7.11, 11.2, 14.6 |
 
 ```c
 typedef enum amark_spell_kind
@@ -699,6 +713,9 @@ AMARK_API amark_error_t amark_block_add_blank_line(amark_node_t *container, cons
 AMARK_API amark_error_t amark_block_add_token(amark_node_t *block, const amark_layout_token_t *token);
 AMARK_API amark_error_t amark_block_move_lines(amark_node_t *from, amark_node_t *to,
                                                amark_line_id_t first, uint32_t count);
+AMARK_API amark_error_t amark_block_remove_lines(amark_node_t *leaf, amark_line_id_t first, uint32_t count);
+AMARK_API amark_error_t amark_block_trim_content_start(amark_node_t *leaf, uint32_t columns,
+                                                       amark_spell_kind_t kind, amark_facet_t facet, uint16_t role);
 AMARK_API amark_error_t amark_block_discard_margin(amark_node_t *container, amark_line_id_t line);
 AMARK_API size_t amark_block_margin_count(const amark_node_t *container);     /* blank_line、token も同じ形 */
 AMARK_API amark_error_t amark_block_margin_at(const amark_node_t *container, size_t index, amark_margin_t *out);
@@ -716,14 +733,18 @@ AMARK_API amark_error_t amark_block_find_margin(const amark_node_t *container, a
   - 行の幅を超える列
   - 範囲の境界がタブ以外の UTF-8 の文字の途中にあるもの（タブの途中は認める）
   - LAZY で空でない範囲、PRESENT で空の範囲を持つ帯（空行での item の帯は、PRESENT で空を認める）
-  - コンテナでないノードへの帯と空行
+  - MARGINS でない型への帯、ブロックの子を持てない型への空行
   - 行の範囲の外の行
+- **遅延継続の帯の列**：LAZY の帯の列（空の範囲の位置）は、その行で外側の祖先のコンテナの帯が終わる列とする。外側に帯がなければ 0 とする。例えば `> - a` の次の行 `b` では、block_quote の帯も item の帯も、列 0 の LAZY になる。
+- **空行の持ち主**（7.4）：空行は、ブロックの子を持てるブロック（document、list、コンテナ）のうち、その行を含み、その行を行の範囲に含む子を持たない一番内側のものが持つ。ブロックの行の範囲には、末尾の空行を含めない。したがって、リストの項目の間の空行は list が、1 つの項目の中の子の間の空行は item が持つ。
 - **同じ行の分け合い**（7.8）：`AMARK_NODE_TYPE_SHARE_LINES` の型の子は、同じ行を、兄弟の順に重ならない列の範囲で記録できる。それ以外の兄弟が同じ行を記録するのは、Verbatim の判定で「出せない」になる（記録の時点では検査しない。複製は同じ行を持つため）。
 - **中身の中の表記**（7.9）：葉の中身は、1 つの行に複数の部分（piece）を持てる。部分の間の列は、葉自身の表記のトークンが持つ。
-- **行の移し替え**（7.10）：`from` の行の範囲の先頭か末尾にある行を、新しいブロック `to` に移す。
-  - 移すもの：その行の葉自身の表記と、中身の部分。`from` の中身は、残りの部分から作り直す。
-  - 前提：`from` に中身のトークンとインラインの子がない（ブロックの段階の操作）。`to` は行の範囲を持たない、まだ記録のないブロックである。
+- **行の移し替え**（7.10）：葉 `from` の行の範囲の先頭か末尾にある行を、新しい葉 `to` に移す（段落の先頭の行をリンク参照定義に、setext の下線の前の行を見出しにするなど）。
+  - 移すもの：その行の葉自身の表記と、中身の部分。`from` の中身は残りの部分から、`to` の中身は移した部分から作り直す。
+  - 前提：`from` と `to` はどちらも CONTENT の葉である。`from` に中身のトークンとインラインの子がない（ブロックの段階の操作）。`to` は行の範囲を持たず、まだ記録がない。
   - 帯はコンテナのものなので、移さない。
+- **行の取り除き**（7.11）：葉の行の範囲の先頭か末尾の行について、その行の葉自身の表記と中身の部分を除き、行の範囲を縮め、中身を作り直す。前提は行の移し替えと同じである。段落の行を表（コンテナ）として記録し直すときは、段落から行を取り除き、表の行とセルに改めて記録する。
+- **中身の先頭の削り**（7.11）：中身の最初の部分の先頭から `columns` 列を、指定した種類、項目、役割を持つ葉自身の表記のトークンに変え、中身を作り直す。タスクリストの記号（`[ ] `）やブロックの段階で消費する先頭の記法に使う。前提は、中身のトークンとインラインの子がないことである。
 - **帯を捨てる操作**：帯を取り除き、そのコンテナの構造の綴りの印を立てる。組み込みの list の `on_change` と、拡張のフックが使う。
 - **帯の検索**（11.2）：行の順の配列を二分探索する。
 
@@ -732,7 +753,7 @@ AMARK_API amark_error_t amark_block_find_margin(const amark_node_t *container, a
 | Field | Detail |
 |-------|--------|
 | Intent | 葉の中身（content オブジェクト）と、その上のトークン |
-| Requirements | 8.1–8.7, 14.6 |
+| Requirements | 8.1–8.8, 5.6, 14.6 |
 
 ```c
 typedef enum amark_content_state
@@ -771,22 +792,31 @@ AMARK_API amark_error_t amark_node_content_token_at(const amark_node_t *node, si
 AMARK_API amark_error_t amark_node_move_content_tokens(amark_node_t *from, amark_node_t *to, size_t first, size_t count);
 AMARK_API amark_error_t amark_node_split_content_token(amark_node_t *node, size_t index, size_t at);
 AMARK_API amark_error_t amark_block_replace_content(amark_node_t *target, const amark_node_t *source_leaf);
+AMARK_API amark_error_t amark_node_content_base(const amark_node_t *node, const char **bytes, size_t *length,
+                                               amark_content_state_t *state, bool *is_own_leaf_content);
 ```
 - **content オブジェクト**（内部）：
   - 持つもの：参照カウント、バイト列、状態（配置済み / 自由）、部分の配列（配置済みのとき）
   - 参照するもの：葉は自分の中身を参照する。トークンを持つノードは、トークンの土台の中身を参照する。content オブジェクトはノードを参照しない。
+  - 書き込みのときの写し（5.6）：content オブジェクトを変える操作は、参照カウントが 2 以上なら、先に写してから変える。対象の操作は、部分の追加、行の移し替え・取り除き、先頭の削り、配置済みから自由への変更である。
+    - 写した新しいオブジェクトを、その葉の中身にする。
+    - その葉と子孫のトークンのうち、元のオブジェクトを土台にしていたものを、新しいオブジェクトに付け替える。
+    
+    複製したノードは元のオブジェクトを使い続けるので、一方への操作がもう一方の綴りと位置を変えない。
 - **配置済みの中身の実体化**（8.1、8.2）：`amark_block_add_content` は、部分を行の順に足すたびに、中身のバイト列を延ばす。
   - 部分の範囲の元のバイトを写す。
   - 範囲の端がタブの途中なら、そのタブの中の範囲の列の数だけ空白を写す。
   - 前の部分と別の行なら、先に仮想の `\n` を 1 バイト足す。同じ行なら足さない（7.9）。
   
   `amark_block_content_bytes` は、このバイト列を返す。
+- **自由な中身**（8.1）：`amark_block_set_free_content` は、CRLF と CR を LF に揃えて持つ。自由な中身では、各 LF が改行の位置で、LINE_BREAK のトークンはそこだけを指せる。
+- **土台の読み取り**（8.8）：`amark_node_content_base` は、ノードのトークンの土台（別の葉へ移したノードや、取り込んだノードでは元の中身）のバイト列と状態を返す。`is_own_leaf_content` は、土台がそのノードの祖先の葉（ノード自身が葉ならその葉）の今の中身であるかを返す。`markdown-renderer` は、綴りの残るノードのバイトを、この土台とトークンの範囲から出す。
 - **トークンの記録**（8.3、8.4）：
   - 土台：`leaf` の中身を土台とする。ノードがすでに別の土台のトークンを持つなら、不正な引数とする。
   - 記録の順序：中身の上の始まりの順に、重ならずに足す。
   - 不正な引数とする記録：
     - 範囲が中身の外にあるか、UTF-8 の文字の途中に境界がある
-    - LINE_BREAK が仮想の `\n` でない位置を指す
+    - LINE_BREAK が改行の位置（配置済みなら仮想の `\n`、自由な中身なら LF）でない位置を指す
     - TAB_REMAINDER が、タブを広げた空白でない位置を指す
     - REPLACED が NUL でも不正な UTF-8 の列でもない位置を指す
     - ESCAPE が `\` と ASCII の句読点の 2 バイトでない
@@ -820,7 +850,14 @@ AMARK_API amark_error_t amark_document_find_definition(const amark_document_t *d
   2. 内側の空白の連続を 1 つの空白にする。
   3. 各符号位置を `amark_unicode_case_fold` で畳み込む。
 - **索引**：文書は、正規化したラベルから、そのラベルを持つ link_definition（切り離したものを含む）の列への表を持つ。
-  - 更新するとき：ラベルの記録と設定（`on_change` と記録の関数から）、ノードの生成（ラベルが空なら入れない）、解放。
+  - **汚れの印**：link_definition のラベルの値が変わりうる操作は、そのノードに汚れの印を付けて、文書の汚れの列に入れるだけにする。対象の操作は次のとおり。
+    - label の項目のトークンの記録、移動、分割
+    - label の記録と設定
+    - 綴りを捨てる操作
+    - 中身の置き換え
+    - 複製と取り込みで作ったノード
+  - **解放**：解放したノードは表と汚れの列から除く。
+  - **検索の前の処理**：検索の前に汚れの列を処理し、各ノードの今のラベルを正規化して表のキーを付け替える。空のラベルは表に入れない。1 つのノードにつき、ラベルの長さに比例する時間で済む。
   - 挿入と切り離しでは更新しない（14.5）。
 - **検索**（9.2、9.3）：
   1. ラベルを正規化し、表を引く。
@@ -847,7 +884,7 @@ AMARK_API amark_error_t amark_node_import_children(amark_node_t *target_parent, 
 - **複製**（5.6）：型、項目の値、style、行の範囲、配置の記録、トークン、拡張のデータ（`copy`）、子孫を写す。content オブジェクトは共有する（参照カウントを増やす）。複製したノードは切り離された状態になる。
 - **取り込み**（5.7–5.9）：
   1. 部分木が参照する行（行の範囲、帯、空行、レイアウトのトークン、中身の部分の行）を集める。
-  2. その行のバイト列を、元の行の順と改行の種類のまま、取り込み先の文書の新しいソースとして登録する（取り込み 1 回につき 1 つ）。
+  2. その行のバイト列を、元の行の順と改行の種類のまま、取り込み先の文書の新しいソース（取り込み 1 回につき 1 つ。入力の終わりを通知した状態）に写す。行は、LineTable の内部関数で、各行の範囲と改行の種類を明示して行の表に足す。バイト列を分け直さないので、改行のない行の次の行や、CR の行の次の空の LF の行が 1 行につながることはない。確保に失敗したら、足した行とソースを取り除く。
   3. 行の番号を写し替える。
   4. content オブジェクトは、取り込み 1 回の中で 1 つにつき 1 回だけ写す。
   
@@ -955,15 +992,24 @@ AMARK_API bool amark_node_is_new(const amark_node_t *node);
   2. 中身を持つ葉なら、11.3 が真である。
   3. 子がすべて真で、それぞれの行の範囲が R の中にあり、兄弟の順に並ぶ。同じ行を持つのは、n が SHARE_LINES で、列の範囲が兄弟の順に重ならないときだけとする。
   4. R の各行 L について、n の記録と子が、ある列 c0 から行の終わりまでをすき間も重なりもなく覆う。
-     - コンテナなら、n が L に帯を持つ。帯の終わり（LAZY なら始まり）から先を、L の空行の記録か、L を持つ子が続けて覆う。
-     - 子が L で始まる列は、子がコンテナなら子の帯の始まり、葉なら子の最初の記録の列とする。
+     - コンテナ（MARGINS）なら、n が L に帯を持つ。帯の終わり（LAZY なら、その空の範囲の位置）から先を、n の表記、L の空行の記録、L を持つ子が続けて覆う。
+     - 通り抜けのブロック（document、list など MARGINS でない、ブロックの子を持てるブロック）なら、帯を求めない。L を、n の表記、L の空行の記録、L を持つ子が、c0 から続けて覆う。
+     - 子が L で始まる列は、次のとおりとする。
+       - 子がコンテナなら、子の帯の位置
+       - 子が通り抜けのブロックなら、その最初の子か空行か表記の列（子の判定の計算のときに、行ごとの始まりの列として覚える）
+       - 子が葉なら、子の最初の記録の列
      - 葉なら、n の表記と中身の部分が L の上で続けて行の終わりまで覆う。
   5. インラインのノードには 11.3 を使う。部分木の根がインラインなら、その祖先の葉の中身の上で、根の部分木のトークンが入れ子の順を保ち、綴りを捨てていないことで判定する。
 
   この規則で、根の外の祖先の帯（c0 より左）は判定に入らない。`markdown-renderer` は、真の部分木の各行を「祖先の帯 ＋ 元の行の c0 から先」として出せる。
 - **祖先の帯**（11.5）：`amark_block_find_margin` を祖先ごとに呼ぶ。移動したブロックの行には、移動先の祖先の帯がない。
 - **新しいノード**（11.6）：行の範囲も記録もトークンも持たず、構造の綴りの印もない。
-- **タイトの導出**（3.7）：リストの部分木の中で、block_quote 以外のブロックが空行として持つ行を集める。その行が、兄弟の item の間か、1 つの item の中の兄弟の子の間にあれば、ルーズとする（INPUT.md の 4.3）。「間」は、前のブロックの最後の行より後で、次のブロックの最初の行より前を指す。
+- **タイトの導出**（3.7）：list 自身と、その直下の item が持つ空行だけを見る。
+  - list が持つ空行が、兄弟の item の間にあればルーズとする。
+  - item が持つ空行が、その item の兄弟の子の間にあればルーズとする。
+  - 「間」は、前のブロックの最後の行より後で、次のブロックの最初の行より前を指す。
+  
+  空行の持ち主の規則（Layout）により、これは INPUT.md の 4.3 の規則と同じ結果になる。4.3 の規則は、引用以外のブロックが持つ空行をリストの部分木から集めるものである。入れ子のリストの中の空行は入れ子のリストか、その item が持つので、外のリストの兄弟の間に来ない。引用の中の空行は block_quote が持つので、数えない。計算は list ごとに直下の子と空行の数に比例し、文書のすべての list の合計はノードと記録の数に比例する（14.9）。
 - **キャッシュ**（14.9）：
   - ノードは、判定の結果とタイトの導出の結果と、その有効の印を持つ。
   - 計算は子の結果を先に求め、再帰を使わずに後順でたどる。
@@ -1025,7 +1071,7 @@ AMARK_API amark_error_t amark_node_dump(const amark_node_t *node, uint32_t flags
   - 記録が順序と範囲を守っている。
   - content オブジェクトの参照カウントが実際の参照の数と一致する。
   - キャッシュの不変条件が成り立つ（有効なノードの子はすべて有効）。
-  - 索引の候補がすべて link_definition で、ラベルが一致する。
+  - 索引の候補がすべて link_definition で、汚れの印のないものは今のラベルのキーにある。
 
 ### Tests：TestSupport
 
@@ -1072,7 +1118,7 @@ graph TB
 - **帯と空行**：コンテナの帯は、行の順に 1 行に 1 つある。空行も、行の順に 1 行に 1 つある。
 - **トークンの順**：レイアウトのトークンは行と列の順に、中身のトークンは中身の上の順に、重ならずに並ぶ。
 - **トークンの土台**：トークンを持つインラインのノードは、ちょうど 1 つの content オブジェクトを土台にする。
-- **content オブジェクト**：参照カウントは、それを中身とする葉の数と、それを土台とするノードの数の和である。
+- **content オブジェクト**：参照カウントは、それを中身とする葉の数と、それを土台とするノードの数の和である。参照カウントが 2 以上のオブジェクトは変更しない（書き込みのときの写し）。
 - **項目と綴り**：項目の綴りを捨てた印が立っているなら、その項目を綴るトークンはない。STRING の項目の値は、トークンがあれば導出値、なければ設定か記録の値か既定の値である。
 - **キャッシュ**：有効なノードの子は、すべて有効である。
 
@@ -1119,7 +1165,19 @@ graph TB
   - 参照の形のリンクへの宛先の設定で、インラインの形になり、同じラベルのほかのリンクと定義が変わらない（6.10）。
   - list と heading と code_block の `on_change` の規則、タイトの上書きと取り消し（6.11）
 - **値の導出**：エスケープ、文字参照（名前付き、10 進、16 進、0 と範囲外）、REPLACED、仮想の改行、FOLD_LINE_BREAKS（コードスパン）、LINES（コードブロック）、RAW（ラベル、HTML）、TAB_REMAINDER（`>\t\tfoo`）
-- **Layout と Content**：記録の順序と範囲の違反（7.7、8.4）、同じ行の分け合い（7.8）、中身の中の表記（7.9）、行の移し替え（7.10）、トークンの移動と分割（8.5）、中身の置き換え（同じ文書と別の文書、8.6）
+- **Layout と Content**：
+  - 記録の順序と範囲の違反（7.7、8.4）、同じ行の分け合い（7.8）、中身の中の表記（7.9）
+  - 行の移し替え（複数行のタイトルを持つリンク参照定義、7.10）、行の取り除きと中身の先頭の削り（7.11）
+  - トークンの移動と分割（8.5）、中身の置き換え（同じ文書と別の文書、8.6）
+  - 自由な中身の CRLF と CR の揃えと、LF の位置の LINE_BREAK（8.1、8.4）
+  - 土台の読み取り（移動したノード、8.8）
+  - 複製した葉の一方の綴りを捨て、中身を追加しても、もう一方の綴り、判定、位置が変わらない（5.6、書き込みのときの写し）
+- **CONTENT の項目**：literal の設定の後、`amark_block_set_free_content` で中身を変えると、取得が新しい中身の値を返す（8.7）。
+- **CopyImport の行**：改行のない最後の行と、CR の行の次の空の LF の行を含む部分木を取り込んでも、行の数と改行の種類が保たれる（5.7）。
+- **リストの判定とタイト**：
+  - 引用の中のリスト（遅延継続を含む）を持つ無編集の文書で、根の判定が真になる（11.4）。
+  - 項目の間の空行は list が持つ。入れ子のリストと引用の中の空行は、外のリストのタイトに効かない（3.7）。
+  - 開始番号を 9 から 10 にすると、最初の項目の帯がすべて捨てられる（list の on_change）。
 - **DefinitionIndex**：
   - 正規化（ß、ẞ、空白の連続）
   - 同じラベルの定義が複数あるとき、文書の順で最初のものを返す。構造を変えた後に結果が変わる。
