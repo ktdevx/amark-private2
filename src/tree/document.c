@@ -130,6 +130,23 @@ bool amark_document_edit_tracking(const amark_document_t *document)
     return (document != NULL) && document->tracking;
 }
 
+amark_error_t amark_document_take_syntax_set(amark_document_t *document,
+                                             amark_syntax_set_t *set)
+{
+    /* Only the heap set the document itself uses, once: the static core set is
+     * never freed, and a set the document does not use, or a second one, would be
+     * freed while something else may still use it. */
+    if ((document == NULL) || (set == NULL) || (set != document->syntax) || set->is_static
+        || (document->owned_syntax != NULL))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+
+    document->owned_syntax = set;
+
+    return AMARK_ERROR_NONE;
+}
+
 /* --- Sources ------------------------------------------------------------------ */
 
 /*

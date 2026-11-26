@@ -26,6 +26,13 @@
  * LF, CR and CRLF lines to lines and columns and rejects the out of range ones;
  * the destruction of the document frees the sources; and the out-of-memory sweeps
  * of the addition and the appending leave the document unchanged.
+ *
+ * Suite ownership (1.3, 1.10, 1.11): amark_document_take_syntax_set takes the heap
+ * set the document uses, which the destruction of the document then frees after
+ * every node (a deinit that reads the set still finds it, under the sanitizers
+ * too), leaving no block; the static core set, a set the document does not use, a
+ * second hand-over and NULL arguments are rejected, the document is unchanged and
+ * the caller still destroys its set once.
  */
 #include "tree/syntax_set.h"
 #include "tree/tree.h"
@@ -1432,8 +1439,298 @@ NAOS_SUITE(source,
     NAOS_ADD_TEST(adding_a_source_passes_the_out_of_memory_sweep),
     NAOS_ADD_TEST(appending_to_a_source_passes_the_out_of_memory_sweep))
 
+/* --- Suite ownership ---------------------------------------------------------------- */
+
+/* The lookups the deinit of test.reader made through the syntax set of the document,
+ * and how many of them found the type and its extension. */
+static size_t reader_deinits;
+static size_t reader_lookups_found;
+
+/* Reads the syntax set of the document of node: the extension list, the dynamic
+ * types and the name index, all freed with the set. Under the sanitizers, a set
+ * freed before the nodes makes these reads fail the test. */
+static void reader_deinit(amark_node_t *node, void *data)
+{
+    const amark_syntax_set_t *set = amark_document_syntax_set(amark_node_document(node));
+    amark_node_type_t by_desc = AMARK_NODE_NONE;
+    amark_node_type_t by_name = AMARK_NODE_NONE;
+
+    (void)data;
+    reader_deinits++;
+    if ((amark_syntax_set_find_extension(set, "reader") != NULL)
+        && amark_syntax_set_node_type_of(set, amark_node_desc(node), &by_desc)
+        && amark_syntax_set_find_node_type(set, "reader.node", &by_name) && (by_desc == by_name)
+        && (amark_syntax_set_node_type_desc(set, by_desc) == amark_node_desc(node)))
+    {
+        reader_lookups_found++;
+    }
+}
+
+static const amark_node_type_desc_t reader_type = {
+    sizeof(amark_node_type_desc_t), "reader.node", AMARK_NODE_LEVEL_BLOCK, AMARK_CONTENT_BLOCK,
+    0, AMARK_LITERAL_NONE, 0, NULL, NULL, NULL, reader_deinit, NULL, NULL, NULL, NULL
+};
+
+static const amark_node_type_desc_t *const reader_types[] = { &reader_type };
+
+static const amark_extension_t reader_extension = {
+    sizeof(amark_extension_t), "reader", reader_types, 1, NULL, 0, NULL
+};
+
+/* Creates in *out_set a frozen set with reader_extension (reader.node is 256). */
+static amark_error_t create_reader_set(amark_syntax_set_t **out_set)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_error_t err;
+
+    *out_set = NULL;
+    err = amark_syntax_set_create(&set);
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_syntax_set_append(set, &reader_extension);
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_syntax_set_freeze(set);
+    }
+
+    if (err != AMARK_ERROR_NONE)
+    {
+        amark_syntax_set_destroy(set);
+        return err;
+    }
+
+    *out_set = set;
+    return AMARK_ERROR_NONE;
+}
+
+NAOS_TEST(a_set_handed_to_the_document_is_freed_with_it)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_node_t *attached = NULL;
+    amark_node_t *detached = NULL;
+    amark_error_t taken = AMARK_ERROR_INVALID_STATE;
+    bool owned = false;
+    bool ok;
+    size_t live_after;
+
+    box_init_fails = false;
+    SET_COUNTING();
+
+    ok = (create_test_set(&set) == AMARK_ERROR_NONE)
+         && (amark_document_create(set, &document) == AMARK_ERROR_NONE)
+         && (amark_node_create(document, 256, &attached) == AMARK_ERROR_NONE)
+         && (amark_node_create(document, 256, &detached) == AMARK_ERROR_NONE);
+    if (ok)
+    {
+        link_last(amark_document_root(document), attached);
+        taken = amark_document_take_syntax_set(document, set);
+        owned = (document->owned_syntax == set) && (amark_document_syntax_set(document) == set);
+    }
+
+    /* The set is the document's now: the caller destroys only the document. */
+    live_after = counting.live_blocks;
+    amark_document_destroy(document);
+    if (taken != AMARK_ERROR_NONE)
+    {
+        amark_syntax_set_destroy(set);
+    }
+
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_TRUE(ok);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, taken);
+    NAOS_CHECK_TRUE(owned);
+    NAOS_CHECK_UINT_GT(live_after, 4);
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+}
+
+NAOS_TEST(the_owned_set_is_freed_after_the_deinit_of_every_node)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_node_t *nodes[3] = { NULL };
+    amark_error_t taken = AMARK_ERROR_INVALID_STATE;
+    bool ok;
+    size_t i;
+
+    reader_deinits = 0;
+    reader_lookups_found = 0;
+    SET_COUNTING();
+
+    /* Under the root, in a subtree and detached: the root is freed first, the
+     * detached node after it, and the set only after both. */
+    ok = (create_reader_set(&set) == AMARK_ERROR_NONE)
+         && (amark_document_create(set, &document) == AMARK_ERROR_NONE);
+    for (i = 0; ok && (i < 3); i++)
+    {
+        ok = (amark_node_create(document, 256, &nodes[i]) == AMARK_ERROR_NONE);
+    }
+
+    if (ok)
+    {
+        link_last(amark_document_root(document), nodes[0]);
+        link_last(amark_document_root(document), nodes[1]);
+        taken = amark_document_take_syntax_set(document, set);
+    }
+
+    amark_document_destroy(document);
+    if (taken != AMARK_ERROR_NONE)
+    {
+        amark_syntax_set_destroy(set);
+    }
+
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_TRUE(ok);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, taken);
+    NAOS_CHECK_UINT_EQ(3, reader_deinits);
+    NAOS_CHECK_UINT_EQ(3, reader_lookups_found);
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+}
+
+NAOS_TEST(a_rejected_hand_over_leaves_the_set_to_the_caller)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_syntax_set_t *other = NULL;
+    amark_syntax_set_t *core = (amark_syntax_set_t *)amark_syntax_set_core();
+    amark_document_t *document = NULL;
+    amark_document_t *core_document = NULL;
+    amark_error_t errors[6];
+    bool unowned = false;
+    bool ok;
+    size_t i;
+
+    SET_COUNTING();
+
+    ok = (create_test_set(&set) == AMARK_ERROR_NONE)
+         && (create_test_set(&other) == AMARK_ERROR_NONE)
+         && (amark_document_create(set, &document) == AMARK_ERROR_NONE)
+         && (amark_document_create(NULL, &core_document) == AMARK_ERROR_NONE);
+    if (ok)
+    {
+        /* The static core set (the one core_document uses), a set the document does
+         * not use (a heap one, and the core set for a document with another set),
+         * and NULL arguments. */
+        errors[0] = amark_document_take_syntax_set(core_document, core);
+        errors[1] = amark_document_take_syntax_set(document, other);
+        errors[2] = amark_document_take_syntax_set(core_document, set);
+        errors[3] = amark_document_take_syntax_set(document, core);
+        errors[4] = amark_document_take_syntax_set(NULL, set);
+        errors[5] = amark_document_take_syntax_set(document, NULL);
+        unowned = (document->owned_syntax == NULL) && (core_document->owned_syntax == NULL)
+                  && (amark_document_syntax_set(document) == set)
+                  && (amark_document_syntax_set(core_document) == amark_syntax_set_core());
+    }
+
+    /* The caller still owns each set: destroying them after the documents frees
+     * each block once (the test allocator fails a second free). */
+    amark_document_destroy(document);
+    amark_document_destroy(core_document);
+    amark_syntax_set_destroy(set);
+    amark_syntax_set_destroy(other);
+    amark_syntax_set_destroy(core);
+    amark_allocator_set(NULL);
+
+    NAOS_REQUIRE_TRUE(ok);
+    NAOS_CHECK_TRUE(unowned);
+    for (i = 0; i < 6; i++)
+    {
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, errors[i]);
+    }
+
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+    NAOS_CHECK_TRUE(amark_syntax_set_is_frozen(amark_syntax_set_core()));
+}
+
+NAOS_TEST(a_second_hand_over_is_rejected)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *document = NULL;
+    amark_error_t first = AMARK_ERROR_INVALID_STATE;
+    amark_error_t second = AMARK_ERROR_NONE;
+    bool still_owned = false;
+    bool ok;
+
+    SET_COUNTING();
+
+    ok = (create_test_set(&set) == AMARK_ERROR_NONE)
+         && (amark_document_create(set, &document) == AMARK_ERROR_NONE);
+    if (ok)
+    {
+        first = amark_document_take_syntax_set(document, set);
+        second = amark_document_take_syntax_set(document, set);
+        still_owned = (document->owned_syntax == set);
+    }
+
+    /* The document frees the set once (the test allocator fails a second free). */
+    amark_document_destroy(document);
+    if (first != AMARK_ERROR_NONE)
+    {
+        amark_syntax_set_destroy(set);
+    }
+
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_TRUE(ok);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, first);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, second);
+    NAOS_CHECK_TRUE(still_owned);
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+}
+
+NAOS_TEST(a_set_shared_with_another_document_outlives_it_when_owned)
+{
+    amark_syntax_set_t *set = NULL;
+    amark_document_t *owner = NULL;
+    amark_document_t *user = NULL;
+    amark_node_t *node = NULL;
+    amark_error_t taken = AMARK_ERROR_INVALID_STATE;
+    bool ok;
+
+    reader_deinits = 0;
+    reader_lookups_found = 0;
+    SET_COUNTING();
+
+    /* Another document that uses the set is destroyed before the owner (the rule of
+     * amark/document.h): the deinit of its node still finds the set. */
+    ok = (create_reader_set(&set) == AMARK_ERROR_NONE)
+         && (amark_document_create(set, &owner) == AMARK_ERROR_NONE)
+         && (amark_document_create(set, &user) == AMARK_ERROR_NONE)
+         && (amark_node_create(user, 256, &node) == AMARK_ERROR_NONE);
+    if (ok)
+    {
+        taken = amark_document_take_syntax_set(owner, set);
+    }
+
+    amark_document_destroy(user);
+    amark_document_destroy(owner);
+    if (taken != AMARK_ERROR_NONE)
+    {
+        amark_syntax_set_destroy(set);
+    }
+
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_TRUE(ok);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, taken);
+    NAOS_CHECK_UINT_EQ(1, reader_lookups_found);
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+}
+
+NAOS_SUITE(ownership,
+    NAOS_SET_TEARDOWN(restore),
+    NAOS_ADD_TEST(a_set_handed_to_the_document_is_freed_with_it),
+    NAOS_ADD_TEST(the_owned_set_is_freed_after_the_deinit_of_every_node),
+    NAOS_ADD_TEST(a_rejected_hand_over_leaves_the_set_to_the_caller),
+    NAOS_ADD_TEST(a_second_hand_over_is_rejected),
+    NAOS_ADD_TEST(a_set_shared_with_another_document_outlives_it_when_owned))
+
 NAOS_MAIN(
     NAOS_ADD_SUITE(document),
     NAOS_ADD_SUITE(node),
-    NAOS_ADD_SUITE(source)
+    NAOS_ADD_SUITE(source),
+    NAOS_ADD_SUITE(ownership)
 )
