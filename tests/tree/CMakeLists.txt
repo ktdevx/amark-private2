@@ -93,3 +93,10 @@ amark_add_test(extension_type_test SOURCES extension_type_test.c LIBRARIES amark
 # records, sources, ring, invariants), the syntax sets and the outputs are as
 # before (reads the ring and checks the invariants).
 amark_add_test(oom_test SOURCES oom_test.c LIBRARIES amark_test_tree INTERNAL)
+
+# Deep trees and complexity: a chain of 100000 nodes traversed, copied, imported,
+# imported as children, compared and destroyed, and a chain of 10000 dumped,
+# without recursion; the internal counters of the edit propagation, the cycle check
+# and the token moves stay within the bounds of the edits (reads the internal
+# counters and the ring and checks the invariants).
+amark_add_test(scale_test SOURCES scale_test.c INTERNAL)
