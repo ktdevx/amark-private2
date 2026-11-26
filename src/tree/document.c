@@ -3,7 +3,8 @@
 
 /*
  * Document: the creation and destruction of documents, the ownership of the
- * syntax set and the ring of every node.
+ * syntax set and the ring of every node (the sources and the line table are
+ * LineTable's, in line_table.c).
  */
 #include "tree/tree.h"
 
@@ -63,6 +64,7 @@ void amark_document_destroy(amark_document_t *document)
         amark_tree_node_release(root->ring_next);
     }
     amark_tree_node_release(root);
+    amark_line_table_deinit(document);
     /* The owned syntax set goes last, after every node (1.8). */
     owned_set = document->owned_set;
     amark_free(document);

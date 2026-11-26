@@ -176,6 +176,59 @@ typedef enum amark_tree_change
  */
 void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind);
 
+/* ---- LineTable (line_table.c) ----------------------------------------------- */
+
+/* The maximum number of lines of a line table (the identifiers stay below
+ * AMARK_LINE_NONE). */
+#define AMARK_TREE_MAX_LINES ((size_t)UINT32_MAX - 1u)
+
+/* A completed line of the line table (amark_line_info_t without the size). */
+typedef struct amark_tree_line
+{
+    amark_source_id_t source;
+    uint32_t number;
+    size_t offset;
+    size_t length;
+    uint8_t eol; /* amark_eol_t */
+    uint32_t width;
+} amark_tree_line_t;
+
+/*
+ * A source: its bytes, its completed lines, and the state of the division into
+ * lines (the unfinished line).
+ */
+typedef struct amark_tree_source
+{
+    /* The bytes, the BOM included (NULL while capacity is 0). */
+    char *data;
+    size_t length;
+    size_t capacity;
+    /* Whether the presence of the BOM is decided: it is once the source has 3
+     * bytes, once its bytes are not a prefix of the BOM, and at the end of the
+     * input. No line is completed before. */
+    bool bom_known;
+    bool has_bom;
+    /* The input has ended (AMARK_SOURCE_FINISHED, amark_document_finish_source). */
+    bool finished;
+    /* The unfinished line: its first byte, the end of the bytes already looked
+     * at (a CR at the end of data waits there for the next byte), and the width
+     * of the bytes before that end. */
+    size_t line_start;
+    size_t scanned;
+    uint64_t width;
+    /* The identifiers of the lines of the source, in order (lines[k] has the
+     * number k + 1). */
+    amark_line_id_t *lines;
+    size_t line_count;
+    size_t line_capacity;
+} amark_tree_source_t;
+
+/* Frees the sources and the line table of document and leaves them empty. */
+void amark_line_table_deinit(amark_document_t *document);
+
+/* The number of bytes of a line ending (0 for AMARK_EOL_NONE). */
+size_t amark_line_table_eol_length(uint8_t eol);
+
 /* ---- Document (document.c) ------------------------------------------------- */
 
 /*
@@ -211,6 +264,16 @@ struct amark_document
     /* Advanced by every structural change (amark_tree_changed). */
     uint64_t structure_generation;
     amark_tree_stats_t stats;
+    /* The sources (index = identifier) and the line table (index = line
+     * identifier), and the line ending of the first line that has one (0 while
+     * there is none). */
+    amark_tree_source_t *sources;
+    size_t source_count;
+    size_t source_capacity;
+    amark_tree_line_t *lines;
+    size_t line_count;
+    size_t line_capacity;
+    uint8_t default_eol;
     /* The epoch of the internal check (amark_tree_check): each check advances
      * it by 2 and marks the nodes it sees with it. */
     uint64_t check_epoch;
@@ -236,7 +299,12 @@ typedef enum amark_tree_violation
     /* A link among the descendants of a link. */
     AMARK_TREE_VIOLATION_LINK_IN_LINK,
     /* A node whose cache is valid has a child whose cache is not. */
-    AMARK_TREE_VIOLATION_CACHE
+    AMARK_TREE_VIOLATION_CACHE,
+    /* The sources and the line table: the lines of a source are not the
+     * division of its bytes in order (offsets, ranges, line endings, widths,
+     * numbers, identifiers), or the default line ending is not the one of the
+     * first line that has one. */
+    AMARK_TREE_VIOLATION_LINES
 } amark_tree_violation_t;
 
 /* The first violation found by amark_tree_check. */

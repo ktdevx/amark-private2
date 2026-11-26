@@ -7,7 +7,8 @@
  *
  * The checks run in order and stop at the first violation:
  *   1. the document checks (document_checks[]): the document node, the ring of
- *      every node, then the walk of every tree;
+ *      every node, the walk of every tree, then the sources and the line
+ *      table;
  *   2. the walk visits each node of each tree once and runs the node checks
  *      (node_checks[]) on it: the relations, the containment rules, the link in
  *      link rule and the cache invariant.
@@ -24,6 +25,8 @@
  * not in the ring, or that is reached twice, is seen without any allocation.
  */
 #include "tree/tree.h"
+
+#include <string.h>
 
 /* The state of one run. */
 typedef struct check_context
@@ -328,12 +331,129 @@ static bool check_trees(check_context_t *context)
                 "a node is not reachable from the top of its tree");
 }
 
+/* The sources and the line table: the lines of each source are, in order of
+ * their identifiers, the division of its bytes from the first byte after the
+ * BOM (contiguous ranges without CR or LF, followed by the bytes of their line
+ * ending, with their number in the source and their width), up to its
+ * unfinished line; every line of the table belongs to exactly one source; and
+ * the default line ending is the one of the first line that has one. Linear in
+ * the bytes of the sources. */
+static bool check_lines(check_context_t *context)
+{
+    const amark_document_t *document = context->document;
+    uint8_t default_eol = 0;
+    size_t listed = 0;
+    size_t s;
+    size_t i;
+
+    for (s = 0; s < document->source_count; s++)
+    {
+        const amark_tree_source_t *source = &document->sources[s];
+        size_t offset = source->has_bom ? 3 : 0;
+        size_t k;
+
+        if (source->length > source->capacity || source->line_count > source->line_capacity ||
+            (!source->bom_known && (source->has_bom || source->line_count > 0)) ||
+            (source->has_bom && (source->length < 3 ||
+                                 memcmp(source->data, "\xEF\xBB\xBF", 3) != 0)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                        "a source has an inconsistent size or BOM");
+        }
+        for (k = 0; k < source->line_count; k++)
+        {
+            amark_line_id_t id = source->lines[k];
+            const amark_tree_line_t *line;
+            uint64_t width = 0;
+            size_t eol_length;
+            size_t b;
+
+            if (id >= document->line_count || (k > 0 && id <= source->lines[k - 1]))
+            {
+                return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                            "the lines of a source are not in the order of the table");
+            }
+            line = &document->lines[id];
+            if (line->source != s || line->number != k + 1)
+            {
+                return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                            "a line has a wrong source or number");
+            }
+            eol_length = amark_line_table_eol_length(line->eol);
+            if (line->eol < AMARK_EOL_NONE || line->eol > AMARK_EOL_CR ||
+                line->offset != offset || line->length > source->length - offset ||
+                eol_length > source->length - offset - line->length)
+            {
+                return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                            "a line does not follow the previous one in its source");
+            }
+            for (b = 0; b < line->length; b++)
+            {
+                char c = source->data[offset + b];
+
+                if (c == '\n' || c == '\r')
+                {
+                    return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                                "a line holds a line ending");
+                }
+                width += c == '\t' ? 4 - width % 4 : 1;
+            }
+            offset += line->length;
+            if (width != line->width ||
+                (line->eol == AMARK_EOL_NONE &&
+                 (!source->finished || k + 1 != source->line_count ||
+                  offset != source->length)) ||
+                (line->eol == AMARK_EOL_LF && source->data[offset] != '\n') ||
+                (line->eol != AMARK_EOL_NONE && line->eol != AMARK_EOL_LF &&
+                 source->data[offset] != '\r') ||
+                (line->eol == AMARK_EOL_CRLF && source->data[offset + 1] != '\n') ||
+                (line->eol == AMARK_EOL_CR && offset + 1 < source->length &&
+                 source->data[offset + 1] == '\n'))
+            {
+                return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                            "a line has a wrong width or line ending");
+            }
+            offset += eol_length;
+        }
+        /* The unfinished line starts after the last completed line; at the
+         * end of the input, nothing is left. */
+        if (source->bom_known &&
+            (source->line_start != offset || source->scanned < offset ||
+             source->scanned > source->length ||
+             (source->finished && offset != source->length)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                        "the unfinished line does not follow the completed lines");
+        }
+        listed += source->line_count;
+    }
+    if (listed != document->line_count)
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                    "a line of the table belongs to no source");
+    }
+    for (i = 0; i < document->line_count && default_eol == 0; i++)
+    {
+        if (document->lines[i].eol != AMARK_EOL_NONE)
+        {
+            default_eol = document->lines[i].eol;
+        }
+    }
+    if (default_eol != document->default_eol)
+    {
+        return fail(context, AMARK_TREE_VIOLATION_LINES, NULL,
+                    "the default line ending is not the one of the first line");
+    }
+    return true;
+}
+
 /* The checks of the document, in order. Add the invariants that span the
  * document (counts of references, the label index) after check_trees. */
 static const document_check_t document_checks[] = {
     check_root,
     check_ring,
     check_trees,
+    check_lines,
 };
 
 /* ---- Entry points ---------------------------------------------------------------- */
@@ -387,6 +507,8 @@ const char *amark_tree_violation_name(amark_tree_violation_t kind)
         return "link_in_link";
     case AMARK_TREE_VIOLATION_CACHE:
         return "cache";
+    case AMARK_TREE_VIOLATION_LINES:
+        return "lines";
     default:
         return "unknown";
     }

@@ -232,6 +232,34 @@ NAOS_TEST(structural_edit_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(source_and_line_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t source = 0;
+    amark_line_info_t info;
+    const char *data = NULL;
+    size_t length = 0;
+    bool has_bom = true;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_add_source(document, "a\r", 2, 0, &source));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, source, "\nb", 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_finish_source(document, source));
+    NAOS_CHECK_UINT_EQ(1, amark_document_source_count(document));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_source_data(document, source, &data, &length, &has_bom));
+    NAOS_CHECK_UINT_EQ(4, length);
+    NAOS_CHECK_FALSE(has_bom);
+    NAOS_CHECK_UINT_EQ(2, amark_document_line_count(document));
+    info.struct_size = sizeof(info);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_line(document, 1, &info));
+    NAOS_CHECK_INT_EQ(AMARK_EOL_NONE, info.eol);
+    NAOS_CHECK_INT_EQ(AMARK_EOL_CRLF, amark_document_default_eol(document));
+    NAOS_CHECK_UINT_EQ(AMARK_SOURCE_FINISHED, 1u);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -242,7 +270,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(registry_functions_link),
     NAOS_ADD_TEST(builtin_types_link),
     NAOS_ADD_TEST(document_and_node_functions_link),
-    NAOS_ADD_TEST(structural_edit_functions_link)
+    NAOS_ADD_TEST(structural_edit_functions_link),
+    NAOS_ADD_TEST(source_and_line_functions_link)
 )
 
 NAOS_MAIN(
