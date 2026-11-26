@@ -577,6 +577,29 @@ NAOS_TEST(verbatim_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(iterator_functions_link)
+{
+    amark_document_t *document = NULL;
+    amark_node_t *paragraph = NULL;
+    amark_iter_t *iter = NULL;
+    amark_node_t *root;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    root = amark_document_root(document);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_PARAGRAPH, &paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(root, paragraph));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_iter_create(root, &iter));
+    NAOS_CHECK_INT_EQ(AMARK_EVENT_ENTER, amark_iter_next(iter));
+    NAOS_CHECK_PTR_EQ(root, amark_iter_node(iter));
+    NAOS_CHECK_INT_EQ(AMARK_EVENT_ENTER, amark_iter_next(iter));
+    NAOS_CHECK_PTR_EQ(paragraph, amark_iter_node(iter));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_iter_reset(iter, root, AMARK_EVENT_EXIT));
+    NAOS_CHECK_INT_EQ(AMARK_EVENT_DONE, amark_iter_next(iter));
+    amark_iter_destroy(iter);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(version_matches_header),
     NAOS_ADD_TEST(error_string_describes_codes),
@@ -596,7 +619,8 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(content_functions_link),
     NAOS_ADD_TEST(content_token_functions_link),
     NAOS_ADD_TEST(block_stage_functions_link),
-    NAOS_ADD_TEST(verbatim_functions_link)
+    NAOS_ADD_TEST(verbatim_functions_link),
+    NAOS_ADD_TEST(iterator_functions_link)
 )
 
 NAOS_MAIN(
