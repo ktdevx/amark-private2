@@ -89,8 +89,9 @@ struct amark_document
     size_t source_count;
     size_t source_capacity;
     bool tracking;
-    /* Counters for the INTERNAL tests of the complexity: the ancestor steps of the
-     * edit propagation and the tokens moved by sorted insertions. */
+    /* Counters for the INTERNAL tests of the complexity, never exposed: the
+     * ancestor steps of the edit propagation (amark_edit_mark) and the tokens
+     * moved by sorted insertions (token.c). 0 when the document is created. */
     size_t stat_propagation_steps;
     size_t stat_token_moves;
 };
@@ -143,11 +144,16 @@ void amark_node_link_child(amark_node_t *parent, amark_node_t *before, amark_nod
 
 /*
  * Checks the invariants of document without recursion: the parent, child and
- * sibling links are symmetric, every child satisfies the containment rule,
- * AMARK_EDIT_DESCENDANTS is closed over the ancestors, the tokens are sorted and
- * within their sources, and every node is in the ring. Returns AMARK_ERROR_NONE,
- * or AMARK_ERROR_INVALID_STATE with a static string that describes the violation
- * in *out_reason. For the tests and the fuzz targets.
+ * sibling links are symmetric, every child satisfies the containment rule
+ * (amark_node_allows_child), every ancestor of a node with edit records has
+ * AMARK_EDIT_DESCENDANTS, the tokens are sorted and within registered sources,
+ * every node of the tree and of the detached subtrees is in the ring, and the
+ * subtrees of the nodes of the ring without a parent hold as many nodes as the
+ * ring. Takes time linear in the nodes and the tokens and allocates nothing.
+ * Returns AMARK_ERROR_NONE, or AMARK_ERROR_INVALID_STATE with a static string that
+ * describes the violation in *out_reason (when out_reason is not NULL; NULL on a
+ * success); AMARK_ERROR_INVALID_ARGUMENT for a NULL document. For the tests and
+ * the fuzz targets.
  */
 amark_error_t amark_tree_check(const amark_document_t *document, const char **out_reason);
 

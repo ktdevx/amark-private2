@@ -42,7 +42,8 @@ amark_error_t amark_document_create(const amark_syntax_set_t *syntax,
         return AMARK_ERROR_INVALID_STATE;
     }
 
-    /* Zero-filled: no node, no source, no owned syntax set, tracking off. */
+    /* Zero-filled: no node, no source, no owned syntax set, tracking off, the
+     * internal counters at 0. */
     document = amark_calloc(1, sizeof(*document));
     if (document == NULL)
     {

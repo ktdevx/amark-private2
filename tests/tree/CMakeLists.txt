@@ -23,3 +23,7 @@ amark_add_test(document_test SOURCES document_test.c INTERNAL)
 # Edit records and their propagation (links nodes and reads the counter through the
 # internal structs).
 amark_add_test(edit_tracking_test SOURCES edit_tracking_test.c INTERNAL)
+
+# The check of the tree invariants, the containment rule on descriptors and the
+# internal counters (breaks the internal structs directly).
+amark_add_test(tree_check_test SOURCES tree_check_test.c INTERNAL)
