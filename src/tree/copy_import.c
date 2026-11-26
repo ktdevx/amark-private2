@@ -262,7 +262,7 @@ static amark_error_t copy_node(copy_context_t *context, const amark_node_t *src,
 
     if (src->token_count != 0)
     {
-        size_t bytes;
+        size_t bytes = 0;
         size_t i;
 
         /* Fits: the tokens of src take as many bytes. */

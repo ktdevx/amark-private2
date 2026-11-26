@@ -571,7 +571,7 @@ static bool read_count(builder_t *b, unsigned long long max, unsigned long long 
 static bool read_token(builder_t *b, amark_node_t *node)
 {
     amark_token_t token;
-    unsigned long long number;
+    unsigned long long number = 0;
     size_t start;
     value_t v;
     amark_error_t err;

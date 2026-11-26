@@ -1127,7 +1127,9 @@ static amark_node_t *build(amark_document_t *document, const char *sexpr, size_t
     char *text = malloc(length + 1);
     amark_error_t err;
 
-    NAOS_REQUIRE_NOT_NULL(text);
+    /* Not NAOS_REQUIRE_NOT_NULL: GCC -O3 warns (maybe-uninitialized) when the pointer
+     * to the block not yet written is passed as const void *. */
+    NAOS_REQUIRE_TRUE(text != NULL);
     memcpy(text, sexpr, length);
     text[length] = '\0';
     err = amark_test_tree_build(document, text, table_attr, NULL, &node, &reason);
