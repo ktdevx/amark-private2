@@ -18,6 +18,14 @@
  * function table of an extension type (init, its failure, deinit, can_contain);
  * amark_node_destroy_subtree frees a deep subtree without recursion; and the
  * out-of-memory sweep of the creation.
+ *
+ * Suite source (1.4, 1.5, 3.5): amark_document_add_source copies the bytes and
+ * numbers the sources from 0, with the NULL and length 0 rules; appending keeps
+ * the bytes at each offset and updates the line index, a CRLF split between two
+ * chunks being one line ending; amark_document_position converts the offsets of
+ * LF, CR and CRLF lines to lines and columns and rejects the out of range ones;
+ * the destruction of the document frees the sources; and the out-of-memory sweeps
+ * of the addition and the appending leave the document unchanged.
  */
 #include "tree/syntax_set.h"
 #include "tree/tree.h"
@@ -36,6 +44,7 @@
 #include <naos/naos.h>
 
 #include "test_allocator.h"
+#include "test_check.h"
 
 /* The test allocator, set by the tests that count allocations; static so that no
  * dangling pointer stays set if a test stops early. */
@@ -892,7 +901,539 @@ NAOS_SUITE(node,
     NAOS_ADD_TEST(a_deep_detached_subtree_is_destroyed_without_recursion),
     NAOS_ADD_TEST(node_creation_passes_the_out_of_memory_sweep))
 
+/* --- Suite source ------------------------------------------------------------------ */
+
+/* An expected position: offset, line, column. */
+typedef struct expected_position
+{
+    size_t offset;
+    size_t line;
+    size_t column;
+} expected_position_t;
+
+/* Whether every offset of expected has its line and column in source of
+ * document. */
+static bool positions_are(const amark_document_t *document, amark_source_id_t source,
+                          const expected_position_t *expected, size_t count)
+{
+    size_t i;
+
+    for (i = 0; i < count; i++)
+    {
+        size_t line = 0;
+        size_t column = 0;
+
+        if ((amark_document_position(document, source, expected[i].offset, &line, &column)
+             != AMARK_ERROR_NONE) ||
+            (line != expected[i].line) || (column != expected[i].column))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* The positions of "a\nbc\r\rd\r\n\ne" (LF, CR, CR, CRLF, LF), whatever the chunks:
+ * offsets 0..11. The LF of the CRLF (offset 8) is on the line of its CR. */
+static const expected_position_t mixed_positions[] = {
+    { 0, 1, 1 }, { 1, 1, 2 },                 /* a \n */
+    { 2, 2, 1 }, { 3, 2, 2 }, { 4, 2, 3 },    /* b c \r */
+    { 5, 3, 1 },                              /* \r */
+    { 6, 4, 1 }, { 7, 4, 2 }, { 8, 4, 3 },    /* d \r \n */
+    { 9, 5, 1 },                              /* \n */
+    { 10, 6, 1 }, { 11, 6, 2 },               /* e, the end */
+};
+
+#define MIXED "a\nbc\r\rd\r\n\ne"
+#define MIXED_COUNT (sizeof(mixed_positions) / sizeof(mixed_positions[0]))
+
+NAOS_TEST(sources_are_copied_and_numbered_from_zero)
+{
+    amark_document_t *document = NULL;
+    char text[] = "abc";
+    amark_source_id_t id = 99;
+    const char *data;
+    size_t length = 99;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_CHECK_UINT_EQ(0, amark_document_source_count(document));
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, text, 3, &id));
+    NAOS_CHECK_UINT_EQ(0, id);
+    text[0] = 'X';
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "", 0, &id));
+    NAOS_CHECK_UINT_EQ(1, id);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, NULL, 0, &id));
+    NAOS_CHECK_UINT_EQ(2, id);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "x\ny", 3, &id));
+    NAOS_CHECK_UINT_EQ(3, id);
+    for (length = 0; length < 10; length++)
+    {
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "z", 1, &id));
+        NAOS_CHECK_UINT_EQ(4 + length, id);
+    }
+
+    NAOS_CHECK_UINT_EQ(14, amark_document_source_count(document));
+
+    /* The copy does not follow the caller's bytes. */
+    data = amark_document_source_data(document, 0, &length);
+    AMARK_CHECK_BYTES_EQ(data, length, "abc");
+    data = amark_document_source_data(document, 1, &length);
+    NAOS_CHECK_NOT_NULL(data);
+    NAOS_CHECK_UINT_EQ(0, length);
+    data = amark_document_source_data(document, 2, &length);
+    NAOS_CHECK_NOT_NULL(data);
+    NAOS_CHECK_UINT_EQ(0, length);
+    data = amark_document_source_data(document, 3, NULL);
+    AMARK_CHECK_BYTES_EQ(data, 3, "x\ny");
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(source_arguments_are_checked)
+{
+    amark_document_t *document = NULL;
+    const char *data;
+    amark_source_id_t id = 99;
+    size_t length = 99;
+    size_t line = 99;
+    size_t column = 99;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+
+    /* NULL data with a length, NULL document, NULL out_source: nothing added. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_add_source(document, NULL, 1, &id));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_document_add_source(NULL, "a", 1, &id));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_add_source(document, "a", 1, NULL));
+    NAOS_CHECK_UINT_EQ(99, id);
+    NAOS_CHECK_UINT_EQ(0, amark_document_source_count(document));
+
+    /* Unknown sources. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_append_source(document, 0, "a", 1));
+    NAOS_CHECK_NULL(amark_document_source_data(document, 0, &length));
+    NAOS_CHECK_UINT_EQ(0, length);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(document, 0, 0, &line, &column));
+    NAOS_CHECK_UINT_EQ(0, line);
+    NAOS_CHECK_UINT_EQ(0, column);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "ab", 2, &id));
+    NAOS_CHECK_UINT_EQ(0, id);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_append_source(document, 1, "a", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_document_append_source(NULL, 0, "a", 1));
+    NAOS_CHECK_NULL(amark_document_source_data(document, 1, NULL));
+    NAOS_CHECK_NULL(amark_document_source_data(NULL, 0, NULL));
+    NAOS_CHECK_UINT_EQ(0, amark_document_source_count(NULL));
+
+    /* NULL data: nothing to append with length 0, rejected with another length. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, 0, NULL, 0));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_append_source(document, 0, NULL, 1));
+    data = amark_document_source_data(document, 0, &length);
+    AMARK_CHECK_BYTES_EQ(data, length, "ab");
+
+    /* Positions: offset up to the length, NULL outputs, unknown source. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_position(document, 0, 2, &line, &column));
+    NAOS_CHECK_UINT_EQ(1, line);
+    NAOS_CHECK_UINT_EQ(3, column);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(document, 0, 3, &line, &column));
+    NAOS_CHECK_UINT_EQ(0, line);
+    NAOS_CHECK_UINT_EQ(0, column);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(document, 0, SIZE_MAX, &line, &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(document, 0, 0, NULL, &column));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(document, 0, 0, &line, NULL));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(NULL, 0, 0, &line, &column));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(an_empty_source_has_one_position)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 99;
+    size_t line = 0;
+    size_t column = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, NULL, 0, &id));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_position(document, id, 0, &line, &column));
+    NAOS_CHECK_UINT_EQ(1, line);
+    NAOS_CHECK_UINT_EQ(1, column);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(document, id, 1, &line, &column));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(positions_follow_lf_cr_and_crlf_lines)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 99;
+    size_t line = 0;
+    size_t column = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_add_source(document, MIXED, sizeof(MIXED) - 1, &id));
+    NAOS_CHECK_TRUE(positions_are(document, id, mixed_positions, MIXED_COUNT));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_document_position(document, id, sizeof(MIXED), &line, &column));
+
+    /* Ending with a line break: the end is on a new, empty line. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "x\r\n", 3, &id));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_position(document, id, 3, &line, &column));
+    NAOS_CHECK_UINT_EQ(2, line);
+    NAOS_CHECK_UINT_EQ(1, column);
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(every_split_into_chunks_gives_the_same_positions)
+{
+    const char text[] = MIXED;
+    size_t length = sizeof(text) - 1;
+    size_t first;
+    size_t second;
+    size_t bad_first = SIZE_MAX;
+    size_t bad_second = SIZE_MAX;
+
+    /* Three chunks cut at every pair of places, the CRLF split between two chunks
+     * included (first or second at 8), and empty chunks. */
+    for (first = 0; first <= length; first++)
+    {
+        for (second = first; second <= length; second++)
+        {
+            amark_document_t *document = NULL;
+            amark_source_id_t id = 99;
+            const char *data;
+            size_t stored = 0;
+            bool ok;
+
+            NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+            ok = (amark_document_add_source(document, text, first, &id) == AMARK_ERROR_NONE) &&
+                 (amark_document_append_source(document, id, text + first, second - first)
+                  == AMARK_ERROR_NONE) &&
+                 (amark_document_append_source(document, id, text + second, length - second)
+                  == AMARK_ERROR_NONE);
+            NAOS_CHECK_TRUE(ok);
+            data = amark_document_source_data(document, id, &stored);
+            AMARK_CHECK_BYTES_EQ(data, stored, MIXED);
+            if (!positions_are(document, id, mixed_positions, MIXED_COUNT) &&
+                (bad_first == SIZE_MAX))
+            {
+                bad_first = first;
+                bad_second = second;
+            }
+
+            amark_document_destroy(document);
+        }
+    }
+
+    /* The first cuts whose positions differ, if any. */
+    NAOS_CHECK_UINT_EQ(SIZE_MAX, bad_first);
+    NAOS_CHECK_UINT_EQ(SIZE_MAX, bad_second);
+}
+
+NAOS_TEST(a_crlf_split_between_chunks_is_one_line_ending)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 99;
+    size_t line = 0;
+    size_t column = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "a\r", 2, &id));
+
+    /* Before the LF comes, the end follows a CR line ending. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_position(document, id, 2, &line, &column));
+    NAOS_CHECK_UINT_EQ(2, line);
+    NAOS_CHECK_UINT_EQ(1, column);
+    NAOS_CHECK_TRUE(document->sources[id].pending_cr);
+
+    /* An empty chunk keeps the pending CR. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, id, "", 0));
+    NAOS_CHECK_TRUE(document->sources[id].pending_cr);
+
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, id, "\nb", 2));
+    NAOS_CHECK_FALSE(document->sources[id].pending_cr);
+    NAOS_CHECK_UINT_EQ(2, document->sources[id].line_count);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_position(document, id, 2, &line, &column));
+    NAOS_CHECK_UINT_EQ(1, line);
+    NAOS_CHECK_UINT_EQ(3, column);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_position(document, id, 3, &line, &column));
+    NAOS_CHECK_UINT_EQ(2, line);
+    NAOS_CHECK_UINT_EQ(1, column);
+
+    /* A CR and then a CR at the start of the next chunk are two line endings. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, id, "\r", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, id, "\r", 1));
+    NAOS_CHECK_UINT_EQ(4, document->sources[id].line_count);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_position(document, id, 6, &line, &column));
+    NAOS_CHECK_UINT_EQ(4, line);
+    NAOS_CHECK_UINT_EQ(1, column);
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(appending_keeps_the_bytes_at_each_offset)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t first = 99;
+    amark_source_id_t second = 99;
+    const char *data;
+    size_t length = 0;
+    size_t i;
+    size_t line = 0;
+    size_t column = 0;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "0123", 4, &first));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "other", 5, &second));
+
+    /* Many chunks, so that the bytes and the line index are reallocated. */
+    for (i = 0; i < 200; i++)
+    {
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                          amark_document_append_source(document, first, "ab\n", 3));
+    }
+
+    data = amark_document_source_data(document, first, &length);
+    NAOS_REQUIRE_NOT_NULL(data);
+    NAOS_CHECK_UINT_EQ(4 + (200 * 3), length);
+    AMARK_CHECK_BYTES_EQ(data, 4, "0123");
+    for (i = 0; i < 200; i++)
+    {
+        AMARK_CHECK_BYTES_EQ(data + 4 + (i * 3), 3, "ab\n");
+    }
+
+    NAOS_CHECK_INT_EQ(0, data[length]);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_document_position(document, first, 4 + (150 * 3) + 1, &line, &column));
+    NAOS_CHECK_UINT_EQ(151, line);
+    NAOS_CHECK_UINT_EQ(2, column);
+
+    /* Appending part of the source to itself. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, first, data, 4));
+    data = amark_document_source_data(document, first, &length);
+    AMARK_CHECK_BYTES_EQ(data + length - 4, 4, "0123");
+    AMARK_CHECK_BYTES_EQ(data, 4, "0123");
+
+    /* The other source is untouched. */
+    data = amark_document_source_data(document, second, &length);
+    AMARK_CHECK_BYTES_EQ(data, length, "other");
+
+    amark_document_destroy(document);
+}
+
+/* Whether source id of document holds exactly the bytes expected (length bytes),
+ * has line_count lines and the pending CR pending_cr. */
+static bool source_is(const amark_document_t *document, amark_source_id_t id,
+                      const char *expected, size_t length, size_t line_count, bool pending_cr)
+{
+    size_t stored = 0;
+    const char *data = amark_document_source_data(document, id, &stored);
+
+    return (data != NULL) && (stored == length) && (memcmp(data, expected, length) == 0) &&
+           (document->sources[id].line_count == line_count) &&
+           (document->sources[id].pending_cr == pending_cr);
+}
+
+NAOS_TEST(appending_a_source_to_itself_survives_the_reallocation)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t plain = 99;
+    amark_source_id_t lines = 99;
+    const char *data;
+    size_t length = 0;
+    size_t capacity;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &document));
+
+    /* All of the bytes, at the exact capacity of the copy: the append must
+     * reallocate them while reading them. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "0123", 4, &plain));
+    capacity = document->sources[plain].bytes.capacity;
+    data = amark_document_source_data(document, plain, &length);
+    NAOS_CHECK_UINT_GT((length * 2) + 1, capacity);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, plain, data, length));
+    NAOS_CHECK_UINT_GT(document->sources[plain].bytes.capacity, capacity);
+    NAOS_CHECK_TRUE(source_is(document, plain, "01230123", 8, 1, false));
+
+    /* With line endings: the CR at the end of the source and the LF at the start
+     * of its copy are one line ending, "\na\r" + "\na\r" being the lines "\n",
+     * "a\r\n", "a\r" and an empty last one. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_add_source(document, "\na\r", 3, &lines));
+    capacity = document->sources[lines].bytes.capacity;
+    data = amark_document_source_data(document, lines, &length);
+    NAOS_CHECK_UINT_GT((length * 2) + 1, capacity);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_document_append_source(document, lines, data, length));
+    NAOS_CHECK_TRUE(source_is(document, lines, "\na\r\na\r", 6, 4, true));
+    NAOS_CHECK_TRUE(positions_are(document, lines,
+                                  (const expected_position_t[]){ { 0, 1, 1 }, { 1, 2, 1 },
+                                                                  { 3, 2, 3 }, { 4, 3, 1 },
+                                                                  { 6, 4, 1 } },
+                                  5));
+
+    amark_document_destroy(document);
+}
+
+NAOS_TEST(destroying_a_document_frees_its_sources)
+{
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 0;
+    bool ok;
+    size_t i;
+    size_t live_after;
+
+    SET_COUNTING();
+
+    ok = (amark_document_create(NULL, &document) == AMARK_ERROR_NONE);
+    for (i = 0; ok && (i < 9); i++)
+    {
+        ok = (amark_document_add_source(document, "a\r\nb", 4, &id) == AMARK_ERROR_NONE) &&
+             (amark_document_append_source(document, id, "\rc\n", 3) == AMARK_ERROR_NONE);
+    }
+
+    ok = ok && (amark_document_add_source(document, NULL, 0, &id) == AMARK_ERROR_NONE);
+    live_after = counting.live_blocks;
+    amark_document_destroy(document);
+    amark_allocator_set(NULL);
+
+    NAOS_CHECK_TRUE(ok);
+    NAOS_CHECK_UINT_GT(live_after, 10);
+    NAOS_CHECK_UINT_EQ(0, counting.live_blocks);
+}
+
+/* Adds a source to a document that has one; a failure must leave the document with
+ * its one source unchanged and *out_source untouched. */
+static amark_error_t add_source_scenario(void *context)
+{
+    bool *unchanged = context;
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 0;
+    amark_source_id_t added = 0;
+    size_t i;
+    amark_error_t err;
+
+    err = amark_document_create(NULL, &document);
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_document_add_source(document, "a\r", 2, &id);
+    }
+
+    /* Fills the first array of sources, so that one of the additions grows it. */
+    for (i = 0; (err == AMARK_ERROR_NONE) && (i < 4); i++)
+    {
+        size_t count = amark_document_source_count(document);
+
+        err = amark_document_add_source(document, "b\nc\r\nd\re", 8, &added);
+        if (err != AMARK_ERROR_NONE)
+        {
+            if ((amark_document_source_count(document) != count) || (added != (count - 1)) ||
+                !source_is(document, 0, "a\r", 2, 2, true))
+            {
+                *unchanged = false;
+            }
+        }
+        else if ((added != count) || !source_is(document, added, "b\nc\r\nd\re", 8, 4, false))
+        {
+            *unchanged = false;
+        }
+    }
+
+    amark_document_destroy(document);
+
+    return err;
+}
+
+NAOS_TEST(adding_a_source_passes_the_out_of_memory_sweep)
+{
+    bool unchanged = true;
+
+    AMARK_CHECK_OOM_SWEEP(add_source_scenario, &unchanged);
+    NAOS_CHECK_TRUE(unchanged);
+}
+
+/* Appends chunks to a source that ends with a CR; a failure must leave its bytes,
+ * its line index and its pending CR unchanged. */
+static amark_error_t append_source_scenario(void *context)
+{
+    bool *unchanged = context;
+    amark_document_t *document = NULL;
+    amark_source_id_t id = 0;
+    amark_error_t err;
+
+    err = amark_document_create(NULL, &document);
+    if (err == AMARK_ERROR_NONE)
+    {
+        err = amark_document_add_source(document, "x\r", 2, &id);
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        /* Many line starts, so that the line index grows. */
+        err = amark_document_append_source(document, id, "\n1\n2\r3\r\n4\n5\n6\n7\n8\r", 18);
+        if ((err != AMARK_ERROR_NONE) && !source_is(document, id, "x\r", 2, 2, true))
+        {
+            *unchanged = false;
+        }
+    }
+
+    if (err == AMARK_ERROR_NONE)
+    {
+        if (!source_is(document, id, "x\r\n1\n2\r3\r\n4\n5\n6\n7\n8\r", 20, 10, true))
+        {
+            *unchanged = false;
+        }
+
+        if (!positions_are(document, id,
+                           (const expected_position_t[]){ { 2, 1, 3 }, { 3, 2, 1 },
+                                                           { 9, 4, 3 }, { 20, 10, 1 } },
+                           4))
+        {
+            *unchanged = false;
+        }
+    }
+
+    amark_document_destroy(document);
+
+    return err;
+}
+
+NAOS_TEST(appending_to_a_source_passes_the_out_of_memory_sweep)
+{
+    bool unchanged = true;
+
+    AMARK_CHECK_OOM_SWEEP(append_source_scenario, &unchanged);
+    NAOS_CHECK_TRUE(unchanged);
+}
+
+NAOS_SUITE(source,
+    NAOS_SET_TEARDOWN(restore),
+    NAOS_ADD_TEST(sources_are_copied_and_numbered_from_zero),
+    NAOS_ADD_TEST(source_arguments_are_checked),
+    NAOS_ADD_TEST(an_empty_source_has_one_position),
+    NAOS_ADD_TEST(positions_follow_lf_cr_and_crlf_lines),
+    NAOS_ADD_TEST(every_split_into_chunks_gives_the_same_positions),
+    NAOS_ADD_TEST(a_crlf_split_between_chunks_is_one_line_ending),
+    NAOS_ADD_TEST(appending_keeps_the_bytes_at_each_offset),
+    NAOS_ADD_TEST(appending_a_source_to_itself_survives_the_reallocation),
+    NAOS_ADD_TEST(destroying_a_document_frees_its_sources),
+    NAOS_ADD_TEST(adding_a_source_passes_the_out_of_memory_sweep),
+    NAOS_ADD_TEST(appending_to_a_source_passes_the_out_of_memory_sweep))
+
 NAOS_MAIN(
     NAOS_ADD_SUITE(document),
-    NAOS_ADD_SUITE(node)
+    NAOS_ADD_SUITE(node),
+    NAOS_ADD_SUITE(source)
 )

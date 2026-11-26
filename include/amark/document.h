@@ -49,7 +49,8 @@ AMARK_API const amark_syntax_set_t *amark_document_syntax_set(const amark_docume
  * Registers a copy of the length bytes at data as a new source of document and
  * stores its identifier (0, 1, ... in registration order) in *out_source. A NULL
  * data with length 0 is an empty source; a NULL data with another length is
- * AMARK_ERROR_INVALID_ARGUMENT.
+ * AMARK_ERROR_INVALID_ARGUMENT. On a failure, no source is added and *out_source
+ * is not written.
  */
 AMARK_API amark_error_t amark_document_add_source(amark_document_t *document, const char *data,
                                                   size_t length, amark_source_id_t *out_source);
@@ -76,8 +77,12 @@ AMARK_API const char *amark_document_source_data(const amark_document_t *documen
 /*
  * Converts offset (0 <= offset <= the length of the source) in the source source
  * of document to a line and a column, both counted from 1 (the column in bytes).
- * A line ends with LF, CR or CRLF. An offset out of range is
- * AMARK_ERROR_INVALID_ARGUMENT.
+ * A line ends with LF, CR or CRLF; the offset of the LF of a CRLF is on the line
+ * of its CR. While a source ends with a CR, its end offset is on the next line; an
+ * LF appended later makes that CRLF, and the offset of the LF is then on the line
+ * of the CR. An offset out of range, an unknown source and a NULL out_line or
+ * out_column are AMARK_ERROR_INVALID_ARGUMENT, and then the outputs that are not
+ * NULL are set to 0.
  */
 AMARK_API amark_error_t amark_document_position(const amark_document_t *document,
                                                 amark_source_id_t source, size_t offset,
