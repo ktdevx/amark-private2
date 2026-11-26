@@ -271,6 +271,16 @@ NAOS_TEST(source_and_line_functions_link)
     amark_document_destroy(document);
 }
 
+NAOS_TEST(label_normalize_links)
+{
+    amark_buffer_t *buffer = NULL;
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_buffer_create(&buffer));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_label_normalize(" Stra\xC3\x9F" "e  A ", 12, buffer));
+    NAOS_CHECK_STR_EQ("strasse a", amark_buffer_data(buffer));
+    amark_buffer_destroy(buffer);
+}
+
 NAOS_TEST(facet_value_functions_link)
 {
     amark_document_t *document = NULL;
@@ -491,6 +501,7 @@ NAOS_SUITE(cxx_include,
     NAOS_ADD_TEST(document_and_node_functions_link),
     NAOS_ADD_TEST(structural_edit_functions_link),
     NAOS_ADD_TEST(source_and_line_functions_link),
+    NAOS_ADD_TEST(label_normalize_links),
     NAOS_ADD_TEST(facet_value_functions_link),
     NAOS_ADD_TEST(layout_functions_link),
     NAOS_ADD_TEST(content_functions_link),

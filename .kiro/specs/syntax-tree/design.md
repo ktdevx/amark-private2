@@ -865,8 +865,8 @@ AMARK_API amark_error_t amark_document_find_definition(const amark_document_t *d
                                                        size_t length, amark_node_t **out);   /* なければ *out = NULL */
 ```
 - **正規化**（9.1）：
-  1. 前後の Unicode の空白を除く。
-  2. 内側の空白の連続を 1 つの空白にする。
+  1. 前後の空白（空白文字、タブ、改行の LF と CR。CommonMark 0.31.2 のラベルの規則。全角の空白などほかの Unicode の空白は普通の文字として残す）を除く。
+  2. 内側の同じ空白の連続を 1 つの U+0020 にする。
   3. 各符号位置を `amark_unicode_case_fold` で畳み込む。
 - **索引**：文書は、正規化したラベルから、そのラベルを持つ link_definition（切り離したものを含む）の列への表を持つ。
   - **汚れの印**：link_definition のラベルの値が変わりうる操作は、そのノードに汚れの印を付けて、文書の汚れの列に入れるだけにする。対象の操作は次のとおり。

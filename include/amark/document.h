@@ -24,6 +24,7 @@
 #define AMARK_DOCUMENT_H
 
 #include <amark/export.h>
+#include <amark/buffer.h>
 #include <amark/error.h>
 #include <amark/node.h>
 
@@ -211,6 +212,29 @@ AMARK_API amark_error_t amark_document_byte_to_column(const amark_document_t *do
  * line table that has one, or AMARK_EOL_LF when there is none (and for NULL).
  */
 AMARK_API amark_eol_t amark_document_default_eol(const amark_document_t *document);
+
+/* ---- Labels ------------------------------------------------------------------ */
+
+/*
+ * Appends to out the normalized form of the link label of length bytes at label,
+ * by the rules of CommonMark (9.1), in this order:
+ *   1. the leading and trailing whitespace is removed;
+ *   2. each run of internal whitespace becomes one space (U+0020);
+ *   3. each code point is replaced by its full case fold
+ *      (amark_unicode_case_fold, the mappings C and F of CaseFolding.txt).
+ * The whitespace is that of CommonMark link labels: space (U+0020), tab, line
+ * feed and carriage return, so the line endings LF, CRLF and CR count. Every
+ * other character, a full-width space (U+3000), a no-break space or a form feed
+ * included, is an ordinary character: it is kept and case-folded. label is decoded as UTF-8 (amark/utf8.h): an invalid
+ * sequence becomes U+FFFD and a NUL byte is an ordinary character. A label of
+ * whitespace only appends nothing. label may be NULL when length is 0. Two
+ * labels match when their normalized forms are the same bytes.
+ * AMARK_ERROR_INVALID_ARGUMENT for a NULL out and a NULL label with a length;
+ * AMARK_ERROR_OUT_OF_MEMORY and AMARK_ERROR_OVERFLOW as for amark_buffer_append.
+ * On failure the content of out is unchanged.
+ */
+AMARK_API amark_error_t amark_label_normalize(const char *label, size_t length,
+                                              amark_buffer_t *out);
 
 AMARK_END_DECLS
 
