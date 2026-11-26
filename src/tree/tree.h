@@ -129,6 +129,9 @@ struct amark_node
     amark_tree_facet_t *facets;
     /* desc->data_size bytes of extension data (NULL when 0). */
     void *data;
+    /* The mark of the last internal check (amark_tree_check) that saw the
+     * node; meaningless outside of it. */
+    uint64_t check_mark;
 };
 
 /*
@@ -208,6 +211,64 @@ struct amark_document
     /* Advanced by every structural change (amark_tree_changed). */
     uint64_t structure_generation;
     amark_tree_stats_t stats;
+    /* The epoch of the internal check (amark_tree_check): each check advances
+     * it by 2 and marks the nodes it sees with it. */
+    uint64_t check_epoch;
 };
+
+/* ---- TreeCheck (tree_check.c) ------------------------------------------------ */
+
+/* The kinds of the violations of the internal invariants. */
+typedef enum amark_tree_violation
+{
+    AMARK_TREE_VIOLATION_NONE = 0,
+    /* The ring of every node: a broken or asymmetric ring, a node of another
+     * document, a count that differs from node_count, a node twice, or a node
+     * of a tree that is not in the ring. */
+    AMARK_TREE_VIOLATION_RING,
+    /* The relations: the parent, child and sibling links are not symmetric, a
+     * node is reached twice (a cycle), a node is not reachable from the top of
+     * its tree, or the document node is not a top. */
+    AMARK_TREE_VIOLATION_RELATION,
+    /* The containment rules: the parent does not accept the child, or the
+     * document node is not of the document type. */
+    AMARK_TREE_VIOLATION_CONTAINMENT,
+    /* A link among the descendants of a link. */
+    AMARK_TREE_VIOLATION_LINK_IN_LINK,
+    /* A node whose cache is valid has a child whose cache is not. */
+    AMARK_TREE_VIOLATION_CACHE
+} amark_tree_violation_t;
+
+/* The first violation found by amark_tree_check. */
+typedef struct amark_tree_check_report
+{
+    amark_tree_violation_t kind;
+    /* The node where the violation was found (the node that breaks the rule;
+     * for a cache violation, the valid node with an invalid child), or NULL. */
+    const amark_node_t *node;
+    /* A static description of the broken rule, or NULL when there is none. */
+    const char *message;
+} amark_tree_check_report_t;
+
+/*
+ * Checks the internal invariants of document (for the tests and the fuzz
+ * targets, after each operation) and returns the kind of the first violation,
+ * or AMARK_TREE_VIOLATION_NONE. report, if not NULL, receives the first
+ * violation. Runs in time proportional to the nodes of the document, without
+ * recursion and without allocation; it only writes the check marks.
+ *
+ * The checks run in order and stop at the first violation, so that a later
+ * check can rely on the invariants of the earlier ones: the document node, the
+ * ring, then a walk of every tree that runs the node checks on each node
+ * (relations, containment, link in link, cache). A component that adds
+ * records or caches adds its invariant as a node check or a document check in
+ * tree_check.c.
+ */
+amark_tree_violation_t amark_tree_check(amark_document_t *document,
+                                        amark_tree_check_report_t *report);
+
+/* The name of a violation kind, for the messages of the tests ("ring",
+ * "relation", ...; "none" for AMARK_TREE_VIOLATION_NONE). */
+const char *amark_tree_violation_name(amark_tree_violation_t kind);
 
 #endif /* AMARK_TREE_TREE_H */

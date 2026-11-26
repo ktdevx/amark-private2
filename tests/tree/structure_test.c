@@ -8,7 +8,10 @@
  * unchanged (containment, the full link-in-link rule, cycles, the document node,
  * the nodes of another document), the change notification (the invalidation of
  * the caches up to an ancestor already invalid and the structure generation) and
- * the complexity of the insertions (1.5, 5.2-5.5, 14.5).
+ * the complexity of the insertions (1.5, 5.2-5.5, 14.5). Also the internal
+ * invariant checker (amark_tree_check, 14.2): deliberately broken trees are
+ * detected with the kind and the node of the first violation, and every tree
+ * left by the structural edits passes it.
  */
 #include "tree/tree.h"
 
@@ -162,8 +165,24 @@ static void fixture_init(fixture_t *f)
     validate_all(f);
 }
 
+/* Checks that document passes the internal checker, and prints the first
+ * violation otherwise. */
+static void check_tree_ok(amark_document_t *document)
+{
+    amark_tree_check_report_t report;
+    amark_tree_violation_t kind = amark_tree_check(document, &report);
+
+    /* The names and the message tell which rule broke. */
+    NAOS_CHECK_STR_EQ("none", amark_tree_violation_name(kind));
+    NAOS_CHECK_STR_EQ("", report.message != NULL ? report.message : "");
+    NAOS_CHECK_NULL(report.node);
+}
+
 static void fixture_deinit(fixture_t *f)
 {
+    /* Every test leaves trees that keep the invariants. */
+    check_tree_ok(f->document);
+    check_tree_ok(f->other);
     amark_document_destroy(f->document);
     amark_document_destroy(f->other);
 }
@@ -735,8 +754,282 @@ NAOS_TEST(insertion_time_is_proportional_to_the_depth)
     move_steps = large->stats.structure_steps + large->stats.invalidation_steps - before;
     NAOS_CHECK_UINT_LE(move_steps, 3 * 101 + 8);
 
+    check_tree_ok(small);
+    check_tree_ok(large);
     amark_document_destroy(small);
     amark_document_destroy(large);
+}
+
+/* ---- The internal invariant checker (14.2) ----------------------------------- */
+
+/* Checks that the first violation of document is kind at node. */
+static void check_violation(amark_document_t *document, amark_tree_violation_t kind,
+                            const amark_node_t *node)
+{
+    amark_tree_check_report_t report;
+
+    NAOS_CHECK_STR_EQ(amark_tree_violation_name(kind),
+                      amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_STR_EQ(amark_tree_violation_name(kind), amark_tree_violation_name(report.kind));
+    NAOS_CHECK_PTR_EQ(node, report.node);
+    NAOS_CHECK_NOT_NULL(report.message);
+    /* Without a report, the same kind. */
+    NAOS_CHECK_INT_EQ(kind, amark_tree_check(document, NULL));
+}
+
+/* Links child as the last child of parent without any check (to build broken
+ * trees); undone with amark_tree_node_detach. */
+static void force_append(amark_node_t *parent, amark_node_t *child)
+{
+    child->parent = parent;
+    child->prev = parent->last_child;
+    child->next = NULL;
+    if (parent->last_child != NULL)
+    {
+        parent->last_child->next = child;
+    }
+    else
+    {
+        parent->first_child = child;
+    }
+    parent->last_child = child;
+}
+
+NAOS_TEST(checker_passes_correct_trees)
+{
+    fixture_t f;
+    amark_document_t *empty = NULL;
+    amark_tree_check_report_t report;
+
+    /* A document with only its node. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_document_create(NULL, &empty));
+    check_tree_ok(empty);
+    amark_document_destroy(empty);
+
+    fixture_init(&f);
+    /* Trees in the document and detached subtrees, every cache valid. */
+    check_tree_ok(f.document);
+    /* Invalid nodes may have valid children. */
+    amark_tree_changed(f.emph1, AMARK_TREE_CHANGE_RECORD);
+    check_tree_ok(f.document);
+    /* Any number of runs: the marks of a run do not confuse the next one. */
+    check_tree_ok(f.document);
+    NAOS_CHECK_INT_EQ(AMARK_TREE_VIOLATION_NONE, amark_tree_check(f.document, &report));
+    NAOS_CHECK_INT_EQ(AMARK_TREE_VIOLATION_NONE, report.kind);
+    /* After edits and destructions. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(f.item, f.quote));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(f.image1, f.dlink));
+    amark_node_destroy(f.para1);
+    check_tree_ok(f.document);
+    NAOS_CHECK_STR_EQ("none", amark_tree_violation_name(AMARK_TREE_VIOLATION_NONE));
+    fixture_deinit(&f);
+}
+
+NAOS_TEST(checker_detects_asymmetric_relations)
+{
+    fixture_t f;
+    amark_node_t *saved;
+
+    fixture_init(&f);
+    /* A child whose parent link points elsewhere. */
+    f.t1->parent = f.quote;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.t1);
+    f.t1->parent = f.para1;
+
+    /* A previous sibling link on a first child. */
+    f.t2->prev = f.t1;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.t2);
+    f.t2->prev = NULL;
+
+    /* A next link that does not come back. */
+    f.link1->next = f.t1;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.t1);
+    f.link1->next = f.image1;
+
+    /* A last child link that misses the last child. */
+    f.para1->last_child = f.link1;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.image1);
+    f.para1->last_child = f.image1;
+
+    /* A first child link without a last child link. */
+    f.emph1->first_child = NULL;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.emph1);
+    f.emph1->first_child = f.t2;
+
+    /* A detached node with a sibling. */
+    f.dpara->next = f.para3;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.dpara);
+    f.dpara->next = NULL;
+
+    /* A node reached twice: t2 is also the child of image1. */
+    f.image1->first_child = f.t2;
+    f.image1->last_child = f.t2;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.t2);
+    f.image1->first_child = NULL;
+    f.image1->last_child = NULL;
+
+    /* A cycle of parents (dlink under dtext under dlink): no top reaches it, and
+     * dlink comes first in the ring. */
+    f.dlink->parent = f.dtext;
+    f.dtext->first_child = f.dlink;
+    f.dtext->last_child = f.dlink;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.dlink);
+    f.dlink->parent = NULL;
+    f.dtext->first_child = NULL;
+    f.dtext->last_child = NULL;
+
+    /* The document node with a parent. */
+    saved = f.root->parent;
+    f.root->parent = f.quote;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RELATION, f.root);
+    f.root->parent = saved;
+    fixture_deinit(&f);
+}
+
+NAOS_TEST(checker_detects_a_broken_ring)
+{
+    fixture_t f;
+    amark_node_t *ring_prev;
+    amark_node_t *ring_next;
+
+    fixture_init(&f);
+    /* A count that differs from the ring. */
+    f.document->node_count++;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RING, f.root);
+    f.document->node_count -= 2;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RING, f.root);
+    f.document->node_count++;
+
+    /* An asymmetric ring link (para2 seems to come after the root). */
+    ring_prev = f.para2->ring_prev;
+    f.para2->ring_prev = f.root;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RING, f.para2);
+    f.para2->ring_prev = ring_prev;
+
+    /* A node of a tree that is not in the ring. */
+    ring_prev = f.t3->ring_prev;
+    ring_next = f.t3->ring_next;
+    ring_prev->ring_next = ring_next;
+    ring_next->ring_prev = ring_prev;
+    f.document->node_count--;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RING, f.t3);
+    ring_prev->ring_next = f.t3;
+    ring_next->ring_prev = f.t3;
+    f.document->node_count++;
+
+    /* A node of another document in the tree. */
+    amark_tree_node_detach(f.other_para);
+    force_append(f.root, f.other_para);
+    check_violation(f.document, AMARK_TREE_VIOLATION_RING, f.other_para);
+    amark_tree_node_detach(f.other_para);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_node_append_child(amark_document_root(f.other), f.other_para));
+
+    /* A node of another document in the ring. */
+    ring_next = f.dpara->ring_next;
+    f.dpara->ring_next = f.other_para;
+    check_violation(f.document, AMARK_TREE_VIOLATION_RING, f.other_para);
+    f.dpara->ring_next = ring_next;
+    fixture_deinit(&f);
+}
+
+NAOS_TEST(checker_detects_containment_violations)
+{
+    fixture_t f;
+    amark_node_t *text;
+
+    fixture_init(&f);
+    /* A paragraph directly in a list. */
+    force_append(f.list, f.dpara);
+    check_violation(f.document, AMARK_TREE_VIOLATION_CONTAINMENT, f.dpara);
+    amark_tree_node_detach(f.dpara);
+
+    /* An inline among blocks, in a detached subtree too. */
+    text = make(f.document, AMARK_NODE_TEXT);
+    force_append(f.root, text);
+    check_violation(f.document, AMARK_TREE_VIOLATION_CONTAINMENT, text);
+    amark_tree_node_detach(text);
+    force_append(f.dpara, f.dlink);
+    check_tree_ok(f.document);
+    amark_tree_node_detach(f.dlink);
+    force_append(f.dlink, f.dpara);
+    check_violation(f.document, AMARK_TREE_VIOLATION_CONTAINMENT, f.dpara);
+    amark_tree_node_detach(f.dpara);
+
+    /* A document node that is not of the document type. */
+    f.root->type = AMARK_NODE_PARAGRAPH;
+    check_violation(f.document, AMARK_TREE_VIOLATION_CONTAINMENT, f.root);
+    f.root->type = AMARK_NODE_DOCUMENT;
+    fixture_deinit(&f);
+}
+
+NAOS_TEST(checker_detects_a_link_among_the_descendants_of_a_link)
+{
+    fixture_t f;
+
+    fixture_init(&f);
+    /* A link under an emph under a link. */
+    force_append(f.emph1, f.dlink);
+    check_violation(f.document, AMARK_TREE_VIOLATION_LINK_IN_LINK, f.dlink);
+    amark_tree_node_detach(f.dlink);
+
+    /* In a detached subtree: dlink2 (under demph) under dlink. */
+    force_append(f.dlink, f.demph);
+    check_violation(f.document, AMARK_TREE_VIOLATION_LINK_IN_LINK, f.dlink2);
+    amark_tree_node_detach(f.demph);
+
+    /* Deeper, after a sibling subtree that holds no link: a link under an image
+     * under an emph under a link. */
+    {
+        amark_node_t *image = make(f.document, AMARK_NODE_IMAGE);
+        amark_node_t *link = make(f.document, AMARK_NODE_LINK);
+
+        image->cache_flags |= AMARK_TREE_CACHE_VALID;
+        link->cache_flags |= AMARK_TREE_CACHE_VALID;
+        force_append(f.emph1, image);
+        check_tree_ok(f.document);
+        force_append(image, link);
+        check_violation(f.document, AMARK_TREE_VIOLATION_LINK_IN_LINK, link);
+        amark_tree_node_detach(link);
+    }
+
+    /* Out of the link again, a link is fine: a link after link1 in para1. */
+    force_append(f.para1, f.dlink);
+    check_tree_ok(f.document);
+    fixture_deinit(&f);
+}
+
+NAOS_TEST(checker_detects_a_valid_node_with_an_invalid_child)
+{
+    fixture_t f;
+
+    fixture_init(&f);
+    f.t2->cache_flags &= ~AMARK_TREE_CACHE_VALID;
+    check_violation(f.document, AMARK_TREE_VIOLATION_CACHE, f.emph1);
+    f.t2->cache_flags |= AMARK_TREE_CACHE_VALID;
+
+    /* In a detached subtree. */
+    f.dtext->cache_flags &= ~AMARK_TREE_CACHE_VALID;
+    check_violation(f.document, AMARK_TREE_VIOLATION_CACHE, f.dlink);
+    /* The notification of a change keeps the invariant. */
+    f.dtext->cache_flags |= AMARK_TREE_CACHE_VALID;
+    amark_tree_changed(f.dtext, AMARK_TREE_CHANGE_RECORD);
+    NAOS_CHECK_FALSE(is_valid(f.dlink));
+    check_tree_ok(f.document);
+    fixture_deinit(&f);
+}
+
+NAOS_TEST(checker_names_every_kind)
+{
+    NAOS_CHECK_STR_EQ("none", amark_tree_violation_name(AMARK_TREE_VIOLATION_NONE));
+    NAOS_CHECK_STR_EQ("ring", amark_tree_violation_name(AMARK_TREE_VIOLATION_RING));
+    NAOS_CHECK_STR_EQ("relation", amark_tree_violation_name(AMARK_TREE_VIOLATION_RELATION));
+    NAOS_CHECK_STR_EQ("containment",
+                      amark_tree_violation_name(AMARK_TREE_VIOLATION_CONTAINMENT));
+    NAOS_CHECK_STR_EQ("link_in_link",
+                      amark_tree_violation_name(AMARK_TREE_VIOLATION_LINK_IN_LINK));
+    NAOS_CHECK_STR_EQ("cache", amark_tree_violation_name(AMARK_TREE_VIOLATION_CACHE));
+    NAOS_CHECK_STR_EQ("unknown", amark_tree_violation_name((amark_tree_violation_t)99));
 }
 
 NAOS_SUITE(structure,
@@ -752,7 +1045,14 @@ NAOS_SUITE(structure,
     NAOS_ADD_TEST(nodes_of_another_document_are_rejected),
     NAOS_ADD_TEST(notification_invalidates_up_to_an_invalid_ancestor),
     NAOS_ADD_TEST(structural_edits_notify_the_old_and_new_places),
-    NAOS_ADD_TEST(insertion_time_is_proportional_to_the_depth)
+    NAOS_ADD_TEST(insertion_time_is_proportional_to_the_depth),
+    NAOS_ADD_TEST(checker_passes_correct_trees),
+    NAOS_ADD_TEST(checker_detects_asymmetric_relations),
+    NAOS_ADD_TEST(checker_detects_a_broken_ring),
+    NAOS_ADD_TEST(checker_detects_containment_violations),
+    NAOS_ADD_TEST(checker_detects_a_link_among_the_descendants_of_a_link),
+    NAOS_ADD_TEST(checker_detects_a_valid_node_with_an_invalid_child),
+    NAOS_ADD_TEST(checker_names_every_kind)
 )
 
 NAOS_MAIN(

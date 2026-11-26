@@ -176,6 +176,15 @@ static size_t ring_size(const amark_document_t *document)
     return count;
 }
 
+/* Checks that document keeps the internal invariants (amark_tree_check). */
+static void check_tree_ok(amark_document_t *document)
+{
+    amark_tree_check_report_t report;
+
+    NAOS_CHECK_STR_EQ("none", amark_tree_violation_name(amark_tree_check(document, &report)));
+    NAOS_CHECK_NULL(report.node);
+}
+
 static amark_test_allocator_t test_allocator;
 
 static void use_test_allocator(void)
@@ -392,6 +401,7 @@ NAOS_TEST(node_create_makes_a_detached_node_with_zero_facets)
 
     NAOS_CHECK_UINT_EQ(4, document->node_count);
     NAOS_CHECK_UINT_EQ(4, ring_size(document));
+    check_tree_ok(document);
     amark_document_destroy(document);
     NAOS_CHECK_UINT_EQ(1, deinit_calls);
 }
@@ -484,6 +494,7 @@ NAOS_TEST(relations_follow_the_links)
     NAOS_CHECK_NULL(amark_node_previous(first));
     NAOS_CHECK_PTR_EQ(quote, amark_node_parent(second));
 
+    check_tree_ok(document);
     amark_document_destroy(document);
 }
 
@@ -644,6 +655,7 @@ NAOS_TEST(node_destroy_frees_the_subtree_and_unlinks_it)
     link_child(inner, new_node(document, AMARK_NODE_PARAGRAPH));
     link_child(box, new_node(document, AMARK_NODE_PARAGRAPH));
     NAOS_CHECK_UINT_EQ(7, document->node_count);
+    check_tree_ok(document);
 
     /* The middle child, with its 3 descendants: its siblings are relinked. */
     amark_node_destroy(box);
@@ -652,6 +664,7 @@ NAOS_TEST(node_destroy_frees_the_subtree_and_unlinks_it)
     NAOS_CHECK_UINT_EQ(2, deinit_calls);
     NAOS_CHECK_PTR_EQ(last, amark_node_next(first));
     NAOS_CHECK_PTR_EQ(first, amark_node_previous(last));
+    check_tree_ok(document);
 
     /* The first and the last child. */
     amark_node_destroy(first);
@@ -671,6 +684,7 @@ NAOS_TEST(node_destroy_frees_the_subtree_and_unlinks_it)
     amark_node_destroy(root);
     NAOS_CHECK_PTR_EQ(root, amark_document_root(document));
     NAOS_CHECK_UINT_EQ(1, document->node_count);
+    check_tree_ok(document);
 
     amark_document_destroy(document);
 }
@@ -697,6 +711,8 @@ NAOS_TEST(deep_subtree_is_freed_without_recursion)
         node = child;
     }
     NAOS_CHECK_UINT_EQ(1 + 100000 + 99999, document->node_count);
+    /* The checker walks the deep tree without recursion. */
+    check_tree_ok(document);
 
     document->stats.release_steps = 0;
     amark_node_destroy(top);
@@ -718,6 +734,7 @@ NAOS_TEST(deep_subtree_is_freed_without_recursion)
         link_child(node, child);
         node = child;
     }
+    check_tree_ok(document);
     amark_document_destroy(document);
 }
 
@@ -736,6 +753,7 @@ NAOS_TEST(statistics_count_the_nodes)
     NAOS_CHECK_UINT_EQ(3, document->stats.nodes_created);
     amark_node_destroy(node);
     NAOS_CHECK_UINT_EQ(2, document->stats.nodes_released);
+    check_tree_ok(document);
     amark_document_destroy(document);
 }
 
