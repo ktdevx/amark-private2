@@ -211,6 +211,11 @@ static bool check_facets(check_context_t *context, const amark_node_t *node)
             return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
                         "a facet has an unknown state");
         }
+        if ((desc->flags & AMARK_FACET_CONTENT) != 0 && has_value)
+        {
+            return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                        "a CONTENT facet stores a value (its value is the content of the leaf)");
+        }
         if (desc->kind == AMARK_FACET_STRING)
         {
             if (slot->number != 0 ||
@@ -460,6 +465,46 @@ static bool check_content_tokens(check_context_t *context, const amark_node_t *n
     return true;
 }
 
+/* The derived values of a node (Facets, derive.c): no STRING facet is spelled
+ * by both layout and content tokens, no token spells a facet whose spelling is
+ * dropped (amark_node_t.dropped), and every cache of a derived value is the
+ * value derived now from the tokens or the content (none for a facet that
+ * derives nothing). Runs after the layout and the content checks, on whose
+ * invariants the derivation relies; linear in the tokens and the cached bytes
+ * of the node, without allocation. */
+static bool check_derived(check_context_t *context, const amark_node_t *node)
+{
+    const amark_tree_content_tokens_t *tokens = node->content_tokens;
+    amark_facet_t facet;
+
+    if ((tokens != NULL) && (tokens->base != NULL) && (tokens->base->bytes == NULL))
+    {
+        /* A malformed base, reported by the content objects check. */
+        return true;
+    }
+    for (facet = 1; facet <= node->desc->facet_count; facet++)
+    {
+        if ((node->desc->facets[facet - 1].kind == AMARK_FACET_STRING) &&
+            amark_tree_layout_spells(node, facet) && amark_tree_content_spells(node, facet))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                        "a string facet is spelled by both layout and content tokens");
+        }
+        if (((node->dropped & (1u << facet)) != 0) &&
+            (amark_tree_layout_spells(node, facet) || amark_tree_content_spells(node, facet)))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                        "a token spells a facet whose spelling is dropped");
+        }
+        if (!amark_tree_derived_cache_ok(node, facet))
+        {
+            return fail(context, AMARK_TREE_VIOLATION_FACETS, node,
+                        "the cache of a derived value differs from the derivation");
+        }
+    }
+    return true;
+}
+
 /* The checks of one node, in order. Add the invariants of the records and the
  * caches of a node here. */
 static const node_check_t node_checks[] = {
@@ -471,6 +516,7 @@ static const node_check_t node_checks[] = {
     check_layout,
     check_content,
     check_content_tokens,
+    check_derived,
 };
 
 /* ---- The walk of the trees ----------------------------------------------------- */
@@ -874,8 +920,8 @@ static bool laid_content_ok(const amark_document_t *document, const amark_tree_c
     return (position == content->length) && (lines == content->line_count);
 }
 
-/* Whether free content holds no CR and its line count is 0 when it is empty,
- * else its LFs + 1. */
+/* Whether free content holds no CR and its line count is 0 or 1 when it is
+ * empty, else its LFs + 1. */
 static bool free_content_ok(const amark_tree_content_t *content)
 {
     size_t lines = 0;
@@ -889,7 +935,10 @@ static bool free_content_ok(const amark_tree_content_t *content)
         }
         lines += (content->bytes[i] == '\n') ? 1u : 0u;
     }
-    return content->line_count == ((content->length == 0) ? 0 : lines + 1);
+    /* Empty free content has no line, or one empty line when it is the value
+     * "\n" of a CONTENT facet (amark_tree_content_from_value). */
+    return (content->length == 0) ? (content->line_count <= 1)
+                                  : (content->line_count == lines + 1);
 }
 
 /* Whether a content object is well formed: a known state, arrays within their

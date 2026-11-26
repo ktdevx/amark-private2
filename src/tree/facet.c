@@ -7,12 +7,14 @@
  *
  * Each node holds one amark_tree_facet_t per facet of its type (tree.h): a
  * state (none, set, recorded), the number or the owned string, and the cache
- * of the derived string. The getter reads, in order, the value set or recorded,
- * then the default value of a value facet, then UNSET for a style. The setters
- * check the value, return early for the same value, normalize the multi-line
- * values, prepare the new value, call the on_change hook and commit only when
- * it succeeds; the records do the same without the hook and without the early
- * return.
+ * of the derived string. The getter reads, in order, the value derived from
+ * the spelling (derive.c: the tokens of a STRING facet, the content of the leaf
+ * for a CONTENT facet), the value set or recorded, then the default value of a
+ * value facet, then UNSET for a style. The setters check the value, return
+ * early for the same value, normalize the multi-line values, prepare the new
+ * value, call the on_change hook and commit only when it succeeds; the records
+ * do the same without the hook and without the early return. A CONTENT facet
+ * stores no value: setting or recording it gives the leaf new free content.
  */
 #include "tree/tree.h"
 
@@ -43,27 +45,38 @@ static const amark_facet_desc_t *facet_desc(const amark_node_t *node, amark_face
 /* ---- Getting ------------------------------------------------------------------- */
 
 /*
- * The current value of facet (desc) of node, in the order of the getter. The
- * components that derive values add their steps in front of the stored value,
- * in this order (design, Tree: Facets):
+ * The current value of facet (desc) of node, in the order of the getter
+ * (design, Tree: Facets):
  *   1. the destination and the title of a reference link or image, resolved by
- *      the definition index (UNRESOLVED without a definition);
+ *      the definition index (UNRESOLVED without a definition) (DefinitionIndex
+ *      adds it here);
  *   2. an OVERRIDABLE facet without an override: the value derived from the
- *      layout (tight);
+ *      layout (tight) (Verbatim adds it here);
  *   3. a STRING facet with tokens: the value derived from its tokens;
- *   4. a CONTENT facet: the value derived from the content of the leaf.
- * Then, here: the value set or recorded, the default value of a value facet,
- * and UNSET for a style.
+ *   4. a CONTENT facet: the value derived from the content of the leaf;
+ *   5. the value set or recorded;
+ *   6. the default value of a value facet, and UNSET for a style.
+ * The steps 3 and 4 fill the cache of the derived value:
+ * AMARK_ERROR_OUT_OF_MEMORY when it cannot be allocated.
  */
-static void facet_value(const amark_node_t *node, amark_facet_t facet,
-                        const amark_facet_desc_t *desc, amark_value_t *out)
+static amark_error_t facet_value(const amark_node_t *node, amark_facet_t facet,
+                                 const amark_facet_desc_t *desc, amark_value_t *out)
 {
     const amark_tree_facet_t *slot = &node->facets[facet - 1];
+    bool derived = false;
+    amark_error_t error;
 
     out->state = AMARK_VALUE_PRESENT;
     out->number = 0;
     out->text = NULL;
     out->length = 0;
+    /* 3 and 4. */
+    error = amark_tree_derive(node, facet, desc, &derived, &out->text, &out->length);
+    if ((error != AMARK_ERROR_NONE) || derived)
+    {
+        return error;
+    }
+    /* 5. */
     if (slot->state != AMARK_TREE_FACET_NONE)
     {
         if (desc->kind == AMARK_FACET_STRING)
@@ -75,12 +88,13 @@ static void facet_value(const amark_node_t *node, amark_facet_t facet,
         {
             out->number = slot->number;
         }
-        return;
+        return AMARK_ERROR_NONE;
     }
+    /* 6. */
     if (desc->role == AMARK_FACET_STYLE)
     {
         out->state = AMARK_VALUE_UNSET;
-        return;
+        return AMARK_ERROR_NONE;
     }
     if (desc->kind == AMARK_FACET_STRING)
     {
@@ -91,19 +105,25 @@ static void facet_value(const amark_node_t *node, amark_facet_t facet,
     {
         out->number = desc->default_number;
     }
+    return AMARK_ERROR_NONE;
 }
 
 amark_error_t amark_node_get(const amark_node_t *node, amark_facet_t facet, amark_value_t *out)
 {
     const amark_facet_desc_t *desc = facet_desc(node, facet);
     amark_value_t value;
+    amark_error_t error;
 
     if (desc == NULL || out == NULL || out->struct_size < sizeof(amark_value_t))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
     value.struct_size = out->struct_size;
-    facet_value(node, facet, desc, &value);
+    error = facet_value(node, facet, desc, &value);
+    if (error != AMARK_ERROR_NONE)
+    {
+        return error;
+    }
     *out = value;
     return AMARK_ERROR_NONE;
 }
@@ -295,31 +315,39 @@ static bool same_string(const amark_facet_desc_t *desc, const char *text, size_t
 }
 
 /*
- * Step 2 of the setters: whether value equals the current value of facet
- * (6.9). For an OVERRIDABLE facet only an override is compared: setting the
- * derived value makes it an override (6.11).
+ * Step 2 of the setters: *same tells whether value equals the current value of
+ * facet (6.9). For an OVERRIDABLE facet only an override is compared: setting
+ * the derived value makes it an override (6.11). AMARK_ERROR_OUT_OF_MEMORY when
+ * the current value cannot be derived.
  */
-static bool is_current_value(const amark_node_t *node, amark_facet_t facet,
-                             const amark_facet_desc_t *desc, const amark_value_t *value)
+static amark_error_t is_current_value(const amark_node_t *node, amark_facet_t facet,
+                                      const amark_facet_desc_t *desc,
+                                      const amark_value_t *value, bool *same)
 {
     amark_value_t current;
+    amark_error_t error;
 
+    *same = false;
     if ((desc->flags & AMARK_FACET_OVERRIDABLE) != 0 &&
         node->facets[facet - 1].state == AMARK_TREE_FACET_NONE)
     {
-        return false;
+        return AMARK_ERROR_NONE;
     }
     current.struct_size = sizeof(current);
-    facet_value(node, facet, desc, &current);
-    if (current.state != AMARK_VALUE_PRESENT)
+    error = facet_value(node, facet, desc, &current);
+    if (error != AMARK_ERROR_NONE || current.state != AMARK_VALUE_PRESENT)
     {
-        return false;
+        return error;
     }
     if (desc->kind == AMARK_FACET_STRING)
     {
-        return same_string(desc, value->text, value->length, current.text, current.length);
+        *same = same_string(desc, value->text, value->length, current.text, current.length);
     }
-    return value->number == current.number;
+    else
+    {
+        *same = value->number == current.number;
+    }
+    return AMARK_ERROR_NONE;
 }
 
 /* ---- Storing ----------------------------------------------------------------------- */
@@ -351,10 +379,20 @@ static amark_error_t store(amark_node_t *node, amark_facet_t facet, bool is_stri
 {
     const amark_facet_desc_t *desc = facet_desc(node, facet);
     amark_value_t prepared;
+    amark_tree_content_t *content = NULL;
     char *text = NULL;
+    bool is_content;
+    bool same = false;
     amark_error_t error;
 
     if (desc == NULL || is_string != (desc->kind == AMARK_FACET_STRING))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
+    /* The value of a CONTENT facet is the content of a leaf. */
+    is_content = (desc->flags & AMARK_FACET_CONTENT) != 0;
+    if (is_content && (node->desc->level != AMARK_NODE_LEVEL_BLOCK ||
+                       (node->desc->flags & AMARK_NODE_TYPE_CONTENT) == 0))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -366,9 +404,13 @@ static amark_error_t store(amark_node_t *node, amark_facet_t facet, bool is_stri
     }
     /* 2. The same value changes nothing (an edit only: a record always stores
      *    its value and its state). */
-    if (mode == STORE_SET && is_current_value(node, facet, desc, value))
+    if (mode == STORE_SET)
     {
-        return AMARK_ERROR_NONE;
+        error = is_current_value(node, facet, desc, value, &same);
+        if (error != AMARK_ERROR_NONE || same)
+        {
+            return error;
+        }
     }
     /* 3. Normalize and 4. prepare the new value. */
     prepared = *value;
@@ -397,6 +439,15 @@ static amark_error_t store(amark_node_t *node, amark_facet_t facet, bool is_stri
         text[length] = '\0';
         prepared.text = text;
         prepared.length = length;
+        if (is_content)
+        {
+            error = amark_tree_content_from_value(text, length, &content);
+            if (error != AMARK_ERROR_NONE)
+            {
+                amark_free(text);
+                return error;
+            }
+        }
     }
     if (mode == STORE_SET && desc->on_change != NULL)
     {
@@ -405,6 +456,7 @@ static amark_error_t store(amark_node_t *node, amark_facet_t facet, bool is_stri
         if (error != AMARK_ERROR_NONE)
         {
             /* 5. The hook failed: discard the prepared value. */
+            amark_tree_content_release(content, true);
             amark_free(text);
             return error;
         }
@@ -413,7 +465,21 @@ static amark_error_t store(amark_node_t *node, amark_facet_t facet, bool is_stri
      *    facet (6.7, 6.8): its tokens are removed and the facet is marked as
      *    dropped by the same step as amark_node_discard_facet_spelling, which
      *    the spelling component adds after this commit; a record keeps the
-     *    spelling (6.14). */
+     *    spelling (6.14). A CONTENT facet takes the new content: the facet
+     *    stores nothing, and an edit removes the tokens of the facet and
+     *    marks its spelling as dropped (no token is put on the new content). */
+    if (is_content)
+    {
+        amark_free(text);
+        if (mode == STORE_SET)
+        {
+            /* The tokens of the facet go with the spelling (no allocation). */
+            amark_tree_remove_facet_tokens(node, facet);
+            node->dropped |= 1u << facet;
+        }
+        amark_tree_leaf_take_content(node, content);
+        return AMARK_ERROR_NONE;
+    }
     commit(node, facet, mode == STORE_SET ? AMARK_TREE_FACET_SET : AMARK_TREE_FACET_RECORDED,
            is_string ? 0 : prepared.number, text, prepared.length);
     return AMARK_ERROR_NONE;

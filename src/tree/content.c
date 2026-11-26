@@ -478,6 +478,7 @@ amark_error_t amark_block_add_content(amark_node_t *leaf, amark_line_id_t line,
         adopt_copy(leaf, copy);
     }
     document->stats.record_steps++;
+    amark_tree_drop_content_derived(leaf);
     amark_tree_changed(leaf, AMARK_TREE_CHANGE_RECORD);
     return AMARK_ERROR_NONE;
 }
@@ -546,10 +547,132 @@ amark_error_t amark_block_set_free_content(amark_node_t *leaf, const char *bytes
     content->owners = 1;
 
     /* Commit: the previous content is released, never changed. */
+    amark_tree_leaf_take_content(leaf, content);
+    return AMARK_ERROR_NONE;
+}
+
+amark_error_t amark_tree_content_from_value(const char *value, size_t length,
+                                            amark_tree_content_t **out)
+{
+    amark_tree_content_t *content;
+    size_t normalized = length;
+    size_t lines = 0;
+    size_t i;
+    char *bytes;
+
+    *out = NULL;
+    /* CRLF and CR become LF (a CONTENT facet without LINES is not normalized
+     * by the setter): each CRLF loses its CR. */
+    for (i = 0; i + 1 < length; i++)
+    {
+        if ((value[i] == '\r') && (value[i + 1] == '\n'))
+        {
+            normalized--;
+        }
+    }
+    if (normalized > (AMARK_TREE_MAX_CONTENT + 1u))
+    {
+        return AMARK_ERROR_LIMIT_EXCEEDED;
+    }
+    content = (amark_tree_content_t *)amark_calloc(1, sizeof(*content));
+    if (content == NULL)
+    {
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    content->bytes = (char *)amark_malloc(normalized + 1);
+    if (content->bytes == NULL)
+    {
+        content_free(content);
+        return AMARK_ERROR_OUT_OF_MEMORY;
+    }
+    content->capacity = normalized + 1;
+    bytes = content->bytes;
+    for (i = 0; i < length; i++)
+    {
+        char c = value[i];
+
+        if (c == '\r')
+        {
+            if ((i + 1 < length) && (value[i + 1] == '\n'))
+            {
+                continue;
+            }
+            c = '\n';
+        }
+        *bytes++ = c;
+    }
+    /* The content is the value without its last LF. */
+    content->length = normalized;
+    if ((normalized > 0) && (content->bytes[normalized - 1] == '\n'))
+    {
+        content->length--;
+    }
+    if (content->length > AMARK_TREE_MAX_CONTENT)
+    {
+        content_free(content);
+        return AMARK_ERROR_LIMIT_EXCEEDED;
+    }
+    content->bytes[content->length] = '\0';
+    for (i = 0; i < content->length; i++)
+    {
+        lines += (content->bytes[i] == '\n') ? 1u : 0u;
+    }
+    content->line_count = (normalized == 0) ? 0 : lines + 1;
+    content->state = AMARK_CONTENT_FREE;
+    content->owners = 1;
+    *out = content;
+    return AMARK_ERROR_NONE;
+}
+
+/*
+ * Removes the tokens of node that spell facet (not AMARK_FACET_NONE): its
+ * layout tokens and its content tokens; the content tokens release their base
+ * when none is left. Allocates nothing; drops the derived values of node.
+ */
+void amark_tree_remove_facet_tokens(amark_node_t *node, amark_facet_t facet)
+{
+    amark_tree_records_t *records = node->records;
+    amark_tree_content_tokens_t *tokens = node->content_tokens;
+    size_t kept = 0;
+    size_t i;
+
+    if (records != NULL)
+    {
+        for (i = 0; i < records->token_count; i++)
+        {
+            if (records->tokens[i].facet != facet)
+            {
+                records->tokens[kept++] = records->tokens[i];
+            }
+        }
+        records->token_count = kept;
+    }
+    if (tokens != NULL)
+    {
+        kept = 0;
+        for (i = 0; i < tokens->count; i++)
+        {
+            if (tokens->items[i].facet != facet)
+            {
+                tokens->items[kept++] = tokens->items[i];
+            }
+        }
+        tokens->count = kept;
+        if (kept == 0)
+        {
+            amark_tree_content_tokens_free(tokens);
+            node->content_tokens = NULL;
+        }
+    }
+    amark_tree_drop_derived(node, AMARK_FACET_NONE);
+}
+
+void amark_tree_leaf_take_content(amark_node_t *leaf, amark_tree_content_t *content)
+{
     amark_tree_content_release(leaf->content, true);
     leaf->content = content;
+    amark_tree_drop_content_derived(leaf);
     amark_tree_changed(leaf, AMARK_TREE_CHANGE_RECORD);
-    return AMARK_ERROR_NONE;
 }
 
 /* ---- Readers -------------------------------------------------------------------------- */
@@ -618,28 +741,12 @@ void amark_tree_content_tokens_free(amark_tree_content_tokens_t *tokens)
     amark_free(tokens);
 }
 
-/* Drops the values derived from the tokens of node (its string caches). */
-static void drop_derived(amark_node_t *node)
-{
-    size_t i;
-
-    if (node->facets == NULL)
-    {
-        return;
-    }
-    for (i = 0; i < node->desc->facet_count; i++)
-    {
-        amark_free(node->facets[i].cache);
-        node->facets[i].cache = NULL;
-        node->facets[i].cache_length = 0;
-    }
-}
-
-/* The change of the tokens of node: its derived values are dropped and the
- * change is notified. */
+/* The change of the tokens of node: its derived values are dropped (those of
+ * its facets and, for a leaf, of its CONTENT facets, which its REPLACED tokens
+ * change) and the change is notified. */
 static void tokens_changed(amark_node_t *node)
 {
-    drop_derived(node);
+    amark_tree_drop_derived(node, AMARK_FACET_NONE);
     amark_tree_changed(node, AMARK_TREE_CHANGE_RECORD);
 }
 
@@ -925,6 +1032,10 @@ amark_error_t amark_node_add_content_token(amark_node_t *node, const amark_node_
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
+    if (amark_tree_mixes_spelling(node, token->facet, false))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
+    }
     content = leaf->content;
     tokens = node->content_tokens;
     if ((tokens != NULL) && (tokens->count > 0) &&
@@ -1019,7 +1130,8 @@ amark_error_t amark_node_move_content_tokens(amark_node_t *from, amark_node_t *t
     moved = &source->items[first];
     for (i = 0; i < count; i++)
     {
-        if (moved[i].facet > to->desc->facet_count)
+        if ((moved[i].facet > to->desc->facet_count) ||
+            amark_tree_mixes_spelling(to, moved[i].facet, false))
         {
             return AMARK_ERROR_INVALID_ARGUMENT;
         }
@@ -1396,9 +1508,11 @@ static amark_error_t take_lines(amark_node_t *from, amark_node_t *to, amark_line
         from->line_first = 0;
     }
     document->stats.record_steps += (token_high - token_low) + (piece_high - piece_low);
+    amark_tree_drop_derived(from, AMARK_FACET_NONE);
     amark_tree_changed(from, AMARK_TREE_CHANGE_RECORD);
     if (to != NULL)
     {
+        amark_tree_drop_derived(to, AMARK_FACET_NONE);
         amark_tree_changed(to, AMARK_TREE_CHANGE_RECORD);
     }
     return AMARK_ERROR_NONE;
@@ -1584,6 +1698,7 @@ amark_error_t amark_block_trim_content_start(amark_node_t *leaf, uint32_t column
         adopt_copy(leaf, copy);
     }
     document->stats.record_steps++;
+    amark_tree_drop_derived(leaf, AMARK_FACET_NONE);
     amark_tree_changed(leaf, AMARK_TREE_CHANGE_RECORD);
     return AMARK_ERROR_NONE;
 }

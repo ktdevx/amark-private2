@@ -650,7 +650,8 @@ amark_error_t amark_block_add_token(amark_node_t *block, const amark_layout_toke
     if ((block == NULL) || (token == NULL) || (token->struct_size < sizeof(*token)) ||
         (block->desc->level != AMARK_NODE_LEVEL_BLOCK) || (token->kind < AMARK_SPELL_TEXT) ||
         (token->kind > AMARK_SPELL_REPLACED) || (token->facet > block->desc->facet_count) ||
-        (token->column_start >= token->column_end))
+        (token->column_start >= token->column_end) ||
+        amark_tree_mixes_spelling(block, token->facet, true))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -693,6 +694,10 @@ amark_error_t amark_block_add_token(amark_node_t *block, const amark_layout_toke
     slot->facet = (uint8_t)token->facet;
     slot->role = token->role;
     block->document->stats.record_steps++;
+    if (token->facet != AMARK_FACET_NONE)
+    {
+        amark_tree_drop_derived(block, token->facet);
+    }
     amark_tree_changed(block, AMARK_TREE_CHANGE_RECORD);
     return AMARK_ERROR_NONE;
 }

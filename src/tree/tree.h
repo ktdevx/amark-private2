@@ -202,7 +202,9 @@ typedef struct amark_tree_piece
  *     AMARK_TREE_MAX_CONTENT. Laid content is the pieces joined by a virtual
  *     LF between lines; free content holds no CR.
  *   - line_count: for laid content, the lines that have a piece (an empty line
- *     is an empty piece); for free content, 0 when empty, else its LFs + 1.
+ *     is an empty piece); for free content, 0 when empty, else its LFs + 1,
+ *     except that the value "\n" of a CONTENT facet is empty content with one
+ *     line (amark_tree_content_from_value).
  *   - pieces: for laid content, its pieces in the order of the lines and the
  *     columns (grows by doubling; NULL while the capacity is 0); none for free
  *     content.
@@ -261,11 +263,36 @@ typedef struct amark_tree_content_tokens
 /* Frees tokens, releasing its base (NULL does nothing). */
 void amark_tree_content_tokens_free(amark_tree_content_tokens_t *tokens);
 
+/*
+ * Makes a new free content object from the value of a CONTENT facet (Facets,
+ * the setting of a CONTENT facet): value, of length bytes, is normalized to LF
+ * here (CRLF and CR become LF, also for a CONTENT facet without LINES);
+ * the content is value without its last LF, if any, and its line count is 0
+ * for an empty value, else the LFs of the content + 1 (so "" has no line and
+ * "\n" one empty line). The object has one owner, for the leaf that takes it
+ * with amark_tree_leaf_take_content, or that the caller releases with
+ * amark_tree_content_release(content, true). AMARK_ERROR_OUT_OF_MEMORY and
+ * AMARK_ERROR_LIMIT_EXCEEDED leave nothing allocated.
+ */
+amark_error_t amark_tree_content_from_value(const char *value, size_t length,
+                                            amark_tree_content_t **out);
+
+/* Removes every layout and content token of node that spells facet (not
+ * AMARK_FACET_NONE); the content tokens release their base when none is left.
+ * Allocates nothing; drops the derived values of node; does not notify. */
+void amark_tree_remove_facet_tokens(amark_node_t *node, amark_facet_t facet);
+
+/* Makes content (one owner, from amark_tree_content_from_value) the content of
+ * leaf, a block with content, releasing the previous one; drops the derived
+ * CONTENT facets of leaf and notifies the change. Allocates nothing. */
+void amark_tree_leaf_take_content(amark_node_t *leaf, amark_tree_content_t *content);
+
 /* ---- NodeCore (node.c) ---------------------------------------------------- */
 
 /* The states of the storage of a facet (amark_tree_facet_t.state). */
-/* No value is stored: the getter returns the default value of a value facet
- * (or, later, the derived value) and UNSET for a style. */
+/* No value is stored: the getter returns the derived value, if any, else the
+ * default value of a value facet and UNSET for a style. A CONTENT facet is
+ * always in this state: its value is the content of the leaf. */
 #define AMARK_TREE_FACET_NONE 0u
 /* A value set by an edit (amark_node_set_*): for an OVERRIDABLE facet, the
  * override. */
@@ -276,14 +303,18 @@ void amark_tree_content_tokens_free(amark_tree_content_tokens_t *tokens);
 /*
  * The storage of one facet of a node (Facets, facet.c). A new node has its
  * facet array zero-filled, so every facet starts in AMARK_TREE_FACET_NONE.
- *   - state: AMARK_TREE_FACET_NONE, _SET or _RECORDED.
+ *   - state: AMARK_TREE_FACET_NONE, _SET or _RECORDED (always NONE for a
+ *     CONTENT facet).
  *   - number: the value of an INT, ENUM or BOOL facet that has one, within the
  *     range of the facet; 0 otherwise.
  *   - text, length: the value of a STRING facet that has one: an owned copy,
  *     terminated by NUL, of valid UTF-8 without NUL, normalized to LF for a
  *     LINES facet; NULL and 0 otherwise.
- *   - cache, cache_length: the string derived from the tokens of the facet
- *     (derive.c); NULL and 0 while there is none.
+ *   - cache, cache_length: the string derived from the tokens of the facet,
+ *     or from the content of the leaf for a CONTENT facet (derive.c),
+ *     terminated by NUL; NULL and 0 while there is none. It is dropped when
+ *     the tokens of the node or the content of the leaf change, and equals
+ *     the value derived now while it is there.
  */
 typedef struct amark_tree_facet
 {
@@ -378,6 +409,51 @@ typedef enum amark_tree_change
  * Each node visited counts one step of stats.invalidation_steps.
  */
 void amark_tree_changed(amark_node_t *node, amark_tree_change_t kind);
+
+/* ---- Derive (derive.c) ------------------------------------------------------- */
+
+/*
+ * The value of facet (desc) of node derived from its spelling, the steps 3 and
+ * 4 of the getter (design, Tree: Facets):
+ *   - a CONTENT facet: always derived from the content of the leaf (the empty
+ *     string without content);
+ *   - another STRING facet spelled by tokens (amark_tree_layout_spells or
+ *     amark_tree_content_spells): derived from its tokens;
+ *   - otherwise *derived is false and nothing else is written.
+ * A derived value is cached in the facet (cache, cache_length) and *text and
+ * *length receive the cache, valid until the next change of the node.
+ * AMARK_ERROR_OUT_OF_MEMORY leaves no cache. The cache is the only part of the
+ * node it writes.
+ */
+amark_error_t amark_tree_derive(const amark_node_t *node, amark_facet_t facet,
+                                const amark_facet_desc_t *desc, bool *derived, const char **text,
+                                size_t *length);
+
+/* Whether a layout token (amark_tree_layout_spells) or a content token
+ * (amark_tree_content_spells) of node spells facet (false for
+ * AMARK_FACET_NONE). A STRING facet is never spelled by both: the records
+ * refuse it. */
+bool amark_tree_layout_spells(const amark_node_t *node, amark_facet_t facet);
+bool amark_tree_content_spells(const amark_node_t *node, amark_facet_t facet);
+
+/* Whether a new token of facet on node would spell a STRING facet with both
+ * kinds of tokens: a layout token (layout true) where a content token spells
+ * the facet, or a content token (layout false) where a layout token does. The
+ * records refuse such a token. */
+bool amark_tree_mixes_spelling(const amark_node_t *node, amark_facet_t facet, bool layout);
+
+/* For the internal check: whether the cache of facet of node, if any, is the
+ * value derived now (a cache of a facet that derives nothing is not).
+ * Allocates nothing. */
+bool amark_tree_derived_cache_ok(const amark_node_t *node, amark_facet_t facet);
+
+/* Drops the cached derived value of facet of node, or of every facet for
+ * AMARK_FACET_NONE: called when the tokens of the node change. */
+void amark_tree_drop_derived(amark_node_t *node, amark_facet_t facet);
+
+/* Drops the cached values of the CONTENT facets of leaf: called when its
+ * content changes. */
+void amark_tree_drop_content_derived(amark_node_t *leaf);
 
 /* ---- LineTable (line_table.c) ----------------------------------------------- */
 
@@ -571,7 +647,10 @@ typedef enum amark_tree_violation
      * range of its facet or set without a value, a string is missing, not
      * terminated at its length, holds NUL or invalid UTF-8, or is not
      * normalized for a LINES facet, a value is held by a facet of another
-     * kind, or a cache length is set without a cache. */
+     * kind or by a CONTENT facet, a cache length is set without a cache, a
+     * cache differs from the value derived now (or a facet that derives
+     * nothing has one), a STRING facet is spelled by both layout and
+     * content tokens, or a token spells a facet whose spelling is dropped. */
     AMARK_TREE_VIOLATION_FACETS,
     /* The layout of a node: a line range outside the line table, records on a
      * node without a range or outside it, margins on a type that is not a
