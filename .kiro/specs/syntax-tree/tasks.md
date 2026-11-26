@@ -219,7 +219,7 @@
     - 確保の失敗で何も変わらない。
   - _Requirements: 6.7, 6.8, 6.12, 6.13, 8.7_
 
-- [ ] 8. テスト用の S 式からの組み立てを作る
+- [x] 8. テスト用の S 式からの組み立てを作る
   - ダンプと同じ形式の S 式から木を組み立てる。
     - 値と style は、記録の関数で入れる。
     - 配置と綴り（行の範囲、帯、空行、表記、中身、中身のトークン）は、記録の関数で入れる。
@@ -465,3 +465,4 @@
 - 共有した中身の写しは、13.3 で公開の複製の API を通して確かめ直す（6.3）。
 - CONTENT の項目の設定と記録は 7.1 で入れた。設定ではその項目のトークンを `amark_tree_remove_facet_tokens` で除いてから捨てた印を立て、値は常に LF に揃える。7.2 の項目の綴りを捨てる操作でも、この関数を使える。取得の順は design のとおり、綴りからの導出が設定・記録の値より先である（7.1）。
 - すべての綴りを捨てる操作は、空行を除く前に list の tight を上書きの値として写す（design の手順 1 を改訂した）。12.3 でタイトの導出を入れたら、ルーズなリストで `discarding_all_spelling_of_a_list_or_its_item_keeps_tight` が値を保つことを確かめる（7.2）。
+- 14.3 のダンプは、組み立ての補助（8）と同じ名前を出す。トークンの種類は `text marker space delimiter escape char_ref replaced line_break tab_remainder`、改行は `none lf crlf cr`、構造の綴りを捨てた印は `:dropped` の中の `structure`。往復には `AMARK_DUMP_LAYOUT` と `AMARK_DUMP_SPELLING` を一緒に使う。組み立ては list の tight を常に上書きの値として記録する（8）。

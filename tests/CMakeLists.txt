@@ -27,8 +27,9 @@ if(AMARK_BUILD_TESTS)
     "${PROJECT_SOURCE_DIR}/include")
   target_link_libraries(amark_test_support PUBLIC Naos::naos)
 
-  # amark_test_tree: building trees from S-expressions (support/tree_builder.h,
-  # amark_test_tree_build and AMARK_CHECK_TREE_DUMP). It calls the public API of
+  # amark_test_tree: building trees from S-expressions (support/tree_builder.h:
+  # amark_test_tree_build and AMARK_CHECK_TREE_BUILD; AMARK_CHECK_TREE_DUMP comes
+  # with the dump). Its test is tree/tree_builder_test.c. It calls the public API of
   # Amark, so it cannot go into amark_test_support: tree_builder.c is an INTERFACE
   # source, compiled with the settings of each test that links it (with amark or
   # amark_internal). It uses the Naos macros, so fuzz targets must not link it.

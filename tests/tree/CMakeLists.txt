@@ -8,6 +8,12 @@
 # depends on Naos. Tests that include the internal header of src/tree/
 # (tree/tree.h) use INTERNAL.
 
+# TestSupport: building trees from S-expressions (tests/support/tree_builder.h,
+# the INTERFACE library amark_test_tree, which tests/CMakeLists.txt defines only
+# when AMARK_BUILD_TESTS is on; amark_add_test() does nothing otherwise).
+amark_add_test(tree_builder_test SOURCES tree_builder_test.c INTERNAL
+  LIBRARIES amark_test_tree)
+
 # Registry: syntax sets, freezing, the identifiers, the lookups and the slots.
 amark_add_test(registry_test SOURCES registry_test.c INTERNAL)
 
