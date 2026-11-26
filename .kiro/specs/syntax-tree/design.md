@@ -189,7 +189,7 @@ tests/tree/                 # 既存のテストはすべて削除し、コン�
 ├── registry_test.c、builtin_types_test.c、document_test.c、line_table_test.c、structure_test.c
 ├── facet_test.c、derive_test.c、layout_test.c、content_test.c、label_index_test.c
 ├── copy_import_test.c、position_test.c、lossless_test.c、verbatim_test.c、iterator_test.c
-├── equal_dump_test.c、extension_type_test.c、msgstr_flow_test.c
+├── equal_test.c、dump_test.c、extension_type_test.c、msgstr_flow_test.c
 ├── oom_test.c      # すべての変更の操作の確保失敗の総当たり
 └── scale_test.c    # 深さ 10 万段と計算量のカウンタ
 tests/support/tree_builder.{h,c}  # 書き直し：新しいダンプの形式から木を組み立てる
