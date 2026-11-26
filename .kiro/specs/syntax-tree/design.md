@@ -182,7 +182,7 @@ fuzz/
 - `include/amark/amark.h` — `foundation` の design が定める `amark.h` の正規の include の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）の「木のヘッダ」の位置に、`node.h`、`document.h`、`token.h`、`iterator.h`、`dump.h`、`extension.h` をこの順で追加する。
 - `src/CMakeLists.txt` — `amark_objects` に `src/tree/*.c` を追加する。
 - `tests/CMakeLists.txt` — `if(AMARK_BUILD_TESTS)` の中で、INTERFACE ライブラリ `amark_test_tree`（INTERFACE のソース `support/tree_builder.c`、インクルード `support/`）を定義し、`add_subdirectory(tree)` を追加する。`tree_builder.h` は Naos のマクロ `AMARK_CHECK_TREE_DUMP` を宣言するので、`amark_test_tree` は Naos に依存する。`foundation` の規則 7.7 により `tests/` は `AMARK_FUZZ` だけが ON の構成でも入るため、Naos に依存するターゲットは `if(AMARK_BUILD_TESTS)` の中に置く（ファジングターゲットは `amark_test_tree` をリンクしない）。
-- `fuzz/CMakeLists.txt` — `amark_add_fuzzer(tree_edit SOURCES tree_edit_fuzz.c CORPUS corpus/tree_edit)` を追加する。
+- `fuzz/CMakeLists.txt` — `amark_add_fuzzer(tree_edit_fuzz SOURCES tree_edit_fuzz.c CORPUS corpus/tree_edit)` を追加する。
 
 ## System Flows
 

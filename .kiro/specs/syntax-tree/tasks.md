@@ -172,7 +172,7 @@
   - サニタイザの構成を含めて、これらのテストが成功する
   - _Requirements: 4.9, 10.3, 10.4, 10.5_
 
-- [ ] 7.4 編集の操作列のファジングターゲットを作る
+- [x] 7.4 編集の操作列のファジングターゲットを作る
   - 入力を、生成・挿入・移動・置換・切り離し・解放・リテラルの設定・一括設定・トークンの追加と移動・複製・取り込み・子をまとめた取り込み・追跡の切り替えの操作列として解釈し、確保の失敗を注入するアロケータをグローバルに設定して実行する
   - 各操作の後に不変条件の検査が成功し、最後に複製と元の比較が等しく、ダンプが一致することを確かめる
   - 種のファイルを置き、ファジングのターゲットとして登録する。コーパスの再生のテストが CTest で成功し、ファジングの短時間実行の対象に含まれる
@@ -213,3 +213,4 @@
 - 7.1: `amark_node_create_copy` は `copy` があれば `data_size` が 0 でも NULL のデータで呼ぶ（init / deinit / equal / dump と同じ。5.2 の非対称は解消）。extension.h に、NULL のデータでの呼び出し、所有するデータを持つ型は `deinit` と `copy` を用意すること、`init` と `copy` は失敗時に自分で解放すること（`deinit` は呼ばれない）、`deinit` は `init` か `copy` が作ったノードごとに 1 回であることを書いた。4.3 と 6.1 で残したテストの不足は extension_type_test.c と equal_dump_test.c で埋めた
 - 7.2: tests/tree/oom_test.c は表駆動（prepare / run / failed_cleanly / succeeded）で、各ケースで操作の中の確保が少なくとも 1 回失敗したこと（`op_failures > 0`）を確かめる。そのため prepare でトークンと構文セットの配列の容量を埋める（INTERNAL の `token_capacity` と `extension_capacity` を読む）。確保しない属性の設定は対象外
 - 7.3: 深い鎖は下から組み立てる（切り離した block_quote が下の鎖を受け取る）。上から組み立てると、循環の検査が壊れたときに組み立て自体が二次になり、テストが失敗せずに長時間かかる。計算量のループは、祖先をたどった最初の編集で打ち切る
+- 7.4: ファジングターゲットは foundation の命名に合わせて `amark_add_fuzzer(tree_edit_fuzz ...)`（design の Modified Files も直した。テスト名は `fuzz.tree_edit.corpus`）。ハンドルのバイトは個数を法とした添字で 0xff が NULL。種はレビューの深さ 3 の伝播の種（deep_propagation）を含む 10 個。`amark_document_check_tokens` は NOT_LOSSLESS のときだけ報告に問題を書く
