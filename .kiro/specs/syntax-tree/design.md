@@ -317,7 +317,7 @@ graph TB
 **Responsibilities & Constraints**
 - 構文セットは作成時に `amark.core`（組み込みの型だけを持つ拡張）を先頭に持つ。`amark.core` の削除・置換・前への挿入は `AMARK_ERROR_INVALID_ARGUMENT`。
 - 追加・挿入・置換のとき記述子を検査する：`struct_size` が v1 の最小以上、名前が `[a-z0-9][a-z0-9_.-]*`、拡張の名前が構文セットの中で重複しない、ノード型の記述子の検査（下記）、スロットの `kind` が 0 でなく `struct_size >= sizeof(amark_slot_t)`。
-- ノード型の記述子の検査：拡張の型の名前は `.` を含む（`.` のない名前は組み込みに予約）。`flags` は `BLOCK` か `INLINE` のどちらか一方。`literal_mode` が既知の値。`data_size` が `AMARK_NODE_TYPE_MAX_DATA_SIZE`（64 KiB）以下。
+- ノード型の記述子の検査：拡張の型の名前は `.` を含む（`.` のない名前は組み込みに予約）。`node_class` が既知の値（`BLOCK` か `INLINE`。0 は書き忘れとして拒否する）。`literal_mode` が既知の値。`data_size` が `AMARK_NODE_TYPE_MAX_DATA_SIZE`（64 KiB）以下。
 - 凍結：すべての型の名前の重複を検査し（重複は `AMARK_ERROR_INVALID_ARGUMENT`、構文セットは凍結されないまま）、拡張の型に 256 から順に識別子を割り当て、名前の索引とスロットの索引（種類ごとに構文セットの順）を作る。凍結後の変更は `AMARK_ERROR_INVALID_STATE`。
 - 記述子と拡張は構文セットより長く生きること（通常は静的な記憶域）。構文セットはそれを使うすべての文書より長く生きること。凍結した構文セットは読み取りだけなので、複数のスレッドから同時に使える。
 - `amark_syntax_set_core()` は、凍結済みで `amark.core` だけを持つ静的な `const` の構文セットを返す。解放しても何もしない。内部の印（`is_static`）を持ち、`amark_document_take_syntax_set` はこの印で静的な構文セットを拒否する（1.11）。
@@ -353,9 +353,12 @@ graph TB
 #define AMARK_CONTENT_INLINE     0x02u
 #define AMARK_CONTENT_LIST_ITEM  0x04u
 
-/* 型の性質 */
-#define AMARK_NODE_TYPE_BLOCK    0x01u
-#define AMARK_NODE_TYPE_INLINE   0x02u
+/* 型の分類（ブロックかインラインか）。閉じた二者択一なので enum にする。
+   0 は不正（記述子で書き忘れたときに登録の検査で拒否するため） */
+typedef enum amark_node_class {
+    AMARK_NODE_CLASS_BLOCK = 1,
+    AMARK_NODE_CLASS_INLINE = 2
+} amark_node_class_t;
 
 typedef enum amark_literal_mode {
     AMARK_LITERAL_NONE = 0,   /* リテラルを持たない */
@@ -369,7 +372,7 @@ typedef enum amark_literal_mode {
 struct amark_node_type_desc {         /* typedef は node.h が前方宣言で行う（C99 は typedef の重複を許さない） */
     size_t struct_size;
     const char *name;                 /* 組み込みは "paragraph" など。拡張は "gfm.table" のように . を含む */
-    uint32_t flags;                   /* AMARK_NODE_TYPE_BLOCK か AMARK_NODE_TYPE_INLINE */
+    amark_node_class_t node_class;    /* AMARK_NODE_CLASS_BLOCK か AMARK_NODE_CLASS_INLINE */
     uint32_t provides;                /* この型が属する分類 */
     uint32_t accepts;                 /* 子として受け入れる分類。0 かつ can_contain が NULL なら葉 */
     amark_literal_mode_t literal_mode;
@@ -469,7 +472,7 @@ AMARK_API const amark_slot_t *amark_syntax_set_slot_at(const amark_syntax_set_t 
 **Responsibilities & Constraints**
 - `amark.core` 拡張は、次の 19 の型の記述子を識別子の順に持ち、スロットを持たない。
 
-| ID | Name | Flags | provides | accepts | literal_mode | 型のデータ（既定値） |
+| ID | Name | node_class | provides | accepts | literal_mode | 型のデータ（既定値） |
 |----|------|-------|----------|---------|--------------|----------------------|
 | 1 | document | BLOCK | — | BLOCK | NONE | — |
 | 2 | block_quote | BLOCK | BLOCK | BLOCK | NONE | — |

@@ -231,6 +231,13 @@
 - **変更**：型を `amark_slot_t`（タグ `struct amark_slot`）に改名した。種類ごとの構造体が先頭に埋め込むメンバーの名前は `base` にする（下流の spec が合わせる）。文書の中では「スロットの基底」と呼ぶ。フィールド（`struct_size`、`kind`）、構造体の形、API の振る舞いは変えない。
 - **Implications**：型とメンバーの名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
 
+### 2026-11-25：ノード型の記述子の `flags` を enum の `node_class` にする
+- **Context**：記述子の `uint32_t flags` は、ビットの定数 `AMARK_NODE_TYPE_BLOCK`（`0x01u`）と `AMARK_NODE_TYPE_INLINE`（`0x02u`）を持っていた。しかし、使えるのはどちらか一方だけで（記述子の検査で両方・どちらでもない値を拒否する）、ビットを組み合わせる用途はない。要件（2.4、8.1）は「ブロックかインラインか」の二者択一で、下流の 4 つの spec もこのフィールドとビットの定数を参照しない（包含の判定は `provides` / `accepts` と `can_contain` で行う）。性質のビットを足す計画もない。steering（tech.md）の規約では、閉じた選択肢の集合は `typedef enum` にする。型が `uint32_t` のビットの印だと、両方を立てられるかのように読める。
+- **変更**：`typedef enum amark_node_class { AMARK_NODE_CLASS_BLOCK = 1, AMARK_NODE_CLASS_INLINE = 2 } amark_node_class_t` を `extension.h` に置き、記述子のフィールドを `amark_node_class_t node_class` にした。ビットの定数 `AMARK_NODE_TYPE_BLOCK` / `INLINE` はなくした。記述子の検査は「`BLOCK` か `INLINE` のどちらか一方」から「`node_class` が既知の値」にした（`literal_mode` の検査と同じ形）。組み込みの型の表の列名を `node_class` にした。
+- **値を 1 と 2 にする理由**：記述子は指示付き初期化子で静的に定義するのが普通で、書き忘れたメンバーは 0 になる。ブロックかインラインかには正しい既定値がないので、0 を有効な値（例：BLOCK）にすると、書き忘れたインラインの型が黙ってブロックとして登録される。0 を不正にして登録の検査で拒否する。`literal_mode` が `NONE = 0` を有効にしているのは、「リテラルを持たない」が多くの型で正しい既定値だから。同じ二者択一の `amark_fragment_context_t`（`block-parser`、`BLOCK = 1`、`INLINE = 2`）とも値をそろえた。
+- **検討した代替**：(1) ビットのまま残す：組み合わせられない値をビットで表す理由がなく、規約にも合わない。(2) 値を 0 と 1 にする：書き忘れを検出できない。ブロックを既定にするなら enum より `bool is_inline` が素直だが、拡張の作者に分類の明示を求めるため採らなかった。(3) 開いた集合として `uint32_t` と `#define` にする：拡張が第 3 の分類を足す必要がなく、包含の分類は `provides` / `accepts` が担う。
+- **Implications**：公開 API の型とフィールドの名前の変更だが、C の実装はまだないので互換性の影響はない。`amark_node_is_block` / `amark_node_is_inline` の形と振る舞い、要件、タスクの範囲は変わらない（タスク 2.2 の「ブロック/インラインのどちらか一方」の検査は、enum の既知の値の検査として満たす）。下流の spec は該当する記述を持たないので変更はない。承認は維持する。
+
 ## References
 - [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
 - [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則
