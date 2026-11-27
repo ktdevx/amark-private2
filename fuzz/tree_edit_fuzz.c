@@ -1666,7 +1666,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     current.index = 0;
     current.code = 0;
     current.call = NULL;
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996) /* getenv: only reads whether a variable is set */
+#endif
     current.trace = getenv("AMARK_TREE_EDIT_TRACE") != NULL;
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
     CHECK(amark_allocator_set(&allocator) == AMARK_ERROR_NONE);
 
     memset(&state, 0, sizeof state);

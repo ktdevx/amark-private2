@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <naos/naos.h>
@@ -274,18 +275,14 @@ NAOS_TEST(an_empty_line_must_be_referred_to)
     amark_document_t *document = new_document(text);
 
     NAOS_REQUIRE_NOT_NULL(document);
-    strcpy(tree, "(document :lines (0 3)\n");
-    strcat(tree, paragraphs);
-    strcat(tree, ")");
+    snprintf(tree, sizeof tree, "%s%s)", "(document :lines (0 3)\n", paragraphs);
     AMARK_CHECK_TREE_BUILD(document, NULL, tree);
     CHECK_LINE_PROBLEM(document, 0, AMARK_LOSSLESS_GAP, 1, 0);
     amark_document_destroy(document);
 
     document = new_document(text);
     NAOS_REQUIRE_NOT_NULL(document);
-    strcpy(tree, "(document :lines (0 3) :blanks ((1 0 0))\n");
-    strcat(tree, paragraphs);
-    strcat(tree, ")");
+    snprintf(tree, sizeof tree, "%s%s)", "(document :lines (0 3) :blanks ((1 0 0))\n", paragraphs);
     AMARK_CHECK_TREE_BUILD(document, NULL, tree);
     CHECK_TREE_OK(document);
     CHECK_LOSSLESS(document, 0);

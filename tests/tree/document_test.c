@@ -44,7 +44,7 @@ typedef struct box_data
 static amark_error_t box_init(amark_node_t *node, void *data)
 {
     box_data_t *box = (box_data_t *)data;
-    static const box_data_t zero;
+    static const box_data_t zero = {0};
 
     (void)node;
     init_calls++;
@@ -357,7 +357,7 @@ NAOS_TEST(node_create_makes_a_detached_node_with_zero_facets)
     amark_syntax_set_t *set = new_test_set();
     amark_document_t *document = NULL;
     amark_node_t *node;
-    static const amark_tree_facet_t zero_facet;
+    static const amark_tree_facet_t zero_facet = {0};
     size_t i;
 
     NAOS_REQUIRE_NOT_NULL(set);
