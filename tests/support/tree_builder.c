@@ -1194,7 +1194,7 @@ static bool check_line_table(builder_t *b, const sx_t *list)
     {
         const sx_t *items[6];
         amark_line_info_t info;
-        int64_t numbers[4];
+        int64_t numbers[4] = {0, 0, 0, 0};
         uint32_t width = 0;
         size_t i;
         amark_error_t error;

@@ -1136,7 +1136,7 @@ static amark_document_t *deep_emphasis(size_t depth)
     amark_node_t *text = NULL;
     size_t i;
 
-    NAOS_REQUIRE_NOT_NULL(source);
+    NAOS_REQUIRE_TRUE(source != NULL);
     memset(source, '*', length);
     source[depth] = 'a';
     source[length] = '\n';

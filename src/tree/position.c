@@ -197,8 +197,8 @@ static amark_error_t block_range(const amark_node_t *block, amark_source_range_t
 {
     const amark_document_t *document = block->document;
     const amark_node_t *node = block;
-    line_span_t start;
-    line_span_t end;
+    line_span_t start = {0, 0, 0};
+    line_span_t end = {0, 0, 0};
     size_t unused;
     extent_t extent;
     amark_error_t error;
@@ -295,8 +295,8 @@ static amark_error_t map_byte(const amark_document_t *document,
     const amark_tree_piece_t *piece;
     const amark_tree_line_t *line;
     size_t offset;
-    size_t first;
-    size_t last;
+    size_t first = 0;
+    size_t last = 0;
     size_t byte;
     uint32_t first_tab_offset = 0;
     uint32_t last_tab_offset = 0;
@@ -363,10 +363,10 @@ static amark_error_t inline_range(const amark_node_t *top, amark_source_range_t 
     const amark_node_t *node;
     size_t earliest = 0;
     size_t latest = 0;
-    size_t start_index;
-    size_t end_index;
-    line_span_t start;
-    line_span_t end;
+    size_t start_index = 0;
+    size_t end_index = 0;
+    line_span_t start = {0, 0, 0};
+    line_span_t end = {0, 0, 0};
     amark_error_t error;
 
     for (node = top; node != NULL; node = walk_next(node, top, true))
