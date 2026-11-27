@@ -86,7 +86,7 @@ Amark は、Markdown テキストと構文木を相互変換する C99 ライブ
 
 ## Existing Spec Updates
 2026-11-26 に、構文木のモデルを「行 × 帯」と「中身の上の CST」に移すことにした（入力資料：`INPUT.md`）。承認済みの spec を、依存の順に requirements から改訂し直す。各 spec の改訂の後に `/kiro-validate-design` で整合性を確かめる。
-- [ ] syntax-tree -- 作り直し。行の表、帯、空行、葉自身の表記、中身（配置済み / 自由）、中身の上のインラインのトークン、value / style / spelling、定義の索引、ロスレス性の検証（行ごとの分割と中身の被覆）。編集の追跡を廃止する。`src/tree` の実装も作り直す（流用する部分は design で決める）。Dependencies: none
+- [x] syntax-tree -- 作り直し。行の表、帯、空行、葉自身の表記、中身（配置済み / 自由）、中身の上のインラインのトークン、value / style / spelling、定義の索引、ロスレス性の検証（行ごとの分割と中身の被覆）。編集の追跡を廃止する。`src/tree` の実装も作り直す（流用する部分は design で決める）。Dependencies: none
 - [ ] html-renderer -- ソース位置の属性と、リンクと画像の宛先とタイトルの取り方だけを改訂する。Dependencies: syntax-tree
 - [ ] block-parser -- 入力の前処理、インラインへの委譲（中身）、各構文の style、定義の索引、表記の記録（帯、空行、葉自身の表記、中身）、断片のパース、ブロック構文の公開 API を改訂する。リスト項目の空行は cmark の順で扱い、タイトは空行から導く。Dependencies: syntax-tree, html-renderer
 - [ ] inline-parser -- 入口を中身にし、参照の形のリンクはラベルと形を記録する。トークンの位置を中身の上の位置にし、style を記録する。断片のパースで自由な中身を作る。インライン構文の公開 API を改訂する。Dependencies: block-parser, html-renderer
