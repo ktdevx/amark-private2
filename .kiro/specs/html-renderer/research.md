@@ -1,179 +1,175 @@
 # Research & Design Decisions
 
+---
+**Purpose**：`html-renderer` の design（2026-11-27 版、`syntax-tree` の「行 × 帯」と「中身の上の CST」のモデルに合わせた作り直し）を決めるための調査と判断を記録する。
+**Usage**：design.md の判断の背景と、採らなかった案の理由を残す。前の版（2026-11-26 承認、構文トークンのモデル）の調査記録は git の履歴にある。この版はそれを引き継がない。
+---
+
 ## Summary
 - **Feature**：`html-renderer`
-- **Discovery Scope**：New Feature（greenfield。`syntax-tree` のレジストリとノードモデルの上に、HTML の出力のエンジン、スロットのインタフェース、組み込みのノード型の HTML 出力を作る。`block-parser`・`inline-parser`・`markdown-renderer` との継ぎ目を定義する）
+- **Discovery Scope**：Extension（実装のない spec を、作り直した上流の契約に合わせて作り直す。light discovery に、cmark の出力の規則の確認を加えた）
 - **Key Findings**：
-  - cmark（0.31.1、CommonMark 0.31.2 対応）の HTML 出力は、ノードごとの入る/出るイベントの処理と、2 つの文脈（画像の代替テキストの「テキストだけのモード」と、段落の祖父母がタイトなリストかどうか）と、`cr()`（直前が改行でなければ改行）だけで書かれている。これらをすべて公開の出力の文脈として提供すれば、組み込みの出力も拡張と同じスロットで書ける。
-  - HTML の出力はノード型に対応し、構文（construct）には対応しない（見出しは ATX と setext、コードブロックはインデントとフェンス、リンクはインライン・参照・オートリンクから作られる）。組み込みの HTML 出力は「構文ごとのファイル」ではなく、`amark.core` のノード型に対応する 1 つの出力の構文拡張としてまとめるのが自然である。
-  - cmark-gfm の拡張は、表・取り消し線・タスクリストではノード型ごとの出力の関数、タグフィルタでは HTML の出力の後段の「フィルタ」、脚注では後処理による定義の移動と、専用のノード型の出力を使う。Amark では、ノード型ごとのスロット、前の処理の呼び出し（差し替えと包み込み）、前後のフック、拡張ごとの状態、入れ子の出力、分類つきの出力のフィルタで、すべてを公開 API だけで表せる。
+  - roadmap の改訂の範囲（「ソース位置の属性と、リンクと画像の宛先とタイトルの取り方だけ」）より、実際の変更は広い。前の版が使っていた `syntax-tree` の公開 API のうち、残っているのはノードの関係とレジストリの一部だけである。値の取得、タイト、位置、スロットの種類の番号、検証用のノード型の作り方が変わる（下の「変更の範囲の確認」）。
+  - 値（宛先、タイトル、literal、レベル、タイト）は、すべて `amark_node_get` と `value.h` の項目の番号で読める。参照の解決とタイトの導出は `syntax-tree` が持つので、レンダラは綴りも定義の表も持たずに済む。
+  - `amark_node_source_range` の範囲は、cmark の `data-sourcepos` の書式（1 から数える行、最初のバイトの列、最後のバイトの列）にそのまま一致する。ただし、1 回の問い合わせが部分木の大きさに比例するので、すべてのブロックに属性を付けると最大でノードの数 × 深さになる。
 
 ## Research Log
 
-### cmark の HTML 出力の規則（`src/html.c`、0.31.1）
-- **Context**：要件 2.1（参照実装と同じ HTML）、2.2–2.9、3.1–3.3、4.1–4.5 の具体的な出力を確定するため。
-- **Sources Consulted**：cmark 0.31.1 の `src/html.c`、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re`（`_scan_dangerous_url`）
+### 変更の範囲の確認（前の版の design が使っていた上流の API）
+- **Context**：roadmap は改訂の範囲を「ソース位置の属性と、リンクと画像の宛先とタイトルの取り方だけ」とする。実際の上流のヘッダと照らし、変更が要る範囲を確かめるため。
+- **Sources Consulted**：前の版の `design.md`（git の履歴）、`include/amark/node.h`、`document.h`、`value.h`、`iterator.h`、`extension.h`、`spelling.h`、`syntax-tree` の design.md と tasks.md の Implementation Notes
 - **Findings**：
-  - `cr()`：出力が空でなく、最後のバイトが LF でなければ LF を出す。ブロックの開始の前に呼ぶ。
-  - document：何も出さない。block_quote：入るとき `cr` `<blockquote` sourcepos `>\n`、出るとき `cr` `</blockquote>\n`。list：入るとき `cr` と `<ul` / `<ol` / `<ol start="N"`（start ≠ 1）、sourcepos、`>\n`。出るとき `</ul>\n` / `</ol>\n`（`cr` なし）。item：入るとき `cr` `<li` sourcepos `>`、出るとき `</li>\n`。heading：入るとき `cr` `<hN` sourcepos `>`、出るとき `</hN>\n`。
-  - code_block：`cr`、情報文字列が空なら `<pre` sourcepos `><code>`、空でなければ最初の空白（`cmark_isspace`：空白、タブ、LF、VT、FF、CR）までを語とし、`<pre` sourcepos `><code class="` ＋（情報文字列が `language-` で始まらなければ `language-`）＋ エスケープした語 ＋ `">`。続けてエスケープしたリテラル、`</code></pre>\n`。
-  - html_block：`cr`、安全モードなら `<!-- raw HTML omitted -->`、そうでなければリテラルをそのまま、`cr`。thematic_break：`cr` `<hr` sourcepos ` />\n`。
-  - paragraph：祖父母が list で tight なら何も出さない。そうでなければ入るとき `cr` `<p` sourcepos `>`、出るとき `</p>\n`。
-  - text：エスケープしたリテラル。linebreak：`<br />\n`。softbreak：HARDBREAKS なら `<br />\n`、NOBREAKS なら空白、それ以外は LF（HARDBREAKS を先に判定）。code：`<code>` エスケープ `</code>`。html_inline：安全モードなら `<!-- raw HTML omitted -->`、そうでなければリテラル。emph `<em>`、strong `<strong>`。
-  - link：`<a href="` ＋（UNSAFE か危険でなければ）href のエスケープ ＋（タイトルがあれば `" title="` ＋ エスケープ）＋ `">`、出るとき `</a>`。image：`<img src="` ＋ 同じ URL ＋ `" alt="`、テキストだけのモードを開始。出るとき（タイトルがあれば `" title="` ＋ エスケープ）＋ `" />`。
-  - テキストだけのモード：text、code、html_inline はエスケープしたリテラル（安全モードでも、エスケープするので安全）、linebreak と softbreak は空白、それ以外は何も出さない。子は通常どおりたどる。開始したノードに戻ったときに終わる。
-  - sourcepos はブロックの要素の開始タグにだけ ` data-sourcepos="L:C-L:C"` を出す（終わりの列は最後のバイトを含む）。インラインには出さない。
-  - HTML のエスケープ（secure=0）：`"` → `&quot;`、`&` → `&amp;`、`<` → `&lt;`、`>` → `&gt;`。`'` と `/` はそのまま。
-  - href のエスケープ：安全な文字（英数字と `-_.+!*(),%#@?=;:/$~`）はそのまま。`&` → `&amp;`、`'` → `&#x27;`、それ以外（`"`、`<`、`>`、`[`、`\`、`]`、`^`、`` ` ``、`{`、`|`、`}`、空白、制御文字、0x80 以上のバイト）は `%XX`（大文字の 16 進）。`%` は検査せずそのまま通す。
-  - 危険な URL：大文字と小文字を区別せず、`data:image/png`、`data:image/gif`、`data:image/jpeg`、`data:image/webp` で始まれば安全、`javascript:`、`vbscript:`、`file:`、`data:` で始まれば危険。
-- **Implications**：組み込みの 19 の型の出力の表を設計に固定する。`language-` の接頭辞の重複の回避と、`cr` の判定が「この出力の呼び出しで書いた最後のバイト」に基づくことを明記する。リンク参照定義は cmark にないノードなので、何も出さない処理を登録する。
+
+| 前の版が使っていたもの | 今の上流 | この版での扱い |
+|---|---|---|
+| ノードの関係（parent、first_child、next）、`amark_node_get_type`、`amark_node_document` | `node.h` に同じ名前である | そのまま使う |
+| 型ごとの属性とリテラルの取得関数 | ない。`amark_node_get(node, facet, &value)` と `value.h` の項目の番号（`AMARK_LIST_TYPE`、`AMARK_CODE_BLOCK_INFO` など） | すべて `amark_node_get` で読む。取得は確保に失敗しうるので、エラーを返す経路を入れた |
+| リンクの宛先とタイトル（ノードにコピーした値） | 参照の形は定義の索引で解決。定義がなければ `AMARK_VALUE_UNRESOLVED` | 解決した値を使う。解決できないときの規則を新しく決めた（要件 3.5） |
+| リストのタイト（属性） | `AMARK_LIST_TIGHT` は空行から導く。利用者は上書きできる | item の処理が親の list の値を読む（要件 3.6） |
+| `amark_node_source_span` と `amark_document_position` と `amark_document_source_data` | ない。`amark_node_source_range`（行と列を直接返す。位置がなければ `has_position` が偽） | 範囲をそのまま書式にする。改行のバイトを取り除く処理は要らない |
+| スロットの種類の番号を `extension.h` に追記 | 11、12 はすでに `extension.h` にある | 追記しない。ファイルの変更の一覧から外した |
+| 拡張の記述子とスロットの基底 | `amark_extension_t { struct_size, name, node_types, node_type_count, slots (const amark_slot_t *const *), slot_count, user_data }`、`amark_slot_t { struct_size, kind }` | 同じ形で使う |
+| `amark_iter_t` | `iterator.h`。非 const の根を取り、確保する | 使わない（前の版と同じ判断。関係の関数でたどる） |
+| 検証用のノード型の型のデータ（列の揃え、ラベル、チェックの有無） | ノード型は値と style を項目として宣言できる。型のデータは `copy` がないとバイトの複製になる | 値を項目として宣言する（下の判断） |
+| テスト用の木の組み立て（旧形式の S 式） | `tests/support/tree_builder.h`（新しいダンプの形式、`:lines`、`:content`、`:tokens`、`:spelling`） | 新しい形式で書く。ソース位置のテストはソースを登録してから組み立てる |
+| 旧 `amark.h` の順の `entity.h` | `entity.h` は foundation の組にある。3 番目の組は `render.h html.h` | 3 番目の組に入れる |
+
+- **Implications**：roadmap の 1 行より広く改訂した。要件では、新しく要件 3（構文木の値に従う出力）を立て、要件 5（ソース位置）と 12（性能）を新しいモデルの言葉で書き直した。ほかの要件（出力の入口、安全モード、スロット、文脈、フック、表現力）は、構文トークンのモデルに依存しないので内容を保ち、番号を付け直した。
+
+### `syntax-tree` の Implementation Notes のうち、この spec への義務
+- **Context**：`syntax-tree` の tasks.md の Implementation Notes には、下流への義務が含まれる。
+- **Findings**：
+  - 位置の問い合わせは部分木をたどるので、全ノードを問い合わせると O(n·深さ)。spec に上限はない。html-renderer が問題にするなら、`syntax-tree` を改める（13.1）。
+  - 綴りを捨てた後の値は、設定では拒む値（`&#10;` から導いた LF を含む text の literal、構造のトークンだけで綴った空の code の literal）でもよい。書き手はこれも正しく出力する（design の Facets）。
+  - 参照リンクの値の取得は、検索の作業用のバッファの確保に失敗しうる（9.2）。
+  - オートリンクに title を設定してインラインの形にしても、宛先のトークンは残る（11）。HTML の出力は値だけを使うので影響しない。
+- **Implications**：要件 1.5（問い合わせの失敗）、3.7（設定できない値）、12.5（位置の時間）と、design の CoreHtml の値の読み方の表に入れた。
+
+### cmark の HTML 出力の規則（`src/html.c`、0.31.1）
+- **Context**：要件 2、4、5 の具体的な出力を確定するため。規則はモデルによらないが、この版で確かめ直した。
+- **Sources Consulted**：cmark の `src/html.c`（GitHub の master、2026-11-27 に取得）、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re`（`_scan_dangerous_url`）
+- **Findings**：
+  - `S_render_sourcepos` を呼ぶのは、block_quote、list、item、heading、code_block、thematic_break、paragraph（タイトでないとき）だけである。html_block、document、インラインには出さない。書式は ` data-sourcepos="%d:%d-%d:%d"`（開始の行、開始の列、終わりの行、終わりの列）。
+  - `cr()`：出力が空でなく、最後のバイトが LF でなければ LF を出す。
+  - 各型の出力、エスケープ、href のエスケープ、危険な URL の規則は design の表のとおり。
+- **Implications**：design の CoreHtml と HtmlEscape の表に固定した。
+
+### ソース位置の範囲と cmark の書式の対応
+- **Context**：`syntax-tree` は「ソース位置の属性の書式（終わりの列を含めるかなど）は html-renderer が決める」とした。
+- **Findings**：
+  - `amark_source_range_t` の `start_column` は最初のバイトの行の中の位置 + 1、`end_column` は最後のバイトの位置 + 1（範囲の終わりの位置）である。cmark の終わりの列は最後の文字を含む 1 から数える列なので、値をそのまま書けば一致する。
+  - ブロックの範囲は、末尾の空行を含まない行の範囲と、最初の行と最後の行の上の記録（帯、空行、表記、中身の部分）の最も左と最も右の列から決まる。引用の中の段落は、帯の後の列から始まる（cmark と同じ）。
+  - cmark は、リストやリスト項目の終わりの位置に独自の癖を持つ（後に続く空行や行の長さの扱い）。CommonMark spec の例は sourcepos を照合しないので、この spec は「`syntax-tree` の範囲を cmark の書式で出す」までを約束し、cmark の位置の値との一致は約束しない。
+  - 範囲が複数のソースにまたがるとき、`syntax-tree` は始まりのソースで切る。属性はソースの番号を持たない。
+- **Implications**：要件 5.1、5.2 を「書式は cmark、値は構文木の範囲」と書いた。
 
 ### cmark-gfm の拡張の HTML 出力
-- **Context**：要件 10（GFM 相当の出力を公開のスロットだけで書けること）のフックの形を決めるため。
-- **Sources Consulted**：cmark-gfm の `extensions/table.c`、`strikethrough.c`、`tasklist.c`、`tagfilter.c`、`src/html.c`（`filter_html_block`、`footnote` の出力）、GFM spec 0.29
+- **Context**：要件 11（GFM 相当の出力を公開のスロットだけで書けること）。
+- **Sources Consulted**：cmark-gfm の `extensions/table.c`、`strikethrough.c`、`tasklist.c`、`tagfilter.c`、`src/html.c`（脚注）、GFM spec 0.29
 - **Findings**：
-  - 表：table / table_row / table_cell の出力の関数。見出しの行を `<thead>`、最初の本体の行の前で `<tbody>`、`<th>` / `<td>` に `align="left|center|right"`。行や表の終わりの判定に、ノードの兄弟と型のデータを見る。
-  - 取り消し線：`<del>` / `</del>`。
-  - タスクリスト：項目の出力を置き換え、`<li` sourcepos `>` の直後に `<input type="checkbox" disabled="" /> `（チェック済みは `checked="" ` を加える）。段落のタイトさの判定は通常の項目と同じ。
-  - タグフィルタ：生の HTML の出力（html_block と html_inline のリテラル）に限り、`<title>`、`<textarea>`、`<style>`、`<xmp>`、`<iframe>`、`<noembed>`、`<noframes>`、`<script>`、`<plaintext>` の開始（`<` と任意の `/` の後のタグ名を大文字小文字を区別せずに照合し、直後が空白・`>`・`/>`）の `<` を `&lt;` にする。
-  - 脚注：参照は出現順に番号を付け（同じラベルの 2 回目以降は同じ番号）、`<sup class="footnote-ref"><a href="#fn-L" id="fnref-L" data-footnote-ref>N</a></sup>`。定義は文書の末尾に `<section class="footnotes" data-footnotes>\n<ol>\n` ＋ 各 `<li id="fn-L">` ＋ 内容 ＋ 最後の段落の終わりの前に戻りのリンク `<a href="#fnref-L" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="N" aria-label="Back to reference N">↩</a>` ＋ `</li>\n` ＋ `</ol>\n</section>\n`。cmark-gfm は後処理で定義を末尾に移す。
-- **Implications**：
-  - 必要なフックは、(1) ノード型ごとの入る/出るの処理、(2) 前の処理の呼び出し（タスクリストやタグフィルタの差し替え・包み込み）、(3) 子の省略（脚注の定義をその場で出さない）、(4) 出力の後のフック（脚注を末尾に出す）、(5) 1 回の出力の間の拡張ごとの状態（参照の番号、定義の記録）、(6) 任意の部分木の入れ子の出力（末尾で定義の内容を出す）、(7) 分類つきの出力のフィルタ（タグフィルタを「生の HTML の出力だけ」に適用する）、(8) 子のタイトさの設定（独自の項目の型）。
-  - 脚注は後処理で木を動かさなくても、出力の文脈だけで末尾に出せる（定義の処理は子を省いて状態に記録し、終了の後のフックで出す）。木を変えないので、`markdown-renderer` の往復に影響しない。
-
-### 出力の前後のフック、フィルタ、レンダラの共通の形
-- **Context**：要件 8 と、`markdown-renderer` とスロットの設計を揃えるため（brief の Adjacent）。
-- **Sources Consulted**：cmark-gfm の `cmark_html_renderer`（`filter_extensions`、`footnote_ix`）、markdown-it の renderer rules（`rules[type] = fn` の置き換えと元の規則の保存）、pulldown-cmark の HTML 出力、`syntax-tree` の design（`amark_slot_header_t`、スロットの種類の番号の範囲、`amark_syntax_set_slot_at`）
-- **Findings**：
-  - markdown-it の「規則の置き換えと、元の規則の呼び出し」は、拡張の差し替えと包み込みを最小の API で表す。Amark では、構文セットの順を優先度とし、`render_next` で前の処理を呼ぶ形が対応する。
-  - cmark-gfm のフィルタは HTML 全体の文字列に対して動くため、テキストのエスケープ後の `&lt;` と、生の HTML の `<` を区別できず、生の HTML の出力の箇所に専用の分岐が入っている。出力に「マークアップ / テキスト / 生の HTML」の分類を付ければ、フィルタは分類で対象を選べる。
-  - `syntax-tree` のレジストリはスロットの中身を知らず、種類ごとに構文セットの順で列挙できる（`amark_syntax_set_slot_at`）。スロットの種類の番号は 1–0xFFFF が Amark の spec、0x10000 以上が利用者。
-- **Implications**：スロットの種類を 2 つ（ノード型ごとの出力、出力の前後のフックとフィルタ）にする。`markdown-renderer` は同じ形（`AMARK_SLOT_MARKDOWN_NODE` / `AMARK_SLOT_MARKDOWN_HOOKS`、不透明な文脈、`render_next`、子の省略、拡張ごとの状態、入れ子の出力）を使える。出力先の書き出しの関数の型は、両方のレンダラで共有するため `render.h` に置く。
-
-### `syntax-tree` の API で足りるか
-- **Context**：上流に不足があれば、回避せずに報告するため。
-- **Findings**：
-  - ノード型の名前から識別子：`amark_syntax_set_find_node_type`。記述子：`amark_node_desc`。スロットの列挙：`amark_syntax_set_slot_count` / `amark_syntax_set_slot_at`（拡張の記述子も返る）。属性とリテラルの取得：`amark_node_*` の取得関数。親と兄弟：`amark_node_parent` など（const を受け取る）。ソース上の範囲：`amark_node_source_span`、`amark_document_source_data`、`amark_document_position`。確保：`amark_malloc` など（グローバルのアロケータ）。すべて揃っている。
-  - `amark_iter_create` は非 const の根を取るため、const の木を出力するエンジンは使わず、親と兄弟のリンクで自分でたどる（反復、確保なし）。
-  - スロットの種類の番号の割り当ては、`extension.h` に各 spec が追記する規約だけで、spec ごとの番号の範囲の表がない。`block-parser` と並行して設計しているため、衝突を避ける規約が上流にあるとよい（必須ではない。この spec は 0x0300–0x03FF を使う）。
-  - `amark_syntax_set_core()`（文書の既定の構文セット）は HTML の出力のスロットを持たない（レイヤーの規則で `src/tree/` は `src/render/` を知らないため、正しい）。既定の構文セットで手で組み立てた木は、組み込みの HTML 出力の構文拡張を加えた構文セットを使わないと出力されない。
-- **Implications**：上流の変更は必須ではない。報告事項として、(1) スロットの種類の番号の spec ごとの範囲の表を `syntax-tree` の `extension.h` に置くこと、(2) CommonMark の構文セットの構築関数（`block-parser`）が組み込みの HTML 出力の構文拡張を含めること、を挙げる。
+  - 表：見出しの行を `<thead>`、最初の本体の行の前で `<tbody>`、`<th>` / `<td>` に `align`。
+  - 取り消し線：`<del>`。タスクリスト：`<li>` の直後に `<input type="checkbox" disabled="" /> `（チェック済みは `checked="" ` を加える）。
+  - タグフィルタ：9 つのタグ名の開始の `<` を `&lt;` にする（生の HTML の出力だけ）。
+  - 脚注：参照の出現順の番号、同じ脚注の 2 回目以降の参照は id に `-k` を付ける。末尾の `<section class="footnotes" data-footnotes>` に定義を並べ、最後の段落の終わりの前に戻りのリンクを置く。
+- **Implications**：必要なフックは、ノード型ごとの入る/出るの処理、前の処理の呼び出し、子の省略、出力の後のフック、拡張ごとの状態、入れ子の出力、分類つきのフィルタ、子のタイトさの設定である。脚注は木を動かさずに、出力の文脈だけで末尾に出せる。
+- **Follow-up**：戻りのリンクの 2 回目以降の書式（`data-footnote-backref-idx="N-k"` と `<sup class="footnote-ref">k</sup>`）は、テストのデータを作るときに cmark-gfm の出力と照らして確かめる。
 
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
 |--------|-------------|-----------|---------------------|-------|
-| 固定の switch ＋ 拡張のフック（cmark-gfm） | 組み込みは switch、拡張は関数表 | 速い、実績がある | 組み込みと拡張の表現力が違う。steering の「内部専用の近道を作らない」に反する | 不採用 |
-| ノード型ごとのスロットの連鎖（採用） | 構文セットの順に同じ型の処理を並べ、最後のものを呼び、`render_next` で前を呼ぶ | 差し替え・包み込み・追加が 1 つの仕組み。組み込みも同じ | 連鎖の呼び出しの文脈の管理が要る | markdown-it の規則の置き換えに近い |
-| 出力の文字列の後処理だけ | 出力後の HTML を書き換える | 単純 | ノードの文脈がない。脚注やタスクリストが書けない | 不採用（フィルタは補助として採用） |
-| 組み込みの出力を構文ごとのファイルに分ける | atx_heading.c などが HTML のスロットを持つ | steering の「1 構文 1 ファイル」に字面で合う | 同じ型の出力の重複、構文の削除で出力が消える非対称、`block-parser` のファイルとの共同所有 | 不採用（Design Decisions を参照） |
+| スロット駆動のレンダラ ＋ 組み込みの出力の構文拡張 | エンジンは型を知らず、組み込みも公開のスロットで書く | 拡張と組み込みが同じ表現力（steering） | 連鎖の表を出力ごとに作る | 採用（モデルによらない判断で、作り直しても変わらない） |
+| レンダラが位置を自分で計算する | `spelling.h` の帯と中身の部分を読んで、ブロックの範囲を下から上へ求める | すべてのブロックで線形になる | `syntax-tree` の位置の規則を重複して持つ（structure.md の「重複した実装を作らない」に反する） | 不採用 |
+| レンダラが値を綴りから読む | トークンを読み、エスケープや文字参照を自分で解く | なし | 値と綴りの二重の真実。編集の後の値と食い違う | 不採用 |
 
 ## Design Decisions
 
-### Decision: 組み込みのノード型の HTML 出力は、1 つの出力の構文拡張 `amark.core.html` にまとめる
-- **Context**：要件 6.7、9.1–9.4。`src/syntax/` の構文のファイルは `block-parser`（ブロック）と `inline-parser`（インライン）が作る。HTML の出力の処理をどこに置き、誰が構文セットに登録するかを、ファイルの共同所有なしに決める必要がある。
+### Decision: 前の版の design を持ち込まない
+- **Context**：利用者の指示（2026-11-26）：中途半端に前の設計を引きずらない。
+- **Selected Approach**：requirements、design、tasks、research を新しく書いた。前の版の内容のうち、構文トークンのモデルに依存しないもの（スロットの形、出力の文脈、フック、フィルタ、エスケープの規則、cmark の出力の表）は、新しい上流の API の言葉で書き直して残した。`amark_node_source_span`、`amark_document_position`、型ごとの取得関数、`extension.h` への追記、型のデータを持つ検証用のノード型は、名前も役割も残さない。
+
+### Decision: 値はすべて `amark_node_get` で読み、綴りを見ない
+- **Context**：要件 3。値は綴りから導かれ、編集で綴りが捨てられても値は残る。
+- **Selected Approach**：組み込みの出力の処理は、`amark_node_get` と `value.h` の項目の番号だけで値を読む。補助の関数 `amark_html_core_get` は `struct_size` を入れて呼ぶだけにする。
+- **Rationale**：値の意味を持つのは `syntax-tree` だけになり、パースした木、手で組み立てた木、編集した木が同じ規則で出力される。
+
+### Decision: 解決できない参照のリンクと画像は、宛先を空にして要素を出す
+- **Context**：定義のない参照の形のリンクは、パースでは作られないが、編集（定義の削除やラベルの変更）で作れる。`amark_node_get` は `AMARK_VALUE_UNRESOLVED` を返す。
 - **Alternatives Considered**：
-  1. 構文ごとのファイル（`atx_heading.c` など）が HTML のスロットを持ち、この spec は処理の関数だけを提供する。
-  2. この spec が、`amark.core` のノード型に対応する出力の構文拡張 `amark.core.html` を `src/syntax/` に置き、公開の取得関数で提供する。CommonMark の構文セットの構築関数がそれを含める。
-  3. エンジンが組み込みの出力を暗黙の土台として常に使う。
-- **Selected Approach**：2。`amark.core.html` は 19 のノード型の HTML のスロットだけを持ち、ノード型もパースのスロットも持たない。`src/syntax/html_*.c` に置き、公開 API だけを使う。CommonMark の構文セットの構築関数（`block-parser` が所有）は、`amark.core.html` を `amark.core` の直後、すべての構文の構文拡張より前に追加する。構文の構文拡張（`commonmark.*`）は組み込みのノード型の HTML のスロットを持たない。
-- **Rationale**：HTML の出力はノード型の関数で、構文の関数ではない。ノード型の定義が `amark.core` にまとまっているのと対になる。構文を無効化しても、他の構文や手で組み立てた木の同じ型のノードの出力が消えない。`block-parser` のファイルを編集せずに済み、登録の箇所は構築関数の 1 行だけになる。3 はエンジン（`src/render/`）が `src/syntax/` を参照することになり、依存の方向と「エンジンは個別の構文を知らない」に反する。
-- **Trade-offs**：利用者が自分で構文セットを作る場合は、`amark.core.html` を自分で加える必要がある（要件 9.2、9.4 で明示）。`markdown-renderer` は、出力が表記（ATX か setext か）に依存するため、構文ごとのスロットを選んでもよい（この決定は HTML に限る）。
-- **Follow-up**：`block-parser` の構築関数が `amark.core.html` を含めること（報告事項）。これにより `block-parser` の構築関数は `html-renderer` の公開関数にリンクする（roadmap の順では `html-renderer` が先）。
+  1. 宛先を空、タイトルをなしとして `<a href="">` を出す（危険な URL と同じ出力）。
+  2. 要素を出さず、子だけを出す。
+  3. 元の表記（`[foo][bar]`）をテキストとして出す。
+  4. 失敗を返す。
+- **Selected Approach**：1。
+- **Rationale**：木は「リンク」と言っているので、要素を残すのが木の意味に忠実である。危険な URL の扱いと同じ形なので、新しい規則が増えない。3 は綴りを読むか合成することになり、この spec の範囲を超える。4 は編集の途中の木を出力できなくする。
+- **Trade-offs**：Markdown に書き戻して再パースした結果（テキストになる）とは、HTML が一致しない。
+- **Follow-up**：利用者の確認を要する判断として報告する。
 
-### Decision: スロットは 2 種類（ノード型ごとの出力、前後のフックとフィルタ）
-- **Context**：要件 6、7、8。
-- **Alternatives Considered**：1 つの種類に全部を入れる／ノード、フック、フィルタ、状態の 4 種類に分ける。
-- **Selected Approach**：`AMARK_SLOT_HTML_NODE`（ノード型の名前、入る/出るの処理、テキストだけのモードの処理）と、`AMARK_SLOT_HTML_HOOKS`（状態の大きさ、開始の前、終了の後、後始末、フィルタ）。後者は 1 つの構文拡張につき 1 つまで（状態を拡張で一意に引くため）。
-- **Rationale**：ノード型ごとの処理は 1 つの拡張が複数持つ（表なら 3 つ）。フック・フィルタ・状態は拡張ごとに 1 つで足り、まとめると状態の持ち主が明確になる。
-- **Trade-offs**：フィルタだけを持つ拡張も、フックのスロットを 1 つ持つ形になる（不要な関数は NULL）。
+### Decision: ソース位置の属性は `amark_node_source_range` をブロックごとに 1 回呼んで作る
+- **Context**：要件 5、12.5。問い合わせは部分木の大きさに比例する。
+- **Alternatives Considered**：
+  1. ブロックごとに問い合わせる。
+  2. レンダラが位置を下から上へ計算する（上の表で不採用）。
+  3. `syntax-tree` に、すべてのブロックの位置を一度に求める API を足す。
+- **Selected Approach**：1。要件 12.5 に時間の範囲を明記し、ソース位置の属性なしの出力だけを線形と約束する。
+- **Rationale**：位置の規則を重複して持たない。属性はエディタのプレビューのための任意の機能で、深い木で使うことはまれである。3 は必要になったときに `syntax-tree` に戻って足す（Revalidation Triggers）。
+- **Trade-offs**：深さ 10 万の鎖に属性を付けると、時間が二次になる。scale_test は属性なしで深さを、属性ありで平らな大きい文書を確かめる。
+- **Follow-up**：利用者の確認を要する判断として報告する。
 
-### Decision: 前の処理の呼び出し（連鎖）で差し替えと包み込みを表す
-- **Context**：要件 6.2、6.3、9.3、10.3、10.5。
-- **Selected Approach**：同じ型の処理を構文セットの順に並べ、最後のものを呼ぶ。処理の中から `amark_html_render_next` で 1 つ前を呼ぶ。最初のものより前は「処理がない場合」（何も出さない）。テキストだけのモードの処理も、その処理を持つスロットだけで同じ連鎖を作る。
-- **Rationale**：置き換え・前後に足す・条件つきで委ねる、のすべてを 1 つの規則で書ける。
-- **Trade-offs**：連鎖の深さは同じ型のスロットの数で、呼び出しのスタックはその数に比例する（ノードの深さには比例しない）。
+### Decision: 検証用のノード型の値を項目として宣言する
+- **Context**：前の版は、列の揃え、脚注のラベル、チェックの有無を型のデータに持っていた。新しいモデルでは、型は値と style を項目として宣言でき、比較、ダンプ、複製、綴りを捨てる操作が型ごとの関数なしで働く。型のデータは `copy` がないとバイトの複製になる。
+- **Selected Approach**：`test.table` の align（STRING、列ごとに `l` `c` `r` `n`）、`test.table_row` の header（BOOL）、`test.task_item` の checked（BOOL）と mark（style）、`test.footnote_ref` と `test.footnote_def` の label（STRING、RAW、NONEMPTY）、`test.strikethrough` の tildes（style）を項目にした。型のデータは持たない。
+- **Rationale**：パーサの検証用拡張は `amark_node_record_*` で値を記録でき、`markdown-renderer` は style から表記を合成でき、ダンプの S 式で木を組み立てられる。
+- **Trade-offs**：表の列の揃えを 1 つの文字列にまとめたので、列の数の上限は項目の文字列の長さだけになるが、列ごとの値を変えるには文字列全体を設定する。
+- **Follow-up**：`block-parser` と `inline-parser` の改訂で、型の印（SHARE_LINES、MARGINS、CONTENT）と項目がパースの記録に足りるかを確かめる。足りなければこの spec に戻って直す（Revalidation Triggers）。
 
-### Decision: 出力の分類つきのフィルタ
-- **Context**：要件 3.5、8.6、8.7、10.5。
-- **Selected Approach**：すべての書き出しは分類（MARKUP、TEXT、RAW）を持つ。フィルタは構文セットの順に連なり、`amark_html_filter_forward` で次へ渡す（渡さなければ省く）。安全モードで生の HTML を置き換えたコメントは MARKUP。
-- **Rationale**：タグフィルタは RAW だけを対象にでき、テキストのエスケープの結果を誤って書き換えない。1 つの生の HTML のノードのリテラルは 1 回の書き出しで渡るため、タグが書き出しの境目で切れない。
-- **Trade-offs**：フィルタの中から通常の書き出しを呼ぶと再帰になるため、禁止する（不正な状態）。
-
-### Decision: タイトさは「親が直接の子に設定する」文脈にする
-- **Context**：要件 2.2、7.3、10.3。cmark は段落の祖父母の型と属性を直接見る。
-- **Selected Approach**：処理が入るときに `amark_html_set_tight_children` を呼ぶと、そのノードの直接の子から `amark_html_tight` が真になる。組み込みの item の処理は、親が list ならその tight を設定する。組み込みの paragraph の処理はそれを問い合わせる。
-- **Rationale**：独自の項目の型（タスクリストの項目など）や独自のリストの型でも、段落の処理を変えずにタイトさを伝えられる。cmark の規則（段落の親が項目で、祖父母がタイトなリスト）と同じ結果になる。
-- **Trade-offs**：部分木の根の親の文脈は使わない。タイトなリストの項目の中の段落だけを出力すると `<p>` が付く（文書化する）。
-
-### Decision: 出力の入口はノードと出力先だけを取り、レンダラのオブジェクトを作らない
-- **Context**：要件 1、11.4。
-- **Alternatives Considered**：構文セットごとに作って使い回すレンダラのオブジェクト。
-- **Selected Approach**：`amark_render_html`（バッファ）と `amark_render_html_to`（書き出しの関数）。呼び出しのたびに、文書の構文セットのスロットから型の識別子で引く表を作る（スロットの数に比例）。
-- **Rationale**：凍結した構文セットは変わらないが、`syntax-tree` には構文セットに付属の情報を持たせる仕組みがない。表の構築はスロットの数に比例し、出力に比べて小さい（Simplification）。
-- **Trade-offs**：小さな部分木を大量に出力する用途では、毎回の表の構築が相対的に目立つ。必要になれば、後からレンダラのオブジェクトを追加できる（入口の関数は残せる）。
+### Decision: 脚注のラベルの照合に `amark_label_normalize` を使う
+- **Context**：脚注の参照と定義のラベルは、CommonMark のラベルと同じ規則で照合する。
+- **Selected Approach**：検証用の拡張は、正規化を自分で持たず、`document.h` の `amark_label_normalize` を使う（`syntax-tree` の Implementation Notes の「自前の正規化を持たない」に揃える）。
 
 ### Generalizations（Synthesis）
-- 「画像の代替テキスト」を、任意の処理が開始できる「テキストだけのモード」と、型ごとのテキストだけのモードの処理に一般化した。
-- 「タイトなリストの判定」を、親が直接の子に設定する文脈に一般化した。
-- 「脚注を末尾に出す」を、出力の前後のフック、拡張ごとの状態、入れ子の出力に一般化した。目次の生成なども同じ仕組みで書ける。
-- 「タグフィルタ」を、分類つきの出力のフィルタに一般化した。
+- 値の読み方は、組み込みの 19 の型も検証用の型も、`amark_node_get` の 1 つの形にまとまる。CoreHtml の補助は 1 つで足りる。
+- 「位置がない」「解決できない」「設定できない値」は、どれも失敗にせず、出力の規則で扱う（Error Handling の「失敗にしないもの」）。
 
 ### Build vs. Adopt
-- エスケープの規則と出力の形は cmark に合わせる（準拠の判定の基準そのもの）。cmark のコードは BSD-2-Clause で互換性はあるが、Amark のバッファとアロケータと出力先の抽象に合わないため、規則だけを採り、実装は書く。
-- 外部のライブラリは使わない（steering：実行時は C 標準ライブラリだけ）。
+- cmark と cmark-gfm のコードは取り込まない（ライセンスは BSD-2 だが、エンジンの形が違い、スロット駆動にすると使える部分がない）。規則だけを参照し、テストのデータで一致を確かめる。
 
 ### Simplification
-- レンダラのオブジェクト、出力の段落ごとの属性の API（`<p class>` を足すなど）、スロットの優先度の数値は作らない（構文セットの順で足りる）。
-- フィルタは書き出しの単位で動き、構文の解析をしない（タグフィルタの照合は拡張の責任）。
+- `extension.h` への追記を除いた（番号はすでにある）。
+- 位置の計算、タイトの判定、定義の表を持たない。
+- レンダラのオブジェクト（表の使い回し）は作らない。出力ごとに表を作る費用はスロットの数に比例し、出力の大きさに比べて小さい。
 
 ## Risks & Mitigations
-- 連鎖・フィルタ・入れ子の出力の文脈の取り違え（処理中でないノードの `render_next` など） — 文脈が現在の呼び出しの状態を持ち、違反を不正な引数/不正な状態で返す。テストで各違反を確かめる。
-- `cr` の判定とフィルタの関係（フィルタが改行を変えると、後の `cr` の判定とずれる） — `cr` はフィルタの前の出力の最後のバイトで判定すると定める。cmark 互換の出力はフィルタがない構成で検証する。
-- 深い木での再帰 — エンジンは親と兄弟のリンクで反復し、深さごとの文脈は動的な配列に持つ。深さ 10 万のテストで確かめる。
-- 手で組み立てた木を既定の構文セットで出力すると何も出ない — 要件 9.4 と API の文書で明示し、テストでも確かめる。
-- CommonMark spec 全体との一致はこの spec では確かめられない — 組み込みの出力の表を cmark の `html.c` と 1 対 1 で照合する手で組み立てた木のテストを持ち、残りは `inline-parser` の準拠テストで確かめる（不具合はこの spec に戻して直す）。
-
-## Revision Notes
-
-### 2026-11-25：spec 横断のレビュー r1（cross-spec review r1）
-- **Context**：全 spec を横断したレビューの指摘のうち、この spec に関わるもの（#7、#10、#1 の間接の影響）を反映した。承認済みの要件の受け入れ基準は変えず、設計とタスクの記述を補う。
-- **#7 `amark.h` の include の順**：`amark.h` は `foundation` が所有し、正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）を定める。「`extension.h` の後に追加する」という書き方をやめ、正規の順の「`render.h`、`html.h`」の位置に置く、という参照に改めた（Modified Files、タスク 1.1）。正規の順の変更を Revalidation Triggers に加えた。
-- **#10 ケースの生成スクリプトの共有**：`markdown-renderer` は、`data/*_cases.txt`（S 式と期待する出力の組）を同じ形式で持ち、別の生成スクリプト（`gen_md_cases.cmake`）を書く予定だった。重複を避けるため、`gen_html_cases.cmake` を HTML に固有の知識を持たない共有のスクリプトとし、`markdown-renderer` がそのまま再利用する。再利用のため、(1) 見出しのオプションの語をスクリプトで解釈せず文字列として検査関数に渡す、(2) 検査関数とヘッダを `CHECK=`、`INCLUDE=` で選べる、(3) 生成するテストが呼ぶ検査関数の形を固定する、を設計に契約として書き、変更は `markdown-renderer` の再検証の契機とした（Boundary の This Spec Owns、Revalidation Triggers、HtmlTests、タスク 1.2）。検討した代替：`tests/support/` へ移す案は、この spec が先に実装され、置き場所の変更が他の spec の Modified Files にも波及するため採らなかった（場所は `tests/html/` のまま、契約で共有する）。
-- **#1 ファジングとテストの補助ライブラリ（間接）**：`amark_test_html_gfm` は `amark_test_parse_gfm`・`amark_test_gfm` を通してファジングターゲットに間接にリンクされる。`foundation` が定める規則（ファジングが使うテストの補助ライブラリは Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` が ON のとき定義する）に合わせ、`amark_test_html_gfm` が Naos に依存しないことと、`AMARK_FUZZ` だけが ON の構成でも定義することを明記した（GfmHtmlExt、タスク 4.1）。
-- **Implications**：公開 API・要件・タスクの範囲は変わらない。承認は維持する。`syntax-tree` のスロットの種類の範囲の表（#9）は、この spec の `0x0301`、`0x0302` と一致する。
-
-### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
-- Revalidation Triggers の `amark_test_html_gfm` の依存の行で、影響先を `block-parser` のファジングターゲット（`amark_test_html_gfm` をリンクしない）から、`inline-parser`（`inline_parse`）と `markdown-renderer`（`md_roundtrip`、`md_edit`）のファジングターゲットに直し、中間のライブラリ `amark_test_parse_gfm`（`block-parser`）と `amark_test_gfm`（`inline-parser`）を明記した。承認の状態は変えない。
-
-### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
-- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
-- **変更**：`src/syntax/html_core_internal.h` を `src/syntax/html_core.h` に改名した（File Structure Plan、該当のコンポーネント）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
-- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：スロットの種類の番号を、`syntax-tree` の通し番号の一覧に合わせる
-- **Context**：スロットの種類の番号は、各 spec の design を別々に書いていた段階で衝突を防ぐため、spec ごとに 256 ずつの範囲（`0x0100`–`0x04FF`）を割り当て、利用者の範囲を `0x10000` 以上としていた。全 spec の design が揃い、Amark の種類は 14 個に確定した。種類は 1 つの公開ヘッダ（`extension.h`）の 1 か所で管理するので、範囲の区切りがなくても、一覧への追記で衝突を防げる。範囲と桁は必要に対して過剰だった。`syntax-tree` が要件 8.13 を改め、spec ごとの範囲をやめて通し番号の一覧にした。
-- **変更**：この spec のスロットの種類の番号を、一覧で割り当てた 11–12 に置き換えた。範囲の注記は削除した。種類の名前と構造体は変えない。
-- **Implications**：番号の値と記述だけの変更で、この spec の要件・API の形・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：スロットの基底の型の改名（`syntax-tree`）に合わせる
-- **Context**：スロットの基底の型 `amark_slot_header_t`（メンバー名 `header`）は、API の上で受け渡すもの（拡張の `slots`、`amark_syntax_set_slot_at` の戻り値）が「スロットそのもの」なのに「スロットのヘッダ」と読める名前だった。また日本語の文書では「スロットの見出し」と訳しており、ノード型の heading の「見出し」やヘッダファイルと紛れた。`syntax-tree` が型を `amark_slot_t` に改名した。
-- **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
-- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-26：ソフトブレークの出し方を enum のフィールドにする（要件 4.5 の変更）
-- **Context**：全 spec の定数の集合を、開いた集合、ビットの印、閉じた選択肢の 3 つに分類し直した（steering の tech.md の規約）。オプションの `AMARK_HTML_HARDBREAKS`（0x02）と `AMARK_HTML_NOBREAKS`（0x04）は、ソフトブレークを「改行／`<br />`／空白」のどれで出すかの三者択一を 2 つのビットで表し、両方のときは「HARDBREAKS が優先」の規則（要件 4.5）で片方を無視していた。組み合わせられない値をビットで表すと、矛盾した指定が型の上で書けてしまう。
-- **変更**：`typedef enum amark_html_softbreak { AMARK_HTML_SOFTBREAK_LF = 0, _BR = 1, _SPACE = 2 }` を足し、`amark_html_options_t` にフィールド `softbreak` を加えた。2 つのビットをなくし、`AMARK_HTML_UNSAFE` を 0x08 から 0x02 に詰めた（実装はまだなく、公開した ABI はない）。入口は範囲外の `softbreak` を `AMARK_ERROR_INVALID_ARGUMENT` で拒否する。出力の文脈に問い合わせ `amark_html_softbreak` を足し、文脈の状態に `softbreak` を持たせた。ケースのデータのオプションの語は `hardbreaks` / `nobreaks` から `softbreak=lf|br|space` にした。レンダラの入口の共通の規則に、閉じた選択肢はビットにせず enum のフィールドにする、を加えた。
-- **0 を既定にする理由**：ノード型の記述子の `level`（`syntax-tree`）では書き忘れを検出するために 0 を不正にしたが、ソフトブレークは改行のままが正しい既定（要件 4.7）で、`amark_html_options_init` も 0 で埋める。0 を既定の LF にする。
-- **要件の変更**：4.5 を「両方の指定があればハードブレークを優先する」から「改行・ハードブレーク・空白のうち 1 つだけを選ぶ指定として受け付ける」に書き換えた。4.3、4.4、4.7 はそのまま満たす。受け入れ基準の意味が変わるが、利用者の要望による見直しであり、承認はこの改訂を含めて維持する。
-- **検討した代替**：cmark のオプション（`CMARK_OPT_HARDBREAKS`、`CMARK_OPT_NOBREAKS`）と同じ形を残す案は、移行の分かりやすさの利点があるが、矛盾した指定を許す。cmark との対応は enum のコメントに書いた。
-- **Implications**：design の Traceability、オプションの契約、出力の表、入口の共通の規則、テストの方針、ケースの形式、タスク 2.4 を合わせた。`markdown-renderer` は `amark_html_options_t` を使わないので影響はない。`AMARK_HTML_UNSAFE` を名前で使う `inline-parser` のテストの補助は変わらない。
+- 上流の値の取得が確保に失敗する → すべての処理が失敗を返し、出力は止まり、バッファを戻す。oom_test の総当たりで確かめる。
+- ソース位置の属性ありの出力が深い木で遅い → 要件 12.5 に明記し、必要なら `syntax-tree` の問い合わせを改める。
+- 検証用のノード型の項目が、パーサや Markdown の出力に足りない → 下流の spec の改訂で確かめ、この spec に戻って直す。
+- cmark-gfm の脚注の戻りのリンクの書式の細部 → テストのデータを作るときに照らす。
 
 ## References
-- cmark 0.31.1 `src/html.c`、`src/houdini_html_e.c`、`src/houdini_href_e.c`、`src/scanners.re` — 出力とエスケープと危険な URL の規則
-- CommonMark Spec 0.31.2 — 準拠の対象
-- cmark-gfm `extensions/table.c`、`strikethrough.c`、`tasklist.c`、`tagfilter.c`、`src/html.c` — GFM 相当の出力の形
-- GitHub Flavored Markdown Spec 0.29 — 表、取り消し線、タスクリスト、タグフィルタ、脚注の期待値
-- markdown-it の renderer rules — 規則の置き換えと元の規則の呼び出しの先行例
-- `.kiro/specs/syntax-tree/design.md` — ノードモデル、レジストリ、スロットの基底、テストの補助
-- `.kiro/specs/foundation/design.md` — エラーコード、アロケータ、バッファ、テストとファジングの仕組み
+- `INPUT.md`（リポジトリの直下）— 構文木のモデルの入力資料
+- `.kiro/specs/syntax-tree/design.md`、`requirements.md`、`tasks.md`（Implementation Notes）— 上流の契約
+- `include/amark/node.h`、`document.h`、`value.h`、`extension.h`、`iterator.h`、`spelling.h` — 上流の公開ヘッダ
+- cmark 0.31.1 `src/html.c`、`houdini_html_e.c`、`houdini_href_e.c`、`scanners.re` — 出力とエスケープの規則
+- cmark-gfm 0.29 `extensions/*.c` — GFM 相当の出力
+- CommonMark Spec 0.31.2
+
+## Skills consulted
+- `kiro-spec-requirements`（`rules/ears-format.md`、`rules/requirements-review-gate.md`）
+- `kiro-spec-design`（`rules/design-principles.md`、`design-discovery-light.md`、`design-synthesis.md`、`design-review-gate.md`）
+- `kiro-validate-design`（`rules/design-review.md`）
+- `kiro-spec-tasks`（`rules/tasks-generation.md`、`rules/tasks-parallel-analysis.md`）
+
+## 設計のレビュー（`/kiro-validate-design`、2026-11-27、inline）
+- **判定**：GO。重大な問題（構造の不整合、要件の欠落、上流の契約との矛盾）は見つからなかった。
+- **確かめたこと**：
+  - 上流の公開ヘッダとの照合：design が使う関数と定数（`amark_node_get`、`AMARK_VALUE_UNRESOLVED`、`AMARK_LIST_TIGHT`、`amark_node_source_range` の `has_position`、`amark_syntax_set_slot_at`、`AMARK_SLOT_HTML_NODE` 11 と `AMARK_SLOT_HTML_HOOKS` 12、`amark_extension_t` の `slots` の型、`amark_label_normalize`）が、`include/amark/` にその名前と意味で存在する。
+  - 公開ヘッダの順：`check_public_headers.cmake` の 3 番目の組 `render.h html.h` と一致する。
+  - レイヤー：`src/syntax/html_*.c` は公開ヘッダだけを使い、`src/render/` の内部ヘッダに依存しない。
+- **指摘と修正**（1 件、軽微）：
+  - 切り離した部分木を出力するときの参照の解決が書かれていなかった（入れ子の出力と脚注の定義の出力で起きる）。CoreHtml の値の読み方に、解決は文書の根につながる定義だけを見る（`amark_document_find_definition` の規則）ことを書き足した。
+- **長所**：値・タイト・位置の意味を `syntax-tree` に一本化し、レンダラが綴りを読まない。スロットと文脈の契約はモデルに依存しないので、下流（`markdown-renderer`）が同じ形を使える。
+
+## タスクの計画のレビュー（`/kiro-spec-tasks`、2026-11-27）
+- **Task Plan Review Gate**：1 回目で 3 件を直した。(1) テストの補助（3.1）が、まだない組み込みの拡張を構文セットに足す前提だった → 3.1 を、組み込みの拡張の骨組み（空の表と取得の関数）を作る統合のタスクにした。(2) 規模のテストと確保の失敗のテストが同じテストの登録のファイルを編集するのに並列だった → 規模のテストの並列の印を外した。(3) 検証用拡張の独立性の確認が単独のタスクとして小さすぎた → 4.1 に含めた。2 回目で通った。
+- **Task-graph sanity review**：mode は inline（このセッションでは新しいレビュー用のサブエージェントを起動できない）。判定は PASS。隠れた前提（`amark_test_tree` のリンク、INTERNAL の登録）は各タスクに書いてあり、`html.h` に宣言を足すタスクはどれも並列にしていない。
+- design への反映：タスクに合わせて、HtmlOutput と HtmlDispatch の INTERNAL の単体テスト（`output_test.c`、`dispatch_test.c`）を File Structure Plan と Testing Strategy に足した。
