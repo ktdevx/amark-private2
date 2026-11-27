@@ -2,7 +2,7 @@
  * Copyright (c) The Amark Authors */
 
 /*
- * Character classes of CommonMark 0.31.2.
+ * Character classes of CommonMark 0.31.2, and the Unicode case fold.
  *
  * The classification follows the definitions of the CommonMark specification:
  *   - Unicode whitespace character: a character of the Unicode general category
@@ -22,6 +22,7 @@
 #define AMARK_UNICODE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <amark/export.h>
@@ -45,6 +46,15 @@ AMARK_API bool amark_unicode_is_punctuation(uint32_t codepoint);
 /* Whether codepoint is an ASCII punctuation character: U+0021..U+002F,
  * U+003A..U+0040, U+005B..U+0060 or U+007B..U+007E. */
 AMARK_API bool amark_ascii_is_punctuation(uint32_t codepoint);
+
+/* Writes the full case fold of codepoint to out and returns the number of code
+ * points written, 1 to 3: the mapping of the status C or F of CaseFolding.txt
+ * (the S and T mappings are not used). A code point without such a mapping,
+ * including a surrogate or a value above U+10FFFF, folds to itself: out[0] is
+ * codepoint and the result is 1. The slots of out past the result are left
+ * unchanged. Folding each code point of a string in turn gives the full case
+ * fold of the string. */
+AMARK_API size_t amark_unicode_case_fold(uint32_t codepoint, uint32_t out[3]);
 
 AMARK_END_DECLS
 

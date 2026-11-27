@@ -15,3 +15,7 @@
 # buffer_fuzz keeps its failure-injecting allocator in its own source.
 amark_add_fuzzer(utf8_fuzz SOURCES utf8_fuzz.c CORPUS corpus/utf8)
 amark_add_fuzzer(buffer_fuzz SOURCES buffer_fuzz.c CORPUS corpus/buffer)
+
+# The fuzz target of the syntax tree (TreeFuzz): the editing operations. It links
+# only amark_internal (not amark_test_tree, which links Naos).
+amark_add_fuzzer(tree_edit_fuzz SOURCES tree_edit_fuzz.c CORPUS corpus/tree_edit)

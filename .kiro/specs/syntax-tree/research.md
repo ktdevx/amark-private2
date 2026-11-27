@@ -1,262 +1,131 @@
 # Research & Design Decisions
 
+---
+**Purpose**：`syntax-tree` の design（「行 × 帯」と「中身の上の CST」のモデル、2026-11-26 版）を決めるための調査と判断を記録する。
+**Usage**：design.md の判断の背景と、採らなかった案の理由を残す。最初の設計（構文トークンと編集の追跡）の調査記録は、git の履歴（2026-11-25 版の research.md）にある。この版はそれを引き継がない。
+---
+
 ## Summary
 - **Feature**：`syntax-tree`
-- **Discovery Scope**：New Feature（greenfield。`foundation` の共通基盤の上に作る。下流の 4 つの spec が使う継ぎ目を定義する）
+- **Discovery Scope**：Complex Integration（既存の spec と実装の置き換え。下流の 4 つの spec がこの契約に依存する）
 - **Key Findings**：
-  - 元の表記の保持は「意味の AST ＋ ノードごとのソース範囲の参照」で足りる。ただし、CommonMark の行の接頭辞（`>`、リストのインデント）は内側のノードの範囲の途中に現れるため、トークンは「所有するノード」と「ソース上の順序」を別々に持つ必要がある。所有は意味（どのコンテナの接頭辞か）で決め、順序はオフセットで決める。
-  - タブは「1 バイトが複数の構文要素に列単位で分かれる」唯一のケースである（CommonMark 0.31.2 の 2.2 節）。バイト範囲だけのトークンでは表せないため、部分的なタブの列の情報が要る。
-  - 編集の追跡は、`markdown-renderer` が「元の表記を出せるか」を判定できれば足りる。ノード単位のビットの記録（内容、子の構成、位置、新規、子孫）で判定でき、より細かい単位（テキストの範囲）は後から別の問い合わせとして足せる。
-  - cmark-gfm の拡張の仕組みは「固定のコア ＋ 後付けのフック」で、ノード型の登録は動的な ID と関数表による。Amark は同じく動的な ID と関数表を採るが、組み込みの型も同じ記述子の形式で定義し、スロットは種類の番号つきの一覧にしてレジストリが中身を知らない形にする。
+  - 値と style と綴りの対応は、「項目（facet）」という 1 つの仕組みにまとめられる。綴りのトークンが「どの項目を綴るか」を持てば、値の導出（3.3）、その値の綴りだけを捨てる編集（6.7、6.8）、捨てた綴りの問い合わせ（11.1）が、型ごとの知識なしに共通の処理になる。
+  - 値の導出に要る構文の知識は、トークンの種類ごとの解読（エスケープ、文字参照、置き換え、仮想の改行、タブの残り）と、項目ごとの小さな印（生のまま、改行を空白にする、LF で終える）だけである。CommonMark の規則のうち構文に固有のもの（コードスパンの両端の空白の除去など）は、パーサが構造の空白として記録すれば値から外れる。
+  - case fold と文字参照の表は、旧 block-parser の design が `src/base` に足す予定だった。この spec がラベルの正規化と値の解読を持つので、ここで引き受ける（依存の向きが tree → parse にならないように）。
 
 ## Research Log
 
-### cmark のノードモデルと走査
-- **Context**：利用者になじみのある API の形と、走査中の変更の規則を決めるため。
-- **Sources Consulted**：cmark の `cmark.h`（`cmark_node_*`、`cmark_iter_*`、`cmark_node_free`、`cmark_node_unlink`）、cmark の `man 3 cmark`
+### 下流の spec が syntax-tree に求めるもの
+- **Context**：新しいモデルで、下流の要件を落とさないため。
+- **Sources Consulted**：`block-parser`、`inline-parser`、`html-renderer`、`markdown-renderer` の requirements.md と design.md（2026-11-25 版）、`INPUT.md` の 6 章。
 - **Findings**：
-  - 走査は `ENTER` / `EXIT` / `DONE` のイベントで、子を持てない型（葉）には `ENTER` だけを返す。`cmark_iter_reset` で位置を設定し直せる。現在のノードの削除は「次の位置に動いてから」行う規約。
-  - `cmark_node_free` は木から外してから部分木を解放する。挿入の関数は包含の規則（`S_can_contain`）を検査して失敗を返す。
-  - ノードの文字列は `cmark_chunk` で、ソースへの参照と所有の両方がありうる。元の表記（マーカー、空白）は残さない。
-- **Implications**：走査の API と葉の扱いは cmark に合わせる（利用者の移行が容易）。解放の規則も同じにする。包含の規則は型の記述子の「分類」で一般化する。
+  - モデルによらず引き継ぐもの：文書の寿命、構文セットの所有の受け渡し、レジストリとスロットの通し番号（1–14）、走査、構造の編集の規則、子をまとめた取り込み、比較とテキストの正規化、S 式のダンプとテスト用の組み立て。
+  - 置き換えるもの：ソースのオフセットによるトークンの記録 → 行と列の記録と中身の上の記録。`check_tokens` → 行ごとの分割と中身の被覆。編集の記録 → 綴りと帯の有無の問い合わせ。参照リンクの宛先のコピー → 定義の索引。
+  - INPUT.md にないが要るもの：パーサの記録で値を捨てない操作、テキストのトークンの分割と移動、行の範囲を新しいブロックへ移す操作（表とリンク参照定義の解釈し直し）、拡張のデータを変えたときに綴りを捨てる操作、逐次の入力で行を確定する規則、文書の既定の改行、部分木を元の表記で出せるかの一般的な問い合わせ。
+- **Implications**：要件 2.6–2.8、6.13、6.14、7.10、8.5、11.4 として requirements に入れた。design では Layout、Content、Facets、Verbatim の各コンポーネントが受け持つ。
 
-### ロスレスな構文木の先行例
-- **Context**：元の表記を保ったまま意味の単位で編集できる木の形を選ぶため。
-- **Sources Consulted**：Roslyn の syntax trivia、rust-analyzer の rowan（green/red tree）、swift-syntax、recast（JavaScript の AST を変更部分だけ印刷し直す）、mdast/micromark の position、comrak の sourcepos
+### 既存の実装
+- **Context**：何を残し、何を作り直すかを決めるため。
 - **Findings**：
-  - Roslyn・rowan・swift-syntax は完全な CST で、トークンに空白（trivia）を付ける。往復は完全だが、編集は具象構文を意識する必要がある（brief の Rejected と同じ評価）。
-  - recast は元のソースと元の AST の複製を持ち、変更されたノードだけを印刷し直す。変更の検出は木の比較で行うため、比較のコストと「何が変わったか」の曖昧さがある。
-  - mdast は位置（行・列・オフセット）だけを持ち、マーカーなどの表記は持たない。`definition` ノード（リンク参照定義）を木に残す。
-- **Implications**：意味の AST に「ソース範囲を参照する構文トークンの列」を付け、変更は比較ではなく明示的な記録（ビット）で追う。リンク参照定義は mdast と同じくノードとして残す（HTML には何も出さない）。
+  - `src/tree/` の 17 ファイルのうち、トークン、編集の記録、リテラルのモード、属性の型ごとのデータに依存しないのは、`syntax_set.c`（レジストリ）、`iterator.c`、`equal.c` の走査の骨格、`structure_edit.c` の包含と循環の検査、ノードの確保と再帰なしの解放の手順である。
+  - ノードの構造体（`struct amark_node`）は、リテラル、トークンの配列、編集の印を直接持つ。ノード型の記述子は `literal_mode` と `validate_literal` を持つ。
+  - 公開ヘッダの順は `cmake/scripts/check_public_headers.cmake` に固定で書かれている。C++ からの include のテスト（`tests/headers/cxx_include_test.cpp`）は、すべての公開ヘッダの関数を呼ぶ。
+- **Implications**：ノードの構造体と記述子の形が変わるので、残せる部分もこの上で書き直すことになる。旧コードを部分的に残して新しい契約を継ぎ足すと、旧設計の概念（トークン、編集の記録、リテラルのモード）が残りやすい。`src/tree/` と `tests/tree/` は全面的に置き換える。
 
-### CommonMark の表記の要素（0.31.2）
-- **Context**：構文トークンのモデルが表現しなければならない要素を確定するため。
-- **Sources Consulted**：CommonMark Spec 0.31.2（2.1 Characters and lines、2.2 Tabs、2.3 Insecure characters、2.4 Backslash escapes、2.5 Entity and numeric character references、4.7 Link reference definitions、5.1 Block quotes の laziness、6.1 Code spans、6.3 Links の title と label）、cmark の BOM の扱い
-- **Findings**：
-  - 行末は LF、CR、CRLF のどれでもよい。行の内容としては区別しないが、往復には元のバイトが要る。
-  - タブは展開せず、ブロック構造の判定の文脈でだけ 4 列のタブストップとして振る舞う。例えば `>\t\tfoo` では、引用の任意の空白が最初のタブの 1 列を使い、残りの列が内容のインデントになる。
-  - U+0000 は U+FFFD に置き換える。BOM は仕様にないが、cmark は先頭の UTF-8 の BOM を読み飛ばす。
-  - 遅延継続行では、段落の継続の行で引用の `>` を省ける。
-  - リンクのラベルは 999 文字以下で、空白以外の文字を含み、エスケープされていない `[` `]` を含まない。タイトルは複数行にできるが空行を含めない。宛先は改行を含めない。コードスパンの内容は改行を空白に変えるため、意味の値として改行を持たず、空にもならない。
-  - コードブロックの内容は行の並びで、各行は改行で終わる（cmark のリテラルは末尾に LF を持つ）。
-- **Implications**：構文トークンの種類に改行、置き換えたバイト、BOM、遅延継続行の印、エスケープ、文字参照を持たせる。部分的なタブを列の単位で表す。リテラルと属性の設定の検査を、これらの規則のうち「どの文脈でも表現できない値」に限って行う。複数行のリテラルは LF に揃え、末尾を LF にする。
+### foundation の現状
+- **Findings**：エラーコードは NONE 0、OUT_OF_MEMORY 1、INVALID_ARGUMENT 2、OVERFLOW 3、LIMIT_EXCEEDED 4、INVALID_STATE 5、UNREPRESENTABLE 6、NOT_LOSSLESS 7。`amark_buffer_t`、UTF-8 の復号と検証（最大の部分列ごとに U+FFFD）、CommonMark の空白と句読点の分類がある。case fold と文字参照の表はない。
+- **Implications**：ラベルの正規化（9.1）には Unicode の case fold（CaseFolding.txt の C と F）が、値の導出（3.3）には HTML の名前付き文字参照の表（WHATWG `entities.json`）が要る。生成の手順は旧 block-parser の design の計画（`tools/gen_unicode_tables.py` の拡張、`tools/gen_entity_table.py`）を、この spec の担当として使う。
 
-### cmark-gfm の拡張の登録
-- **Context**：ノード型の登録と構文拡張の記述子の形を決めるため。
-- **Sources Consulted**：cmark-gfm の `cmark-gfm-extension_api.h`（`cmark_syntax_extension_add_node`、`cmark_syntax_extension_set_*_func`、`cmark_node_set_type`、`cmark_syntax_extension_set_can_contain_func`、`opaque_alloc_func` / `opaque_free_func`）
-- **Findings**：
-  - 拡張のノード型は実行時に番号を割り当てる。型ごとのデータは `opaque` のポインタと解放の関数で持つ。
-  - 包含の規則を拡張が上書きする関数がある（表の行は表にだけ入る）。
-  - パース・HTML 出力・後処理の関数は、拡張の構造体の固定のフィールドとして足されている（後付けのフック）。そのため、コアの構造体が新しいフックのたびに変わる。
-- **Implications**：番号の動的な割り当て、型ごとのデータの関数表、包含の上書きは採る。フックは固定のフィールドにせず、「種類の番号 ＋ 種類ごとの構造体」のスロットの一覧にする。レジストリはスロットの中身を知らず、下流の spec がスロットの種類を足してもレジストリの API は変わらない。
-
-### foundation の公開 API との整合
-- **Context**：上流の契約に正確に合わせるため。
-- **Sources Consulted**：`.kiro/specs/foundation/design.md`
-- **Findings**：
-  - エラーコード（`AMARK_ERROR_NONE`、`OUT_OF_MEMORY`、`INVALID_ARGUMENT`、`OVERFLOW`、`LIMIT_EXCEEDED`、`INVALID_STATE`）、出力引数は最後で `out_` で始める、失敗時は強い保証、解放の関数は NULL を受け付ける、公開の構造体は先頭に `struct_size`。
-  - 確保はグローバルのアロケータ（`amark_malloc` など）で行い、オブジェクトはアロケータを持たない。`amark_buffer_t` は内部で埋め込める（`buffer_internal.h` の `amark_buffer_init` / `amark_buffer_deinit`）。
-  - `amark_utf8_validate` で UTF-8 を検査できる。
-  - テストは `amark_add_test(... [INTERNAL] [LIBRARIES ...])`、確保失敗の総当たりは `AMARK_CHECK_OOM_SWEEP`、比較は `AMARK_CHECK_BYTES_EQ` / `AMARK_CHECK_BUFFER_EQ`。ファジングは `amark_add_fuzzer`。
-  - `amark_test_support` は Amark の関数を呼ばない約束（`amark` と `amark_internal` の両方と組み合わせるため）。
-- **Implications**：
-  - 構文木のテスト用の補助（S 式から木を組み立てる）は Amark の関数を呼ぶので、`amark_test_support` には入れない。INTERFACE ライブラリ `amark_test_tree` の INTERFACE のソースとして、各テストの実行ファイルにそのテストの設定でコンパイルさせる（`amark` と `amark_internal` のどちらとも組める）。foundation の変更は不要。
-  - 「表現できない値」も `AMARK_ERROR_INVALID_ARGUMENT`、凍結済みの構文セットの変更は `AMARK_ERROR_INVALID_STATE` で表せる。新しいエラーコードは不要。
+### 列の数え方
+- **Context**：行の列の幅と、列とバイトの対応（2.3）を決めるため。
+- **Sources Consulted**：cmark の `S_advance_offset`（タブ以外のバイトは 1 列ずつ、タブは 4 列のタブストップ）、commonmark.js（UTF-16 の単位で数える）。
+- **Findings**：列が意味を持つのは、帯とインデントを決める範囲（ASCII の空白、`>`、リストの記号）と、そこに混ざるタブだけである。cmark と同じく「タブ以外のバイトは 1 列」にすれば、タブのない行では列とバイトが一致し、変換が恒等になる。
+- **Implications**：列はバイトの単位で数え、タブだけを 4 列のタブストップで広げる。UTF-8 の文字の途中に境界を置かないことは、列とは別に検査する（7.7、10.3）。
 
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
 |--------|-------------|-----------|---------------------|-------|
-| 意味の AST ＋ ノードごとの構文トークン（採用） | ノードは意味の単位。各ノードがソース範囲を参照するトークンの列を持つ | 編集 API が素直。無編集の部分はソースのバイト列で再現できる | トークンの所有の規則（行の接頭辞）を明確にする必要がある | roadmap の決定どおり |
-| 完全な CST | すべてのバイトをトークンとして木に置く | 往復が構造的に保証される | 編集が具象構文を意識する。実装量が倍 | roadmap で不採用 |
-| 位置だけの AST ＋ ソースの再走査 | ノードは範囲だけを持ち、表記はレンダラがソースを読み直して判断する | 木が小さい | レンダラがパーサの知識を重複して持つ。部分的なタブを表せない | 不採用 |
-| ノードごとにソースの断片を複製 | 表記の文字列をノードに持つ | ソースが不要 | メモリが倍。位置の問い合わせができない | 不採用 |
+| 項目（facet）による値・style・綴りの対応 | 型の記述子が項目を宣言し、トークンが項目の番号を持つ | 組み込みと拡張で同じ仕組み（3.9、12.2）。綴りを捨てる単位が項目になる（Q8） | 1 つの型の項目は 31 個まで | 採用 |
+| 型ごとの専用のフィールドと専用の関数 | 見出しのレベルなどを型のデータとして持ち、型ごとの setter が綴りを捨てる | 型ごとに最適化できる | 拡張の型に style を宣言させる仕組みが別に要る。型ごとに捨てる綴りの規則を書くことになる | 不採用 |
+| 中身を元の行の範囲の列としてだけ持ち、文字列を作らない | 中身の文字列を必要なときに組み立てる | メモリが少ない | インラインのパーサと値の導出が、行をまたぐ連続した文字列を毎回組み立てる。タブの残りの扱いが散らばる | 不採用。中身はバイト列として持つ |
+| 編集のたびに祖先へ印を伝える | 旧設計の編集の追跡 | 問い合わせが速い | 値と綴りの二重の真実に戻る。公開の意味論を持つ | 不採用。キャッシュの無効化だけを内部で行う |
 
 ## Design Decisions
 
-### Decision: 文書オブジェクトを根のノードと分ける
-- **Context**：メモリの所有、ソース、構文セット、編集の追跡の切り替えを 1 か所に置く必要がある（1.1–1.5、7.8）。
+### Decision: 中身を参照カウント付きのバイト列（content オブジェクト）として持つ
+- **Context**：インラインのトークンは中身の上の位置を指す（INPUT 2.3）。インラインのノードを別の葉へ移すと、移動先の中身の上では位置が意味を持たない。
 - **Alternatives Considered**：
-  1. cmark と同じく、文書ノードが根であり所有者でもある
-  2. 不透明型の `amark_document_t` が所有者で、根は型 document のノード
-- **Selected Approach**：2。`amark_document_root()` が根のノードを返す。
-- **Rationale**：ソースの一覧や構文セットをノードの型のデータに混ぜずに済む。切り離したノードの所有者が明確になる。
-- **Trade-offs**：オブジェクトが 1 つ増える。
-- **Follow-up**：`html-renderer` と `markdown-renderer` の入口はノードを受け取る形にすれば、部分木の出力にも使える。
+  1. 移動のときに、移るノードのトークンが指すバイトをノードへ複製する。
+  2. トークンの位置を、ノードが持つ「綴りの土台」（content オブジェクトへの参照）からの位置にする。
+- **Selected Approach**：2。インラインのノードは、トークンを記録したときの content オブジェクトを土台として参照する。葉の中身を置き換えても、移動しても、土台は変わらない。content オブジェクトは参照カウントで寿命を管理する。
+- **Rationale**：移動と複製でバイトを写さずに済み、中身を元の行のまま出せるかの判定（11.3）が「すべてのインラインの土台が、その葉の中身であるか」で決まる。
+- **Trade-offs**：中身を置き換えた後も、古い中身が参照されている間は残る。
+- **Follow-up**：参照カウントの循環がないこと（content オブジェクトはノードを参照しない）を tree_check で確かめる。
 
-### Decision: ノードの所有と削除の規則
-- **Context**：brief は削除時の所有権の規約を design に委ねた（1.3、1.6、1.7）。
+### Decision: 中身を、行から作ったバイト列として実体化する
+- **Context**：インラインのパーサは連続した文字列の上で動く。値の導出（3.3）と中身の取り出し（8.2）も同じ文字列を使う。
+- **Selected Approach**：配置済みの中身は、記録した行の列の範囲から、タブの途中の部分を空白に広げ、行の間に仮想の `\n` を入れたバイト列として作る。各部分（piece）は、行、列の範囲、中身の上の始まりを持つ。
+- **Trade-offs**：文書のテキストの部分を 1 回複製する。旧設計がリテラルを複製していたのと同じ程度である。
+
+### Decision: 定義の索引を、木の中の位置によらずに持ち、問い合わせのときに絞り込む
+- **Context**：定義を含む部分木の挿入と切り離しのたびに索引を直すと、挿入の時間が部分木の大きさに比例し、14.5 を満たせない。
 - **Alternatives Considered**：
-  1. 切り離しと同時に解放する
-  2. 切り離しは所有を変えず、解放は明示する。文書の解放で残りをすべて解放する
-- **Selected Approach**：2。ノードは常に作った文書に属する。`amark_node_unlink` は切り離すだけ、`amark_node_destroy` は（必要なら切り離してから）部分木を解放する。文書はすべてのノードを内部の環でつなぎ、解放時にまとめて解放する。
-- **Rationale**：移動や一時的な取り外しが安全になる。解放し忘れても文書の寿命で回収される。
-- **Trade-offs**：長い編集のセッションで、切り離したまま解放しないノードは文書の解放まで残る（文書化する）。
-- **Follow-up**：ノードの確保は 1 回の確保（ヘッダ ＋ 型のデータ）。必要になればスラブの確保に変えても API は変わらない。
+  1. 挿入と切り離しのたびに、部分木の中の定義を索引に出し入れする。
+  2. 文書のすべての link_definition（切り離したものを含む）をラベルで索引にし、問い合わせで木の中にあるものだけを選ぶ。
+- **Selected Approach**：2。索引の更新は、ラベルの変更、ノードの生成と解放のときだけ行う。問い合わせでは、同じラベルの定義の各々が文書の根につながるかを祖先をたどって確かめる（木の深さに比例）。複数あれば文書の順で最初のものを選び、木の構造が変わるまでその結果をラベルごとに覚える。
+- **Rationale**：挿入と切り離しに索引の費用がかからない。同じラベルの定義が 1 つなら、問い合わせは深さに比例する時間で済む。
+- **Trade-offs**：同じラベルの定義が複数あり、構造を変えた後の最初の問い合わせは、それらの順を決める時間（兄弟をたどる時間を含む）がかかる。requirements の 14.8 をこれに合わせて直した。
 
-### Decision: 構文トークンはソースの範囲の参照で、所有はノード、順序はオフセット
-- **Context**：6.1–6.6。コンテナの接頭辞は内側のノードの範囲の途中に現れる。
-- **Alternatives Considered**：
-  1. トークンを子の間の位置（スロット）で持つ
-  2. トークンをソース上のオフセットで並べ、所有は意味で決める
-- **Selected Approach**：2。各ノードのトークンは（ソース、オフセット、部分的なタブの列）の順に保つ。接頭辞は `AMARK_TOKEN_FLAG_CONTAINER_PREFIX` を付けてコンテナが持つ。遅延継続行は長さ 0 の `LAZY_CONTINUATION` をコンテナが持つ。
-- **Rationale**：行の接頭辞のように子をまたぐ表記も、所有と順序を分ければ一貫して表せる。部分木を移動しても、その部分木が持つトークンは自分の表記だけになる（祖先の接頭辞を含まない）。
-- **Trade-offs**：部分木の表記の列を得るには、自分のトークンと子の列のマージが要る（`markdown-renderer` と検証が行う）。
-- **Follow-up**：パーサの spec は、どのトークンをどのノードに持たせるかと、役割の番号を自分の構文の中で決める。
+### Decision: 「元の表記のまま出せるか」を、子の結果と自分の記録から合成し、内部でキャッシュする
+- **Context**：14.9 は、すべてのノードについての問い合わせの合計が線形であることを求める。部分木を毎回調べると二次になる。
+- **Selected Approach**：各ブロックの判定（11.4）を、子の判定、自分の記録、子の最初の列の記録だけから決める（Verbatim の規則）。結果をノードにキャッシュし、ノードの記録・値・子が変わったら、そのノードと祖先のキャッシュを、すでに無効な祖先に着くまで無効にする。リストのタイトの導出（3.7）も同じキャッシュに載せる。
+- **Rationale**：無効化は編集の回数に対して償却で定数、問い合わせはノードと記録の数に線形になる。キャッシュは公開の意味論を持たない（Q10：内部だけ）。
 
-### Decision: トークンの種類は汎用の分類、構文ごとの意味は役割の番号
-- **Context**：パーサと Markdown 出力の同じ構文のコードの間の語彙を、レジストリに固定しないため。
-- **Selected Approach**：種類（テキスト、マーカー、空白、改行、エスケープ、文字参照、置換、BOM、遅延継続）はこの spec が定める。役割（16 ビット）は、所有するノードの型を扱う構文拡張が決める。組み込みの構文の役割の値も下流の spec が決める。
-- **Rationale**：汎用のエンジン（接頭辞の付け直し、検証）は種類と印だけで動ける。構文ごとの詳細は構文のファイルの中に閉じる。
-- **Trade-offs**：利用者が表記（ATX か setext かなど）を知るには、構文が公開する役割の値を使う。
+### Decision: 組み込みの規則を、項目の変更のフックで表す
+- **Context**：参照の形のリンクへの宛先の設定（6.10）、リストの記号の変更で項目の帯を捨てること、レベル 3 以上の setext 見出しの ATX への変更、インデントのコードへの情報文字列の設定は、値を 1 つ変える以上の変化を伴う。3.9 は、組み込みの型を拡張と同じ仕組みで定義することを求める。
+- **Selected Approach**：項目の記述子が `on_change` のフックを持てるようにする。項目を設定する関数は、新しい値を用意（確保）してからフックを呼び、フックが成功したら確定する。フックは自分の変更を全か無かで行う。
+- **Trade-offs**：フックの中から別の項目を設定できるので、組み込みの規則が記述子に散らばる。builtin_types.c の 1 ファイルにまとめる。
 
-### Decision: ソースは複数、追加のみ、複製して保持
-- **Context**：1.4、1.5、4.7。`block-parser` は逐次の入力（feed）を受ける。`markdown-renderer` は断片の差し込みを検討する。
-- **Selected Approach**：文書は複数のソースを持つ。ソースは複製で登録し、末尾への追加だけを許す。取り込み（import）は参照されるソースを取り込み先に複製する。行の先頭の索引をソースごとに追加のたびに更新する。
-- **Rationale**：パーサはチャンクを文書のソースへ直接追加でき、二重の保持が要らない。別の文書でパースした断片も元の表記つきで差し込める。
-- **Trade-offs**：取り込みのたびにソースを複製する（参照されるソースの大きさに比例）。借用（ゼロコピー）は今回は持たない。
+### Decision: 最初の設計の概念を持ち込まない
+- **Context**：利用者の指示（2026-11-26）：中途半端に前の設計を引きずらない。
+- **Selected Approach**：次のものは、名前も役割も新しい設計に置かない。ソースのオフセットを指す構文トークン、`CONTAINER_PREFIX` と `PARTIAL_TAB` の印、`LAZY_CONTINUATION` のトークン、LINE_ENDING と BOM のトークン、編集の記録（`AMARK_EDIT_*`）と追跡の有効化、リテラルのモード（`literal_mode`）、属性の型ごとのデータ、`check_tokens` とトークンの報告、トークンの移し替え（`transfer_tokens`）。`token.h` は削除する。
+- **Rationale**：新しいモデルでは、これらはすべて構造（行の表、帯の状態、列の範囲、項目、綴りの有無）から表せる。残すと、二重の表現と、それを合わせる規則が生まれる。
 
-### Decision: 編集の追跡はノード単位のビットと、追跡の切り替え
-- **Context**：7.1–7.10。brief とステアリングは粒度を design に委ね、後から改善できることを求める。
-- **Alternatives Considered**：
-  1. ノード単位のビット
-  2. 変更の履歴（ログ）
-  3. 元の木の複製との比較（recast 方式）
-- **Selected Approach**：1。`CONTENT`、`CHILDREN`、`DESCENDANTS`、`RELOCATED`、`CREATED`。追跡は文書ごとに切り替え、新しい文書は無効で始まる（パーサが組み立て後に有効にする）。値が同じ設定は記録しない。利用者には「未知のビットは `CONTENT` とみなす」ことを求め、ビットや別の問い合わせ（テキストの範囲の変更など）を後から足せるようにする。
-- **Rationale**：判定に必要な情報（自分の表記が使えるか、子の並びが変わったか、文脈が変わったか）を定数時間で得られる。ログや比較より単純で、メモリも小さい。
-- **Trade-offs**：記録を消す操作は持たない（消すとトークンと意味の食い違いを隠せるため）。追跡を無効にして編集した利用者の責任は文書化する。
-
-### Decision: ノード型の識別子は組み込みが固定、拡張が凍結時に割り当て
-- **Context**：2.1、8.6、8.10。C の利用者は `switch` で型を判定したい。
-- **Selected Approach**：1–255 を組み込みに予約し、現在は 1–19 を使う。拡張の型は構文セットの凍結時に、拡張の順、記述子の順で 256 から割り当てる。拡張の型の名前には `.` を必須にし、`.` のない名前を組み込みに予約する。
-- **Rationale**：組み込みの型は定数で比較できる。同じ構成の構文セットは同じ識別子になる。名前の衝突を構造的に避けられる。
-- **Trade-offs**：拡張の型の識別子は構文セットごとに違いうる。取り込みと比較は記述子のポインタで対応付ける。
-
-### Decision: スロットは種類の番号つきの見出しを先頭に持つ構造体への参照の一覧
-- **Context**：8.2、8.8、8.9。下流の spec がスロットを足しても、レジストリの API を変えないため。
-- **Selected Approach**：`amark_slot_header_t { struct_size; kind; }` を先頭のメンバーに持つ構造体を、構文拡張が `const amark_slot_header_t *const *` の一覧で持つ。レジストリは凍結時に種類ごとの索引を作り、順に列挙する。番号の範囲は 1–0xFFFF を Amark、0x10000 以上を利用者とする。
-- **Rationale**：利用者が独自のレンダラ（HTML と Markdown 以外）のスロットを定義できる。配列の要素の大きさが将来変わる問題が起きない（ポインタの配列）。
-- **Trade-offs**：型の安全はスロットの種類ごとの規約に頼る（種類の番号と `struct_size` の検査はエンジンの責任）。
-
-### Decision: 組み込みの型にリンク参照定義を加える
-- **Context**：往復で元の表記を残すには、リンク参照定義が木のどこかにある必要がある。product の用途（リンクの書き換え）では定義の宛先を編集したい。
-- **Selected Approach**：ブロックの葉の型 `link_definition`（ラベル、宛先、タイトル）を組み込みに加える。HTML には何も出さない（`html-renderer` の責任）。
-- **Rationale**：mdast と同じ扱い。表記をトークンとして持つ場所ができ、比較にも含められる。
-- **Trade-offs**：brief の 18 の型の一覧から 1 つ増える（報告で明示する）。
-
-### Decision: リテラルと属性の検査は「どの文脈でも表現できない値」に限る
-- **Context**：5.2–5.6。brief は、表現できない編集を黙って受け入れないことを求める。エスケープや区切りの選び直しは `markdown-renderer` が決める。
-- **Selected Approach**：設定時には、NUL、不正な UTF-8、改行を持てない値の改行、空行を持てない値の空行、範囲外の数値、空の code、作れないラベルを拒否する。文脈に依存する表現の可否（リンクの中のリンクなど）は `markdown-renderer` が出力時に判定する。複数行のリテラルは LF に揃え末尾を LF にする（意味を変えない正規化）。
-- **Rationale**：木の不変条件として、パースで作れる値の集合に合わせる。エスケープの方式を縛らない。
-
-### Decision: テキストの一括設定は改行をソフト改行に変える
-- **Context**：5.7。翻訳では段落のテキストを丸ごと置き換えたい。
-- **Selected Approach**：インラインを持てるノードに、改行で区切った text と softbreak の列を設定する関数を用意する。text のリテラル自体は改行を拒否する。
-- **Rationale**：意味が明確で、表現できない値を作らない。
-
-### Decision: 比較は意味だけ、テキストの正規化は任意
-- **Context**：9.1、9.2。`markdown-renderer` の性質テストは、出力の再パースの木と編集後の木を比べる。パーサとの text の分け方の違いを吸収したい。
-- **Selected Approach**：型（記述子のポインタ）、属性（型の比較関数）、リテラル、子の並びを比べる。`AMARK_EQUAL_NORMALIZE_TEXT` で隣り合う text を連結とみなし、空の text を無視する。確保をしない反復で実装する。
-
-### Decision: ダンプは S 式、テスト用に同じ形式から木を組み立てる
-- **Context**：9.3–9.7。後続の spec は「手で組み立てた木」でレンダラをテストする。
-- **Selected Approach**：属性とリテラル、任意でトークン・編集・位置を含む決定的な S 式。拡張の属性はダンプの書き手の関数で書く。テスト用の補助はダンプと同じ形式（トークンを含む）を読む。
-
-## Design Synthesis
-
-### Generalization
-- 包含の規則：組み込みの規則（document はブロック、list は項目、段落はインライン…）を、型の「分類（provides）」と「受け入れる分類（accepts）」のビットに一般化し、表や表の行のような拡張には上書きの関数を許す。
-- リテラル：text、code、html_inline、code_block、html_block の規則を、リテラルの方式（なし、1 行、空行なしの複数行、行の並び）と任意の検査関数に一般化した。拡張の型も同じ方式を選べる。
-- スロット：パース・後処理・HTML・Markdown と利用者独自の出力を、種類の番号つきの一覧に一般化した。
-- ソース：逐次の入力と断片の取り込みを、「複数の追加のみのソース」に一般化した。
-
-### Build vs. Adopt
-- 既存の C のライブラリ（cmark、cmark-gfm、md4c）は元の表記を持たず、ノードモデルも固定である。ロスレスなトークンと拡張の記述子を後付けするより、作る方が要件に合う。API の形（走査のイベント、ノードの関数名）は cmark にならう。
-- S 式のダンプは cmark の `--to xml` や mdast の JSON の代わりに、依存なしで比較しやすい独自の小さな形式にする。
-
-### Simplification
-- トークンの合成（ソースにない文字列のトークン）は持たない。新しいノードはトークンを持たず、作り直しは `markdown-renderer` が行う。
-- ソースの借用（ゼロコピー）、記録の消去、拡張の依存関係の宣言、部分木のトークンの列の公開の反復子は持たない（必要が具体化したら追加する）。
-- 文書単位のアリーナは「文書がすべてのノードを所有する」規則で満たし、確保の方式（個別の確保）は内部の実装の選択とする。
+### Decision: setext の下線の文字を style に持たない
+- **Context**：INPUT.md の 4.6 は、見出しの style に「setext の下線の文字」を挙げている。
+- **Findings**：setext の下線の文字は、レベル 1 なら `=`、レベル 2 なら `-` と決まる。style として持つと、レベルと食い違う状態が作れてしまう。
+- **Selected Approach**：持たない。requirements の 3.5 を直した。
 
 ## Risks & Mitigations
-- トークンのメモリが大きい（1 トークン約 32 バイト）— 内部の構造を詰め、計算量の要件（10.5）と合わせて大きな文書で計測する。必要なら後でまとめて確保する。
-- 追跡を無効にしたまま編集すると、元の表記が古いまま出力される — 文書化し、ロスレス性の検証と不変条件の検査をテストとファジングで使う。
-- 包含の規則が拡張の構文（脚注の定義、表）に足りない — `can_contain` の上書きで対応する。足りなければこの spec を更新する（Revalidation Trigger）。
-- 取り込みがソースを毎回複製する — 文書化する。頻繁な差し込みの需要が出たら、ソースの共有を設計し直す。
-- 下流の spec がトークンのモデルの不足を見つける — 種類と印は追加できる番号で定義し、未知の種類を扱う規則を文書化する。
-
-## Revision Notes
-
-### 2026-11-25：下流の spec からの上流の変更（`block-parser`、`html-renderer` の依頼）
-- **Context**：`block-parser` と `html-renderer` の設計で、この spec の API と規約に足りない点が見つかった。下流の spec は回避策をとらず、この spec を更新する約束（Boundary Context の Adjacent expectations、design の Risks）に従って反映する。承認済みの要件・設計・タスクに追加する形で行い、既存の受け入れ基準の意味は変えない。
-- **`amark_document_take_syntax_set`（1.10、1.11）**：`block-parser` の便宜の関数（`amark_parse_commonmark` など）は構文セットを内部で作り、返した文書がそれを保持し続ける必要がある（`block-parser` の 1.2、11.3）。パーサの層が構文の層（`src/syntax/`）や利用者に解放の責任を残さないよう、文書が構文セットの所有権を受け取れるようにした。既存の規則（文書は凍結済みの構文セットだけを使う、構文セットは使うすべての文書より長く生きる、`amark_syntax_set_core()` は静的で解放しても何もしない）と矛盾しないよう、受け付けるのは「その文書が使っている、静的でない構文セットを 1 回だけ」とし、解放はノードの `deinit` が記述子を参照できるようにすべてのノードの後に行う。失敗時に所有権が呼び出し側に残ることで、呼び出し側は失敗の後も通常どおり解放できる。検討した代替：構文セットに参照の数を持たせる案は、凍結した構文セットを読み取り専用で共有する規則（1.9）とスレッドの安全性に原子的な操作を持ち込むため採らなかった。
-- **`amark_node_import_children`（4.10、4.11）**：`block-parser` の断片のパースは、一時的な文書の根（または一時的な段落）の子をすべて既存の文書へ全か無かで挿入する必要がある（`block-parser` の 10.1、10.2、10.4）。既存の `amark_node_import` を子ごとに呼ぶと、(1) 途中で失敗したときに挿入済みの子を戻す処理が呼び出し側に要り、(2) 子ごとに同じソースが複製される。検査（型の対応付け、包含）と確保（ソース、複製）を先にすべて行い、確保なしのつなぎ込みで終える操作として定義した。包含の判定とつなぎ込みは StructureEdit の内部関数を共有し、規則を 1 か所に保つ。
-- **スロットの種類の番号の範囲の表（8.13）**：`html-renderer` は `0x0301`、`0x0302`、`block-parser` は `0x0100` 台を使う。各 spec が独立に番号を選ぶと衝突しうるため、Amark の範囲（`0x0001`–`0xFFFF`）を spec ごとに 256 ずつ割り当てる表を `extension.h` に置いた。この spec 自身はスロットの種類を定義しないが、レジストリが将来使う可能性のために `0x0001`–`0x00FF` を予約する。レジストリは表を強制しない（利用者の範囲 `0x10000` 以上と同じく、`kind` が 0 でなければ受け付ける）。表は spec の間の約束であり、範囲の重なりはテストで確かめる。
-- **Implications**：Revalidation Triggers に、所有の受け渡しと子をまとめた取り込みの規則の変更、範囲の表の変更を加えた。下流の spec は、この時点の `block-parser` と `html-renderer` の design の記述（関数の形、エラーの規則、番号の範囲）と一致する。
-
-### 2026-11-25：spec 横断のレビュー r1（cross-spec review r1）
-- **Context**：全 spec を横断したレビューで、この spec に関わる指摘が 3 つあった（#7、#8、#9）。承認済みの要件・設計・タスクの意味は変えず、記述をそろえる修正だけを行う。
-- **#9 スロットの種類の範囲の表が古い**：表の右の列が「各 spec の design が定める」のままだった。承認済みの下流の design に合わせ、具体的な種類を記した：`block-parser` 0x0100–0x0103（`BLOCK_SYNTAX`、`PARAGRAPH_CONSUMER`、`POSTPROCESS`、`PARSE_STATE`）、`inline-parser` 0x0201–0x0206（`INLINE_SYNTAX`、`INLINE_DELIMITER`、`INLINE_BRACKET`、`INLINE_TEXT_SCANNER`、`INLINE_NODE_TRAITS`、`INLINE_SPECIAL`）、`html-renderer` 0x0301–0x0302（`HTML_NODE`、`HTML_HOOKS`）、`markdown-renderer` 0x0401–0x0402（`MARKDOWN_NODE`、`MARKDOWN_HOOKS`）。`extension.h` の範囲の節の注記にも同じ一覧を置き、タスク 1.1 に反映した。定義の正本は各 spec の design のままとし、種類を足す・変える spec が表と注記を更新することを Revalidation Triggers に加えた。要件 8.13 の文言は変えない（表を公開ヘッダに置く、という要件のまま）。
-- **#7 `amark.h` の include の順**：`amark.h` は `foundation` が所有し、正規の順（`foundation` のヘッダ → 木のヘッダ → `render.h`、`html.h` → `entity.h`、`scan.h`、`parser.h`、`block.h`、`inline.h`、`commonmark.h` → `markdown.h`）を定める。この spec の「`unicode.h` の後に追加する」という書き方をやめ、`foundation` の正規の順の「木のヘッダ」の位置に 6 つのヘッダを置く、という参照に改めた（File Structure Plan、公開ヘッダの構成、タスク 1.1）。正規の順の変更を Revalidation Triggers に加えた。
-- **#8 `amark_document_take_syntax_set` の `const`**：`block-parser` の `amark_parser_create(const amark_syntax_set_t *)` から非 `const` の `take` を呼ぶと `const` を外すキャストが要る、という指摘。所有権の受け渡し（解放の責任の移動）は `const` のポインタでは表せないため、この関数の引数は非 `const` のままとする。設計に「`const` のポインタしか持たない呼び出し側は所有権を渡してはならない（`const` を外すキャストをしない）」と明記した。`const` でないポインタを持つ経路だけで受け渡すよう直すのは `block-parser` の側で行う。
-- **Implications**：API・要件の受け入れ基準・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：spec 横断のレビュー r2（cross-spec review r2）
-- **`amark_test_tree` の定義の条件**：`tree_builder.h` は Naos のマクロ `AMARK_CHECK_TREE_DUMP` を宣言するので `amark_test_tree` は Naos に依存する。`foundation` の規則 7.7 では `tests/` は `AMARK_FUZZ` だけが ON の構成でも入るため、`amark_test_tree` の定義と `add_subdirectory(tree)` を `if(AMARK_BUILD_TESTS)` の中に置くと明記した（design の Modified Files、TreeBuilder、タスクの該当箇所）。ファジングターゲットはこのライブラリをリンクしない。承認は維持する。
-
-### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
-- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
-- **変更**：`src/tree/tree_internal.h` を `src/tree/tree.h` に、`src/tree/syntax_set_internal.h` を `src/tree/syntax_set.h` に改名した（File Structure Plan、Dependency direction、Components、TreeInvariants、Logical Data Model）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
-- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：`src/tree/` のソースファイル名をコンポーネント名にそろえる
-- **Context**：`edit.c`（編集の記録）と `node_edit.c`（構造の編集）は、名前から役割を区別できなかった。また `node_` の接頭辞が、ノードを扱うファイルの一部にだけ付いていた。
-- **変更**：`edit.c` を `edit_tracking.c` に、`node_edit.c` を `structure_edit.c` に、`node_copy.c` を `copy_import.c` に、`node_attr.c` を `attr.c` に改名した（File Structure Plan、Dependency direction）。コンポーネント名（EditTracking、StructureEdit、CopyImport、LiteralAttr）とテストのファイル名に合わせ、`node_` は NodeCore の `node.c` だけに残す。steering（structure.md）のファイル名の例も `structure_edit.c` に直した。
-- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲と依存の順は変わらない。承認は維持する。
-
-### 2026-11-25：ノード型の識別子の定数を `#define` にする
-- **Context**：ノード型の識別子は `typedef uint32_t amark_node_type_t` で、定数は無名の `enum` だった。enum 型の変数がないので、`switch` の網羅の警告やデバッガでの名前の表示は得られず、使われるのは値だけだった。識別子の値（組み込みは 1–19、1–255 は予約、拡張は 256 から）は ABI の一部で、集合は拡張で増える。
-- **変更**：`AMARK_NODE_*` を、同じ名前と値の `#define`（`u` 付き）にした（NodeCore の Contracts）。あわせて steering（tech.md）に、閉じた集合は `typedef enum`、固定幅の型に入れる開いた集合・予約範囲・ビットの印は `#define` に `u` を付ける、という規約を加えた。
-- **Implications**：名前と値は変わらず、使い方（比較、`switch` の `case`）も同じ。定数の型が `int` から符号なしになる。要件・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：スロットの種類の番号を、spec ごとの範囲から通し番号の一覧に変える（要件 8.13 の変更）
-- **Context**：スロットの種類の番号は、各 spec の design を別々に書いていた段階で衝突を防ぐため、spec ごとに 256 ずつの範囲（`0x0100`–`0x04FF`）を割り当て、利用者の範囲を `0x10000` 以上としていた。全 spec の design が揃い、Amark の種類は 14 個に確定した。種類は 1 つの公開ヘッダ（`extension.h`）の 1 か所で管理するので、範囲の区切りがなくても、一覧への追記で衝突を防げる。範囲と桁は必要に対して過剰だった。
-- **変更**：Amark の範囲を 1–255、利用者の範囲を 256 以上にした（ノード型の識別子と同じ境界）。spec ごとの範囲の定数（`AMARK_SLOT_KIND_CORE_FIRST` など 10 個）をやめ、通し番号の一覧（`block-parser` 1–4、`inline-parser` 5–10、`html-renderer` 11–12、`markdown-renderer` 13–14、15–255 は予約）を design と `extension.h` の注記に置いた。`kind` の型（`uint32_t`）と `amark_slot_header_t` の形は変えない。
-- **要件の変更**：8.13 を「spec ごとに重ならない範囲に分けた表」から「重ならない通し番号の 1 つの一覧」に書き換え、Boundary Context の 2 か所の記述を合わせた。8.9（Amark の範囲と利用者の範囲を分ける）はそのまま満たす。受け入れ基準の意味が変わるが、利用者の要望による見直しであり、承認はこの改訂を含めて維持する。
-- **Implications**：タスク 1.1（公開ヘッダの定数と注記）とテスト（一覧の番号が重ならず Amark の範囲に含まれること）の記述を合わせた。下流の 4 つの spec は、種類の番号を一覧の値に置き換えた。種類の名前、構造体、API は変わらない。
-
-### 2026-11-25：スロットの基底の型を `amark_slot_t` に改名する
-- **Context**：スロットの基底の型 `amark_slot_header_t`（メンバー名 `header`）は、API の上で受け渡すもの（拡張の `slots`、`amark_syntax_set_slot_at` の戻り値）が「スロットそのもの」なのに「スロットのヘッダ」と読める名前だった。また日本語の文書では「スロットの見出し」と訳しており、ノード型の heading の「見出し」やヘッダファイルと紛れた。
-- **変更**：型を `amark_slot_t`（タグ `struct amark_slot`）に改名した。種類ごとの構造体が先頭に埋め込むメンバーの名前は `base` にする（下流の spec が合わせる）。文書の中では「スロットの基底」と呼ぶ。フィールド（`struct_size`、`kind`）、構造体の形、API の振る舞いは変えない。
-- **Implications**：型とメンバーの名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：ノード型の記述子の `flags` を enum の `node_class` にする
-- **Context**：記述子の `uint32_t flags` は、ビットの定数 `AMARK_NODE_TYPE_BLOCK`（`0x01u`）と `AMARK_NODE_TYPE_INLINE`（`0x02u`）を持っていた。しかし、使えるのはどちらか一方だけで（記述子の検査で両方・どちらでもない値を拒否する）、ビットを組み合わせる用途はない。要件（2.4、8.1）は「ブロックかインラインか」の二者択一で、下流の 4 つの spec もこのフィールドとビットの定数を参照しない（包含の判定は `provides` / `accepts` と `can_contain` で行う）。性質のビットを足す計画もない。steering（tech.md）の規約では、閉じた選択肢の集合は `typedef enum` にする。型が `uint32_t` のビットの印だと、両方を立てられるかのように読める。
-- **変更**：`typedef enum amark_node_class { AMARK_NODE_CLASS_BLOCK = 1, AMARK_NODE_CLASS_INLINE = 2 } amark_node_class_t` を `extension.h` に置き、記述子のフィールドを `amark_node_class_t node_class` にした。ビットの定数 `AMARK_NODE_TYPE_BLOCK` / `INLINE` はなくした。記述子の検査は「`BLOCK` か `INLINE` のどちらか一方」から「`node_class` が既知の値」にした（`literal_mode` の検査と同じ形）。組み込みの型の表の列名を `node_class` にした。
-- **値を 1 と 2 にする理由**：記述子は指示付き初期化子で静的に定義するのが普通で、書き忘れたメンバーは 0 になる。ブロックかインラインかには正しい既定値がないので、0 を有効な値（例：BLOCK）にすると、書き忘れたインラインの型が黙ってブロックとして登録される。0 を不正にして登録の検査で拒否する。`literal_mode` が `NONE = 0` を有効にしているのは、「リテラルを持たない」が多くの型で正しい既定値だから。同じ二者択一の `amark_fragment_context_t`（`block-parser`、`BLOCK = 1`、`INLINE = 2`）とも値をそろえた。
-- **検討した代替**：(1) ビットのまま残す：組み合わせられない値をビットで表す理由がなく、規約にも合わない。(2) 値を 0 と 1 にする：書き忘れを検出できない。ブロックを既定にするなら enum より `bool is_inline` が素直だが、拡張の作者に分類の明示を求めるため採らなかった。(3) 開いた集合として `uint32_t` と `#define` にする：拡張が第 3 の分類を足す必要がなく、包含の分類は `provides` / `accepts` が担う。
-- **Implications**：公開 API の型とフィールドの名前の変更だが、C の実装はまだないので互換性の影響はない。`amark_node_is_block` / `amark_node_is_inline` の形と振る舞い、要件、タスクの範囲は変わらない（タスク 2.2 の「ブロック/インラインのどちらか一方」の検査は、enum の既知の値の検査として満たす）。下流の spec は該当する記述を持たないので変更はない。承認は維持する。
-
-### 2026-11-26：ロスレス性の検証の不整合を `AMARK_ERROR_NOT_LOSSLESS` で返す
-- **Context**：`amark_document_check_tokens` は、検査を最後まで実行できたかを `amark_error_t` で、文書が正しいかを別の列挙 `amark_token_check_error_t`（`OK`、`GAP`、`OVERLAP`、`TAB_COLUMNS`）で返していた。呼び出し側（`block-parser` と `inline-parser` のテストの補助を含む）は 2 段で判定し、不整合を伝えるときは自分でエラーコードを選ぶ必要があった。`markdown-renderer` は、表現できない木を `foundation` に追加したエラーコード `AMARK_ERROR_UNREPRESENTABLE` で返し、詳細を報告の構造体（`amark_markdown_report_t`、種類は `amark_markdown_problem_t`）に書く。同じ形にそろえる。
-- **変更**：`foundation` に `AMARK_ERROR_NOT_LOSSLESS`（10.10）を追加した。不整合のときはこのコードを返し、`out_report` が NULL でなければ最初の不整合を書く。`amark_token_check_error_t` を `amark_token_problem_t`（`NONE = 0`、`GAP`、`OVERLAP`、`TAB_COLUMNS`）に、`amark_token_check_t` を `amark_token_report_t`（`error` を `problem` に）に改名した。`out_report` は NULL 可にした（テストでは成功したかどうかだけを見ることが多いため。`markdown-renderer` の `report` も任意）。`NONE = 0` は「問題なし」という正しい既定値なので 0 を使う（`node_class` で 0 を不正にした事情とは異なる）。
-- **範囲**：この関数とコードは、トークンがソースのバイトを過不足なく覆うか（ロスレス性）だけを扱う。トークンの意味が文脈に合うかなどの検査を足すときは別の関数にする、と design に記した。名前（`NOT_LOSSLESS`）が将来の追加で不正確にならないようにするため。
-- **検討した代替**：(1) いまの 2 段の形を残す：検査の実行の失敗と文書の不整合を戻り値で区別できるが、`markdown-renderer` と形がそろわず、呼び出し側が不整合を自分でコードに直す必要がある。(2) `GAP` などをそれぞれ `amark_error_t` に加える：1 つの関数のためにコードが 3 つ増える。種類は報告の構造体に残す。
-- **Implications**：TokenCheck の Contracts と Responsibilities、共通の規約の構造体名、Error Handling、Testing Strategy、Revalidation Triggers、タスク 5.1 を合わせた。`block-parser` の design のテストの補助の説明（`OK` を `AMARK_ERROR_NONE` に）を直した。`block-parser` の research と `inline-parser` の記述は関数名と種類名（GAP など）だけで、変更は要らない。要件 6.9 の文言は変えない。承認は維持する。
-
-### 2026-11-26：ノード型の記述子の `node_class` を `level` に改名する
-- **Context**：`node_class` は `class` が C++ の予約語のため `node_` を付けた名前で、ノード型の記述子のメンバーとしては冗長だった。
-- **変更**：型を `amark_node_level_t`、定数を `AMARK_NODE_LEVEL_BLOCK`（1）と `AMARK_NODE_LEVEL_INLINE`（2）、記述子のメンバーを `level` にした。値、0 を不正にする規則、記述子の検査は変えない。
-- **名前**：HTML と CSS で定着した「block-level／inline-level」の言い方に合わせた。見出しの属性のレベル（1–6）と単語は同じだが、あちらはノードの属性（`amark_node_heading_level`）で、記述子のメンバーとは層が違うので取り違えにくい。文書では「ブロックレベルかインラインレベルか」と「見出しのレベル」と書き分ける。検討した代替：`layer`（steering のコードのレイヤーの規則と言葉が重なる）、`context`（`amark_block_context_t` などの処理の文脈と紛れる）、`category`（`provides` / `accepts` の「分類」と重なる）、`kind`（スロットとトークンの `kind` と重なる）。
-- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。C の実装はまだない。承認は維持する。
+- 中身の実体化でメモリが増える。文書のテキストの部分の 1 倍程度で、性能のテストで上限を確かめる。
+- 項目の数の上限（31）が拡張の型で足りない。拡張の型は、項目にしない値を型のデータとして持てる（その場合は 6.13 で綴りを捨てる）。
+- 定義の索引の文書の順の決定が、同じラベルの定義が多い文書で遅くなる。ラベルごとに結果を覚え、構造を変えたときだけ決め直す。
+- 下流の spec が、まだ旧設計の API を前提にしている。roadmap.md の Existing Spec Updates の順で改訂し、この design の Revalidation Triggers を確認の手がかりにする。
 
 ## References
-- [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — タブ、NUL、行末、遅延継続、リンクのラベル・タイトル・宛先、コードスパン
-- [cmark](https://github.com/commonmark/cmark) — ノード API、走査のイベント、解放の規則
-- [cmark-gfm extension API](https://github.com/github/cmark-gfm/blob/master/src/cmark-gfm-extension_api.h) — 拡張のノード型の登録、包含の上書き、型ごとのデータ
-- [Roslyn syntax trivia](https://learn.microsoft.com/dotnet/csharp/roslyn-sdk/work-with-syntax) — ロスレスな CST とトリビア
-- [rowan](https://github.com/rust-analyzer/rowan) — green/red tree
-- [recast](https://github.com/benjamn/recast) — 変更部分だけを印刷し直す AST の書き戻し
-- [mdast](https://github.com/syntax-tree/mdast) — `definition` ノードと位置
-- `.kiro/specs/foundation/design.md` — エラーコード、アロケータ、バッファ、UTF-8、テストとファジングの仕組み
+- `INPUT.md`（リポジトリの直下）— モデルの入力資料
+- CommonMark Spec 0.31.2 — ブロックの構造、タブ、ラベルの照合、文字参照
+- Unicode 17.0.0 `CaseFolding.txt` — ラベルの正規化
+- WHATWG `entities.json` — 名前付き文字参照
+- cmark `blocks.c`（`S_advance_offset`、リスト項目の空行の扱い）— 列の数え方
+
+## 設計のレビューによる修正（2026-11-26）
+`/kiro-validate-design` で、独立したレビュアーの指摘を確かめ、次の 6 件を design と requirements に反映した。
+
+| 指摘 | 起きること | 修正 |
+|---|---|---|
+| list をコンテナに数えた | list は帯を持たないので、リストを含む文書の判定が常に偽になる。項目の間の空行の持ち主が決まらず、タイトが壊れる | 帯を持つ型を `AMARK_NODE_TYPE_MARGINS` で明示し、document と list は通り抜けのブロックにした。空行の持ち主の規則を定め（requirements 7.4）、タイトを list と直下の item の空行から導くようにした。遅延継続の帯の列を定めた |
+| link_definition が中身を持たない | 行の移し替えで中身の部分の行き先がない。複数行のタイトルの改行を綴れない | link_definition を CONTENT の葉にした。行の取り除きと中身の先頭の削りを足した（requirements 7.11） |
+| content オブジェクトをその場で変える | 複製の一方への操作が、もう一方の綴りと位置を変える | 書き込みのときの写しにした（requirements 5.6） |
+| 土台のバイトを読めない | 移したインラインの綴りを、markdown-renderer が出せない | `amark_node_content_base` を足した（requirements 8.8） |
+| 自由な中身の改行 | 複数行の msgstr のソフト改行を記録できない | 自由な中身は LF に揃え、LF を改行の位置にした（requirements 8.1、8.4） |
+| 取り込みで行を分け直す | 改行のない行や CR の行の次の行がつながり、行の番号が狂う | 行の範囲と改行の種類を明示して足す内部関数にした |
+| 索引の更新の漏れ | 複製・取り込みした定義と、トークンで綴ったラベルが索引に入らない | ラベルが変わりうる操作で汚れの印を付け、検索の前に付け替えるようにした |
+| list の on_change | 記号の幅が変わっても続く行のインデントが元のままで、項目から外れる | 影響する item の帯をすべて捨てるようにした |
+| code_block と html_block の literal | 設定した値と中身の 2 つが正になる（旧設計のリテラルの名残） | 項目の印 `AMARK_FACET_CONTENT` を足し、中身だけを正にした（requirements 8.7） |
+
+## 綴りの層の早期検証の結果（タスク 10）
+
+- CommonMark 0.31.2 の 19 の例（418、413、444、443、405 を引用の中に置いたもの 2 つ、329、337、515、26、25、22、505、527、561、570、633、634、649）を、パーサと同じ順で公開 API だけで組み立てた。どの例も記録を拒まれず、中身をちょうど 1 回覆い、導いた値と解決した宛先が spec の HTML と一致した。design に戻る必要はなかった。
+- 区切り文字の連続は 1 文字ずつの DELIMITER のトークンとして記録する。一部だけ使う連続（413、443、444）もこれで表せる。使われずに残った区切り文字は、DELIMITER のトークンを持つ text のノードとして残し、literal を記録する。隣の text と 1 つにしないことを design の「記録」に書き足した。

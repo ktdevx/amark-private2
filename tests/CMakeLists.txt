@@ -3,8 +3,9 @@
 #
 # The tests of Amark. This directory is added when AMARK_BUILD_TESTS or AMARK_FUZZ
 # is on (FuzzInfra's rule for fuzzer support libraries):
-#   - Targets that depend on Naos (amark_test_support, the check tests) are defined
-#     only inside if(AMARK_BUILD_TESTS). A fuzz-only configuration has no Naos.
+#   - Targets that depend on Naos (amark_test_support, amark_test_tree, the check
+#     tests) are defined only inside if(AMARK_BUILD_TESTS). A fuzz-only
+#     configuration has no Naos.
 #   - Support libraries that fuzz targets link must not depend on Naos, and are
 #     defined whenever this directory is added.
 #   - amark_add_test() does nothing when AMARK_BUILD_TESTS is off, so the
@@ -25,6 +26,17 @@ if(AMARK_BUILD_TESTS)
     "${CMAKE_CURRENT_SOURCE_DIR}/support"
     "${PROJECT_SOURCE_DIR}/include")
   target_link_libraries(amark_test_support PUBLIC Naos::naos)
+
+  # amark_test_tree: building trees from S-expressions (support/tree_builder.h:
+  # amark_test_tree_build and AMARK_CHECK_TREE_BUILD; AMARK_CHECK_TREE_DUMP comes
+  # with the dump). Its test is tree/tree_builder_test.c. It calls the public API of
+  # Amark, so it cannot go into amark_test_support: tree_builder.c is an INTERFACE
+  # source, compiled with the settings of each test that links it (with amark or
+  # amark_internal). It uses the Naos macros, so fuzz targets must not link it.
+  add_library(amark_test_tree INTERFACE)
+  target_sources(amark_test_tree INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/support/tree_builder.c")
+  target_include_directories(amark_test_tree INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/support")
+  target_link_libraries(amark_test_tree INTERFACE Naos::naos)
 
   # The test allocator and the sweep, built twice: with amark and with
   # amark_internal, so that a duplicate symbol in either combination fails to link.
@@ -87,6 +99,7 @@ if(AMARK_BUILD_TESTS)
 endif()
 
 add_subdirectory(base)
+add_subdirectory(tree)
 add_subdirectory(testgen)
 
 # The checks of the public headers (amark_header_check, cxx_include_test,

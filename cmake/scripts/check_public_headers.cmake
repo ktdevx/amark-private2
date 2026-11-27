@@ -33,13 +33,13 @@ cmake_minimum_required(VERSION 3.21)
 # not exist yet are skipped; a later spec inserts its headers at their position.
 set(_canonical_order
   # 1. Common base (foundation)
-  export.h version.h error.h allocator.h buffer.h utf8.h unicode.h
+  export.h version.h error.h allocator.h buffer.h utf8.h unicode.h entity.h
   # 2. Syntax tree (syntax-tree)
-  node.h document.h token.h iterator.h dump.h extension.h
+  node.h document.h value.h spelling.h iterator.h dump.h extension.h
   # 3. Renderer and HTML (html-renderer)
   render.h html.h
   # 4. Parser (block-parser, inline-parser)
-  entity.h scan.h parser.h block.h inline.h commonmark.h
+  scan.h parser.h block.h inline.h commonmark.h
   # 5. Markdown output (markdown-renderer)
   markdown.h)
 
