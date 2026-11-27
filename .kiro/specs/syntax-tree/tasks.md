@@ -482,3 +482,4 @@
 - GFM の表のセルの中の `\|` は、セルの中身の 2 つの部分の間に、セル自身のレイアウトのトークン（15.2 では ESCAPE、項目なし、役割 2）として記録すれば表せる。種類と役割は GFM の拡張の spec で決める（15.2）。
 - 中身のトークンの記録は、覚えた葉（`amark_tree_leaf_of`）で葉を確かめるので償却で定数になる。覚えた葉は構造の世代ごとに有効なので、パーサは構造を組み立ててから記録するか、浅いテキストに記録して `move_content_tokens` で移す（block-parser と inline-parser の改訂で明記する）。`amark_node_content_base` の葉の探索はまだ深さに比例する（15.5）。
 - トークンは記録の時点で種類とバイトを確かめる（中身のトークンはすべて、レイアウトのトークンは項目を綴るものだけ）。綴りを捨てた値は、設定では拒む値（改行を含む text など）でもよい。CONTENT の literal は REPLACED のトークンの範囲だけを U+FFFD にするので、block-parser は中身の全体にトークンを置く。ファジングの種は `tools/gen_tree_edit_seeds.py` で作り、`--check` で照合する（15.6）。
+- 機能の検証（validate-impl）で、Revalidation Trigger が発火したことを確かめた。下流の 4 つの spec（block-parser、inline-parser、html-renderer、markdown-renderer）の design は旧設計の API（token.h、check_tokens など）のままで、roadmap の Existing Spec Updates の順で作り直す。block-parser は自前の `amark_label_normalize` と case fold を持たず、syntax-tree と `src/base` のものを使う。各 spec はこの Implementation Notes の内容を取り込む（validate-impl）。

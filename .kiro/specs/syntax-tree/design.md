@@ -43,7 +43,11 @@
 - `foundation` の公開 API と内部ヘッダ（`base/*_internal.h`）：アロケータ、バッファ、エラー、UTF-8、Unicode の分類
 - C 標準ライブラリ
 - 依存の向き：`src/base` ← `src/tree`。`src/tree` は `src/parse`、`src/render`、`src/syntax` を参照しない。`src/base` に足す case fold と文字参照は、`src/tree` を参照しない。
-- `src/tree` の中の向き：Registry → NodeCore → { LineTable, Facets, Layout, Content } → { DefinitionIndex, Verbatim, Position, LosslessCheck, CopyImport } → { Iterator, Equality, Dump }。右から左への参照は、NodeCore の変更の通知（`amark_tree_changed`）を通してだけ行う。
+- `src/tree` の中の向き：Registry → NodeCore → { LineTable, Facets, Layout, Content } → { DefinitionIndex, Verbatim, Position, LosslessCheck, CopyImport } → { Iterator, Equality, Dump }。右から左への参照は、NodeCore の変更の通知（`amark_tree_changed`）を通してだけ行う。ただし、次の内部関数は例外として許す（実装で確かめた本質的な依存）。
+  - 値の取得の入口（Facets の `facet_value`）は、手順 1 の参照の解決で DefinitionIndex（`amark_tree_find_definition`）を、手順 2 の tight の導出で Verbatim（`amark_tree_derive_overridable`）を呼ぶ。DefinitionIndex は定義のラベルを取得の入口で読むので、Facets と DefinitionIndex は互いに呼び合う。
+  - Content の中身のトークンの記録は、葉の判定に Verbatim の覚えた葉（`amark_tree_leaf_of`）を使う。
+  - NodeCore のノードの解放は、Layout、Content、DefinitionIndex の後始末の関数（`amark_tree_records_free`、`amark_tree_content_release`、`amark_tree_def_index_forget` など）を呼ぶ。Registry は BuiltinTypes の組み込みの拡張（`amark_tree_core_extension`）を引く。BuiltinTypes のフックは Layout と Facets の操作を呼ぶ。
+  - 置き場所：行の移し替え、行の取り除き、中身の先頭の削りは中身を作り直すので `content.c` に、中身の被覆（`amark_tree_content_cover`）は `verbatim.c` に置き、LosslessCheck が再利用する。
 
 ### Revalidation Triggers
 - ノード型の記述子、項目の記述子、`on_change` のフックの契約の変更 → すべての下流の spec と、拡張を定義するテスト
