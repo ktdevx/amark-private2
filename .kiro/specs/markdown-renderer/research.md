@@ -1,189 +1,177 @@
-# Research & Design Decisions
+# Research & Design Decisions: markdown-renderer
 
 ## Summary
 - **Feature**：`markdown-renderer`
-- **Discovery Scope**：Complex Integration（greenfield のコードだが、`syntax-tree` の構文トークンと編集の記録、`block-parser` と `inline-parser` の役割の番号・文字の宣言・走査、`html-renderer` のスロットの形の上に作る。上流の 5 つの spec との継ぎ目がすべて関わる）
+- **Discovery Scope**：Complex Integration（新しいエンジンと公開 API。上流の `syntax-tree` は実装済み、`html-renderer`、`block-parser`、`inline-parser` は改訂した承認済みの design だけがある）
 - **Key Findings**：
-  - 書き戻しの正しさの難しさは 3 か所に集まる：(1) テキストと周りの表記の境目（記号、行頭のブロックの構文、行頭と行末の空白、区切り文字の flanking）、(2) ブロックの境目（空行、遅延継続、同じ種類のリストの結合、閉じていないフェンス）、(3) 行頭の接頭辞（祖先のコンテナ、部分的なタブ、遅延継続）。どれも「ノードごとの出力」ではなく「隣り合う出力の組み合わせ」で決まるため、エンジンが行と葉の単位でまとめて判断し、ノードの出力の処理はそれを使うだけにするのがよい。
-  - 構文トークンは「所有するノード」と「ソース上の位置」を別々に持つので、接頭辞は「そのコンテナがその元の行に持つトークン」として行ごとに引ける。移動したノードの行では移動先のコンテナがその行のトークンを持たないため、自然に合成に切り替わる。この性質で、接頭辞の付け直しを一般的な規則 1 つで書ける。
-  - 強調の正しさは、区切り文字の並びの flanking と CommonMark の照合（3 の倍数の規則など）の両方で決まる。照合を出力側で作り直すと規則の重複になるため、`inline-parser` の照合を純粋な関数として公開し、出力側は「選んだ表記を照合で検証し、だめなら構成的に安全な表記へ落とす」方式にする。
+  - `syntax-tree` の判定は、行ごとの分割と中身の被覆を前提に、部分木を「祖先の帯 ＋ 元の行の c0 から先」として出せるかを返す。祖先の帯（c0 より左）は判定しないので、書き戻しは「部分木が元の表記で出せる」ことと「祖先が元の帯を出せる」ことを分けて確かめる必要がある。
+  - 中身の置き換えの後の段落（msgstr）は、元の行と帯を保ち、インラインはすべての綴りを保つが、中身が自由なので `amark_node_verbatim` も `amark_block_content_verbatim` も偽になる。翻訳者のバイトを出すには、「綴りの揃った自由な中身」を書き戻しの側で認める必要がある（公開の問い合わせとトークンの読み取りで確かめられる）。
+  - 区切り文字の開閉の判定と照合（`amark_inline_delimiter_flanks`、`amark_inline_match_delimiters`）、文字の宣言（`amark_inline_special_chars`）、HTML ブロックの開始（`amark_scan_html_block_start`）は、上流が「書き戻しが使う」として公開した。これで、区切り文字の選び方と行頭の保護を、規則を重複せずに書ける。
 
 ## Research Log
 
-### 上流の構文トークンと編集の記録
-- **Context**：要件 2、3、5、8。何を元の表記として出せ、何を作り直すべきかの判定の材料。
-- **Sources Consulted**：`.kiro/specs/syntax-tree/design.md`（TokenStore、EditTracking、TokenCheck、Equality、CopyImport、System Flows の判定図）、`.kiro/specs/block-parser/design.md`（BlockEngine、Builtin syntaxes の役割の表、Fragment）、`.kiro/specs/inline-parser/design.md`（InlineDelimiters、InlineBrackets、InlineText、LinkCommon、InlineSpecial、CommonMarkSet の役割の表）
-- **Findings**：
-  - トークンの種類は 9 つの汎用の分類（TEXT、MARKER、SPACE、LINE_ENDING、ESCAPE、CHAR_REF、REPLACED、BOM、LAZY_CONTINUATION）、印は CONTAINER_PREFIX と PARTIAL_TAB、役割は 16 ビットで構文ごとに決まる（ブロックは 1–0x9F、インラインは 0x0100–0x01FF、エンジンは 0xFF00–0xFF0F と 0xFF10–0xFF1F）。
-  - 編集の記録は CONTENT、CHILDREN、DESCENDANTS、RELOCATED、CREATED。未知のビットは CONTENT として扱う。編集してもトークンは残る（設定はトークンを変えない）。テキストの一括設定は改行を softbreak にし、新しい子は CREATED。リテラルの改行は LF に揃えられる。
-  - 空行のトークンは、その空行を含む最も内側の開いているブロックが持つ。ブロックの間の空行が、深い子孫（入れ子のリストの最後の項目）に属することがある。遅延継続は長さ 0 の LAZY_CONTINUATION を接頭辞が省かれたコンテナが持つ。部分的なタブは、同じタブを複数のノードが列を分けて持つ。
-  - インラインでは、成立しなかった区切り文字とブラケットは text の `UNMATCHED`（0xFF11）の役割を持つ。softbreak は直前の行末の空白を自分のトークンとして引き取る。断片のパースで挿入したノードはトークンを持ち、RELOCATED になる。
-  - 比較（`amark_node_equal` と `AMARK_EQUAL_NORMALIZE_TEXT`）は、隣り合う text の分け方の違いを吸収する。プロパティテストの等しさの定義にそのまま使える。
-- **Implications**：
-  - ノードの扱いを「エンジンが元の表記をそのまま出す（verbatim）」「出力の処理を呼ぶ」の 2 つに分け、処理には編集の状態の印を渡す。元の表記をそのまま出せるのは、部分木が無編集で、周りの文脈も元のままのときに限る。
-  - 空行はブロックの間の「区切り」として、子の末尾の空行と親の空行のトークンをまとめて扱う。末尾の空行はトークンの種類（SPACE と LINE_ENDING だけの行）から一般的に求める。
+### 前の版の design を持ち込まない
+- **Context**：利用者の指示（旧設計を半分だけ引きずらない）。前の版は、構文トークンのヒープによる合流（MdSource）、行ごとの接頭辞の二分探索（MdLines）、編集の状態の印の表（`EDITED_LEAF`、`RELOCATED` など）、トークンの役割による帯の特定を使っていた。
+- **Findings**：新しいモデルでは、帯は行ごとの記録、中身は葉ごとの文字列、編集の状態は綴りの有無で表される。合流も接頭辞の探索も状態の印も要らない。
+- **Implications**：コンポーネントの名前（MdSource、MdLines）は roadmap の「作り直す」に合わせて残すが、中身はすべて新しい。MdSource は元の行の読み取り、MdLines は行の組み立てと帯の決定、状態の印の表は MdJudge の判断の表（UNIT、KEEP、REBUILD、NEW と中身の 4 種類）になる。
 
-### CommonMark の再パースで意味が変わる表記の境目
-- **Context**：要件 3.3–3.6。保守的なエスケープと区切りの選び直しの規則を決めるため。
-- **Sources Consulted**：CommonMark Spec 0.31.2（2.4 バックスラッシュのエスケープ、2.5 文字参照、4.1–4.10、5.1–5.3、6.1–6.9。特に 6.2 の flanking と 3 の倍数の規則、4.8 の段落の継続行の先頭の空白の除去、6.7–6.8 の改行）、cmark 0.31.1 の `inlines.c`、mdast-util-to-markdown（remark）の `unsafe` パターンと、強調の前後の文字を文字参照で表す手法
+### 上流の契約の読み取り
+- **Sources Consulted**：`include/amark/{node,document,value,spelling,extension}.h`、`.kiro/specs/syntax-tree/design.md`（Layout、Content、Verbatim、Facets）、`.kiro/specs/syntax-tree/tasks.md` の Implementation Notes、`tests/tree/msgstr_flow_test.c`、`INPUT.md` の 2.5、3.2、4.2–4.9、6.7、`.kiro/specs/{html-renderer,block-parser,inline-parser}/design.md`
 - **Findings**：
-  - バックスラッシュでエスケープできるのは ASCII の句読点だけ。それ以外の文字（空白、英数字）は数値文字参照で表せる。文字参照は flanking の判定では句読点（`&` と `;`）として働く。
-  - 段落の行頭と行末の空白、ATX の見出しの末尾の `#` の並び、行頭のブロックの構文（`#`、`>`、`-`、`+`、`*`、`=`、`` ` ``、`~`、`<`、数字と `.` / `)`、4 つ以上の空白）は、テキストの中身でも構文として解釈される。
-  - 強調は、区切りの並びが単一の役割（開くだけ、閉じるだけ）で、直接隣り合う並びの文字が違えば、構成的に元の構造になる。ただし元の文書には 3 の倍数の規則に頼る表記（`*foo**bar**baz*`）があり、この規則だけで判断すると無編集の強調まで書き換えてしまう。
-  - 短縮の参照リンク `[foo]` の直後の `(`・`[`、リンクの直前の `!`、行末の `\`、隣り合うコードスパンのバッククォートは、隣のノードとの組み合わせで意味が変わる。
-- **Implications**：
-  - エスケープは「構文セットが宣言する文字の和」を常にエスケープし（保守的な方式）、行頭・行末・区切り文字の隣だけを位置に依存して追加で保護する。
-  - 区切り文字は、元の文字と希望の文字で組んだ出力を `inline-parser` の照合で検証し、合わなければ構成的に安全な割り当て（隣と違う文字、単一の役割、隣のテキストの文字参照）へ落とす。
+  - 判定：`amark_node_spelling_state`（`has_spelling`、`complete`、`dropped_facets`、`structure_dropped`）、`amark_block_find_margin`、`amark_block_content_verbatim`（配置済みだけ）、`amark_node_verbatim`（祖先の帯は判定しない、キャッシュあり）、`amark_node_is_new`。
+  - 帯：PRESENT / LAZY と FIRST。LAZY の列は外側の帯の終わり。空行での項目の帯は長さ 0 の PRESENT。空行の持ち主は、その行を子に含まない一番内側のブロックの子を持てるブロック。
+  - 綴りを捨てた後の値は、設定では拒まれる値（`&#10;` の text、空の code）でもよい。書き手は正しく出力しなければならない（Implementation Notes 15.6、design の 6.13）。
+  - すべての綴りを捨てる操作は list の tight を上書きの値として写す（7.2）。記録した tight も上書きとして働く（12.3）。
+  - 使われずに残った区切り文字の text は DELIMITER のトークンと記録した literal を持ち、元の表記と判定される（10）。
+  - オートリンクに title を設定すると inline の形になるが、宛先のトークンは残る（11）。オートリンクの中では `\` は文字どおりなので、inline の形の宛先にバイトを写すと値が変わる。
+  - `block-parser` の記録の規約：段落の字下げは葉の SPACE、項目の FIRST の帯は記号と空白（後が空白だけなら空白なし）、HTML ブロックの中身は先頭の空白を含む、コードと HTML の中身は全体がトークンで覆われる、tight は記録しない。
+  - `inline-parser` の記録の規約：区切り文字は 1 文字ずつの DELIMITER、参照の形はラベルと形だけ、オートリンクの宛先は記録した値、ハードブレークの形、葉の先頭と末尾の空白は葉の SPACE。
+  - `html-renderer` の規約：2 種類のスロット、名前による型、構文セットの順の連鎖、`render_next`、拡張ごとの状態、`begin` 順・`end` と `finish` 逆順、2 つの入口、`render.h` の `amark_write_fn_t`、`gen_html_cases.cmake` の形式と `CHECK=`・`INCLUDE=`。
+
+### CommonMark の再パースで意味が変わる境目
+- **Sources Consulted**：CommonMark Spec 0.31.2（2.4、2.5、4.1–4.10、5.1–5.3、6.1–6.9）、cmark 0.31.1、mdast-util-to-markdown（remark）の unsafe のパターン
+- **Findings**：
+  - `\` でエスケープできるのは ASCII の句読点だけ。ほかの文字は数値の文字参照で表せる。文字参照は flanking の判定では句読点（`&` と `;`）として働く。
+  - 段落の行の端の空白は値から除かれ、行末の 2 つ以上の空白はハードブレークになる。段落と見出しの末尾の `\` と空白のハードブレークは成り立たない。
+  - 段落の最初の行で読まれうるブロックの構文と、続く行で段落を中断する構文（ATX、引用、フェンス、区切り線、HTML の種類 1–6、空でない箇条書き、`1.` の開き、setext の下線）は違う。遅延継続の行は setext の下線にならない。
+  - 空行があっても、同じ種類と記号のリストはつながる。リストの後の字下げした行は項目に取り込まれる。段落の後に空行なしで置いた段落、引用やリストの後の段落は遅延継続になる。
+  - 種類 6・7 の HTML ブロックは空行まで続き、種類 7 は段落を中断しない。リンク参照定義は段落を中断せず、定義の後の行は title として読まれうる。
+- **Implications**：エスケープは構文セットが宣言する文字の和で保守的に行い、行の端の空白は文字参照にする（エンジン）。行頭の保護は、最初の行と続く行で別の表にし、CommonMark の規則は `amark.core.markdown` のフィルタに置く（拡張は自分のフィルタで参加する）。ブロックの区切りは、新しい隣接には空行を置き、タイトな文脈では型ごとの `follow` で判断する。
 
 ### 他の実装の書き戻しの方式
-- **Context**：Build vs. Adopt と、方式の選択。
-- **Sources Consulted**：mdast-util-to-markdown（remark）、prettier の Markdown の出力、recast（JavaScript の変更部分だけを印刷し直す AST の書き戻し）、cmark の `commonmark.c`
-- **Findings**：
-  - cmark の `commonmark.c` と remark は木の全体を正規化して出力し、元の表記を保たない。remark はテキストの「unsafe」パターン（文脈つきの文字の並び）でエスケープし、強調の内側の端の空白を文字参照で表す。
-  - recast は、変更のないノードは元のソースの範囲をそのまま出し、変更のあるノードだけを印刷し直す。範囲の重なり（祖先の字下げ）は行単位で付け直す。
-  - どれも C のライブラリとして Amark のトークンと拡張の仕組みに合わせられないため、作る。考え方（unsafe パターン、文字参照による端の表し方、変更部分だけの印刷し直し、行単位の字下げの付け直し）を採る。
-- **Implications**：エンジンは recast の「変更のない部分はソースの範囲」と remark の「unsafe と文字参照」を組み合わせた形にする。
-
-### `html-renderer` のスロットの規約
-- **Context**：要件 9.1、9.3（スロットの形を揃える）。
-- **Sources Consulted**：`.kiro/specs/html-renderer/design.md`（HtmlApi、HtmlDispatch、HtmlEngine、Renderer slot conventions、CoreHtml の登録の規則）
-- **Findings**：ノード型ごとのスロットと前後のフックのスロットの 2 種類、名前でのノード型の指定、構文セットの順の連鎖と `render_next`、子の省略、拡張ごとの状態、`begin`（順）／`end`・`finish`（逆順）、不透明な文脈、バッファと書き出しの関数の 2 つの入口（`amark_write_fn_t` を `render.h` で共有）、`struct_size` と未知のビットの拒否、組み込みの出力は `amark.core.html` 1 つ、構築関数が `amark.core` の直後に足す。
-- **Implications**：同じ形で `AMARK_SLOT_MARKDOWN_NODE`（0x0401）と `AMARK_SLOT_MARKDOWN_HOOKS`（0x0402）を定義し、組み込みの出力を `amark.core.markdown` にまとめる。HTML の入れ子の出力とフィルタは、Markdown の要件にないので持たない（後で末尾に足せる）。Markdown に固有の文脈（接頭辞、空行の規則、エスケープ、区切り文字、保護）は文脈の API として足す。
+- **Sources Consulted**：mdast-util-to-markdown、prettier の Markdown、recast、cmark の `commonmark.c`
+- **Findings**：cmark と remark は木の全体を正規化する。recast は変更のないノードのソースの範囲をそのまま出し、行の字下げを付け直す。どれも C のライブラリとして、行 × 帯のモデルと拡張のスロットに合わせられない。
+- **Implications**：作る。考え方（変更のない部分は元の範囲、unsafe と文字参照、端の空白の文字参照、行の単位の帯の付け直し）を採る。
 
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
 |--------|-------------|-----------|---------------------|-------|
-| 全体の正規化（cmark 方式） | 木から常に正規の表記を作る | 単純 | 往復と局所性を満たせない | 不採用 |
-| 出力の検証つきの作り直し | 編集した部分を出力して再パースし、違えば別の表記を試す | 正しさを実行時に確かめられる | レンダラがパーサに依存し、断片の文脈（接頭辞、定義）の再現と計算量が重い | 検証はテストの受け入れ基準として使う（実行時には使わない） |
-| 構成的な作り直し＋境目の規則（採用） | 元の表記の再利用、作り直し、境目の規則（行、葉、ブロックの区切り）をエンジンにまとめる | パーサに依存しない。局所性を保てる。拡張も同じ規則に乗る | 規則の網羅をテストで確かめる必要がある | 強調だけはパーサの照合の純粋な関数で検証する |
+| 行の単位、ブロックごとの判断（採用） | ブロックを判断の表で分け、UNIT は元の行、それ以外は出力の処理が行を書く。帯はエンジンが行ごとに決める | INPUT.md の 4.9 の手順そのまま。帯の持ち主とコンテナの処理が分かれる | 帯の決定に深さの分の時間がかかる | 帯は出力に必ず要るので本質的 |
+| 部分木ごとに文字列を作って字下げを付け直す | 子の出力の文字列に親が接頭辞を付ける | 単純 | 元の帯（遅延継続、タブの分け合い）を行ごとに残せない。深さに比例する写し | 不採用 |
+| 全体を正規化して出力し、差分を元に戻す | 正規化の出力と元の行を比べる | 正規化の出力は簡単 | 局所性を保証できない | 不採用 |
 
 ## Design Decisions
 
-### Decision: 元の表記の出力はエンジン、作り直しは出力の処理
-- **Context**：要件 2、5、9.9。
+### Decision: 判断の表と UNIT の条件
+- **Context**：2.1、2.4、5.1。`amark_node_verbatim` は祖先の帯を判定しない。
 - **Alternatives Considered**：
-  1. すべてのノードで出力の処理を呼び、処理が元の表記を出すか決める
-  2. 無編集で文脈も元のままの部分木はエンジンがトークンをそのまま出し、それ以外だけ処理を呼ぶ
-- **Selected Approach**：2。処理を呼ぶときは編集の状態の印（トークンの有無、内容の編集、構造の編集、移動、汚れの印、新しい隣接、作り直す葉の中）を渡し、処理は `amark_markdown_write_verbatim` などで元の表記を使える。
-- **Rationale**：往復の保証が処理の正しさに依存しない。拡張が処理を持たなくても無編集なら往復できる。
-- **Trade-offs**：「文脈が元のまま」の判定をエンジンが持つ（新しい隣接、作り直す葉、汚れの印）。
+  1. `amark_node_verbatim` が真の部分木を常に元の行で出す
+  2. 祖先の枠がその行で元の帯を出せるときだけ UNIT にし、そうでなければ降りる
+- **Selected Approach**：2。UNIT の行は「祖先の帯 ＋ 元の行の c0 から行の終わり」で出し、c0 は一番内側の祖先の帯の終わりの列とする。項目の FIRST の帯は最初の出力の行でだけ使う。タイトな list の下で子の間の空行を持つ item は UNIT にしない。
+- **Rationale**：移したブロックは自分の綴りを保つが、移した先では遅延継続や行頭の解釈が変わりうる（INPUT.md 4.9 の 6）。降りれば、葉の中身の行がフィルタを通る。
+- **Trade-offs**：UNIT の確かめは行の数と深さの積に比例する。
+- **Follow-up**：scale_test で行の数と深さの積の比例を確かめる。
 
-### Decision: 出力の単位は行、接頭辞は「その行のコンテナのトークン」
-- **Context**：要件 8。
-- **Selected Approach**：エンジンが現在の行を、内容（断片）と元の行への対応（アンカー）とともにため、行の終わりに祖先のコンテナの接頭辞を外側から付ける。コンテナがアンカーの元の行に接頭辞のトークンを持てばそれを、持たなければ処理の `prefix` で合成する。最初の行のマーカーはコンテナの最初の出力の行にだけ使う。部分的なタブは、同じタブのすべての部分を元のまま出すときだけタブで、それ以外は列の数の空白にする。合成した接頭辞の後ろの列に依存するタブは、元の幅の空白にする。
-- **Rationale**：遅延継続、移動、部分的なタブ、マーカーの幅の変化を 1 つの規則で扱える。
-
-### Decision: 保守的なエスケープ（v1）
-- **Context**：要件 3.3、3.4、7.5、9.7。
+### Decision: 作り直しの単位は葉の中身。綴りの揃った自由な中身はそのまま出す
+- **Context**：5.2、5.4、6.1。`syntax-tree` の Q8 は「値を変えたノード自身だけの綴りを捨てる」とした。
 - **Alternatives Considered**：
-  1. 文脈を解析して必要最小限だけエスケープする
-  2. 構文セットが宣言する文字の和を、作り直す葉のテキストで常にエスケープし、位置に依存する保護（行頭、行末、区切りの隣、拡張の保護の要求）を足す
-- **Selected Approach**：2。作り直す葉では、編集していない text も同じ規則でエスケープし直す（元の ESCAPE / CHAR_REF / REPLACED のトークンは表し方を保つ）。
-- **Rationale**：作り直す葉の中で、素の記号が新しく構文を作る経路（成立しなかったブラケット、`<` と後ろのテキスト、リンクの外し）をまとめて断てる。判断はエンジンの 1 か所にあるので、後で必要最小限の方式へ変えても出力の処理は変わらない。
-- **Trade-offs**：編集した葉の中の、編集していないテキストにもバックスラッシュが増える（局所性は葉の単位）。翻訳の用途では葉の全体を置き換えることが多く、影響は小さい。
-- **Follow-up**：必要最小限のエスケープは、オプションのフラグで選べる形で後から足す。
+  1. 綴りの残るインラインのノードごとに元のバイトを出し、合成した部分とつなぐ
+  2. 中身を元の表記で出せないときは葉の中身の全体を作り直し、各インラインの出力の処理が綴りを使うかを決める。自由な中身で綴りが揃っていれば（msgstr）、中身のバイトをそのまま出す
+- **Selected Approach**：2。作り直しの中では、text のトークンもエスケープし直し、強調は区切り文字の並びとして選び直す。ESCAPE、CHAR_REF、REPLACED のバイトと、コードスパン・リンクの綴りは使えるときに使う。
+- **Rationale**：インラインの意味は葉の中の前後の文字と区切り文字の照合で決まるので、葉の中の 1 か所の変更が遠くの区切り文字の対を変えうる。葉の単位なら、エスケープと照合の確かめが葉の中で閉じる。msgstr の断片は同じ型の葉の中身としてパースされたので、そのバイトは同じ木を作る（行頭と定義だけはフィルタと作り直しの指定で守る）。
+- **Trade-offs**：編集した葉の中の編集していないテキストにも `\` が増えうる。翻訳の用途では葉の全体を置き換えるので影響は小さい。
 
-### Decision: 区切り文字は「希望の表記を照合で検証、だめなら構成的な割り当て」
-- **Context**：要件 3.5、5.3、6.5。
+### Decision: 保守的なエスケープと位置の保護、行頭の保護はフィルタ
+- **Context**：3.2、3.10、6.5、7.6、9.7。
+- **Selected Approach**：エンジンは、宣言された文字（`amark.core.markdown` が `amark_inline_special_chars` で宣言し、拡張が足す）の前に `\` を置き、LF と CR を文字参照にし、行の端の空白を文字参照にする。行頭のブロックの構文の保護は、`AMARK_SLOT_MARKDOWN_HOOKS` の `filter` として、中身の行（作り直した行、綴りの揃った自由な中身の行、移した行）に当てる。CommonMark の表は `amark.core.markdown`、GFM の表の区切りの行は GFM の部品が持つ。
+- **Rationale**：エスケープの方式は 1 か所（エンジン）にあり、後でオプションの選択肢を足しても出力の処理は変わらない。行頭の規則は構文ごとに違うので、拡張が参加できる形にする。
+- **Trade-offs**：HTML のフィルタ（出力のバイトの分類）とは意味が違う。スロットの形（`begin`、`end`、`finish`、`filter`、状態）は揃える。
+
+### Decision: エンジンから区切り文字の照合を呼ぶ
+- **Context**：3.4。`html-renderer` は `src/render/` から `src/parse/` を参照しない規則を置いた。
 - **Alternatives Considered**：
-  1. 構成的な規則だけ（隣と違う文字、単一の役割、隣のテキストの文字参照）
-  2. 出力側に照合を作り直す
-  3. `inline-parser` の照合を純粋な関数として公開し、それで検証する
-- **Selected Approach**：3 と 1 の組み合わせ。最初に元の文字と希望の文字で組み、照合で意図した対になるかを確かめる。合わなければ 1 で割り当て直して再び確かめる。照合を提供するフックがないときは 1 だけを使う。
-- **Rationale**：3 の倍数の規則に頼る無編集の強調を書き換えない（局所性）。構成的な割り当ては照合がなくても正しい。照合の規則を重複して実装しない。
-- **Trade-offs**：`inline-parser` の区切り文字の処理を、並びの配列の上の純粋な関数として切り出す上流の変更が要る。
+  1. エンジンが flanking と照合の規則を自分で持つ（重複する）
+  2. 区切り文字の決定を `amark.core.markdown` に置き、エンジンは仮の位置だけを持つ
+  3. エンジンが `inline.h` の公開の純粋な関数と区切り文字のスロットを読む
+- **Selected Approach**：3。区切り文字の文字ごとの規則は構文セットの区切り文字のスロットから取り、照合は `amark_inline_match_delimiters` で行う。`src/parse/` の内部ヘッダは使わない。
+- **Rationale**：steering は重複した実装を禁じる。2 では、拡張の区切り文字（取り消し線）が同じ確かめを使えない。上流（`inline-parser`）はこの関数を「書き戻しが使う純粋な関数」として公開し、`block-parser` の `scan.h` も「書き戻しが共有する走査の規則」としている。structure.md は parse と render を同じ層に置き、互いの公開 API の使用を禁じていない。
+- **Trade-offs**：`src/render/` が parse 層の公開 API に依存する。依存は純粋な関数とスロットの構造体の読み取りに限り、Allowed Dependencies に明記する（利用者の確認を待つ決定）。
 
-### Decision: ブロックの区切りは「元の隣接は元のまま、新しい隣接は空行と処理の判断」
-- **Context**：要件 3.6、5.2(c)。
-- **Selected Approach**：2 つのブロックが元の文書でも連続していた（どちらも元の位置で、間の行がトークンの空行だけ）なら元の区切りを出す。新しい隣接では、親の空行の規則（元のまま、なし、空行が要る）に従い、空行が許されれば少なくとも 1 つの空行を置く。空行が許されない（タイトなリスト）ときは、後ろのノードの処理の `can_follow` が真のときだけ空行なしで置き、偽なら表現できないと報告する。空行の後でも残る結合（同じ種類のリスト、インデントのコード、字下げの吸収、閉じていないフェンスと HTML ブロック）は、新しい隣接の印を受けた処理が表記を切り替えて避ける。
-- **Rationale**：元の隣接の判定を行の番号だけで行え、削除で生まれた隣接も検出できる。保守的に空行を置くので、ブロックの種類ごとの中断の表はタイトな文脈の `can_follow` に限られる。
+### Decision: ブロックの区切りとリストの空行
+- **Context**：3.6、3.9、4.1。
+- **Selected Approach**：
+  - 元の隣接（どちらも親の行の範囲の中にあり、間が親の空行だけ）は元の空行のまま。
+  - 新しい隣接は、間にある親の空行を出し、なければ空行を 1 つ合成する（保守的）。
+  - list の出力の処理が tight を読んで `set_spacing` を置く。TIGHT なら list と直下の item の子の間の空行を出さず、空行が要る隣接（`follow` が偽）は ADJACENT。LOOSE で出す空行がなければ最初の区切りに 1 つ足し、区切りがなければ ATTRIBUTE。
+  - 同じ種類のリストの隣接は、空行でも分けられないので記号を切り替える。リストの後のインデントのコードは fenced にし、移したブロックの字下げのトークンは書かない。
+- **Rationale**：tight の値（上書き、すべての綴りを捨てたときの写しを含む）を、空行の有無で保つ規則が `syntax-tree` の導出（list と直下の item の空行）と同じ範囲になる。
 
-### Decision: 文書全体の依存（リンク参照定義）はフックの事前の印付けで扱う
-- **Context**：要件 3.7、5.2(e)。
-- **Selected Approach**：`amark.core.markdown` のフックの `begin` が、文書に編集があるときだけ、定義の表（先勝ち）を作り、参照の形のリンクのラベルが同じ宛先とタイトルの定義に解決されるかを確かめる。解決されないリンクと、定義に編集があるときの `UNMATCHED` の `[` を含むテキストに汚れの印を付ける。汚れの印は祖先に伝わり、その葉は作り直しになる。
-- **Rationale**：非局所の依存を、拡張と同じ公開の仕組み（`amark_markdown_mark_dirty`）で表せる。脚注などの拡張も同じ方法を使える。
+### Decision: 定義の追加と編集では、残りのブラケットを持つ葉を作り直す
+- **Context**：3.8、6.5。参照の形のリンクは索引で解決されるので、定義の変更に追従する。逆に、リンクにならなかった `[foo]` のテキストは、新しい定義で再パースのときリンクになりうる。
+- **Selected Approach**：`amark.core.markdown` の `begin` のフックで、文書の link_definition のどれかが元の表記で出せなければ、ブラケットの残りのテキストを持つ葉を `force_rebuild` で指定する。作り直しでは残りのブラケットがエスケープされる。
+- **Rationale**：ラベルの照合をせずに安全側に倒せる。定義の編集はまれで、影響は残りのブラケットを持つ葉に限る。
+- **Trade-offs**：新しい定義のラベルと関係のない葉も作り直す。後で正規化したラベルで絞れる。
 
-### Decision: 表現できない木は専用のエラーコードと報告で知らせる
-- **Context**：要件 4。
-- **Selected Approach**：`foundation` のエラーコードの末尾に `AMARK_ERROR_UNREPRESENTABLE` を足す（上流の変更）。理由とノードは、オプションの `report` のポインタに書く。入口の形は `html-renderer` と同じに保つ。
-- **Rationale**：引数の誤りと区別でき、利用者が分岐しやすい。報告をオプションに置けば入口の形を揃えられる。
+### Decision: 定義で解決できない参照の形のリンクは表現できない
+- **Context**：3.7、4.1。定義を消すと、参照の形のリンクの宛先は UNRESOLVED になる。そのまま書くと再パースでテキストになる。
+- **Alternatives Considered**：
+  1. UNRESOLVED のリンクを空の宛先の inline の形（`[a]()`）で書く（HTML の出力は同じ）
+  2. 表現できない（UNRESOLVED）と報告する
+- **Selected Approach**：2。
+- **Rationale**：1 は値（UNRESOLVED と空の文字列）が変わり、意味の比較で等しくならない。利用者は、定義を消す前にリンクを inline の形にするか、テキストに置き換えられる。
+- **Follow-up**：利用者の確認を待つ決定。1 を選ぶならオプションの印で足せる。
 
-### Decision: GFM 相当の拡張の Markdown の部品はテストの中に置く
-- **Context**：要件 10、brief の Existing Spec Touchpoints。
-- **Selected Approach**：`tests/markdown/support/gfm_md_ext.{h,c}`（INTERFACE ライブラリ `amark_test_md_gfm`）に、表、取り消し線、タスク項目、脚注の Markdown のスロットと、拡張オートリンクと表の区切りの行の保護のフックを置く。`inline-parser` の `tests/extensions/gfm_set.c` がそれを構文セットに加える。
-- **Rationale**：HTML（`tests/html/support`）、ブロックのパース（`tests/parse`）、インライン（`tests/extensions`）と同じく、部品を所有する spec のテストに置く。
+### Decision: スロットの形
+- **Context**：9.1、9.8。
+- **Selected Approach**：ノード型ごとのスロットは `{base, node_type, write, margin, follow, user_data}`、前後のフックのスロットは HTML と同じ `{base, state_size, begin, end, finish, filter, user_data}`。`write` は連鎖し `write_next` で前を呼ぶ。`margin` と `follow` は持つものの最後を使い、連鎖しない。入れ子の出力（HTML の `render_subtree`）は要件がないので持たず、子の葉の中身は `prepare_content` で書ける。
+- **Rationale**：HTML の規約（2 種類、名前、連鎖、状態、入口）を揃え、Markdown に固有のもの（帯、隣接）を任意の関数として足す。`html-renderer` の design も「固有の文脈は各レンダラが足す」としている。
+- **Trade-offs**：ノード型のスロットのフィールドは HTML と同じではない（`render_plain` の代わりに `margin` と `follow`）。
+
+### Decision: 表現できない木の報告はオプションの報告先
+- **Context**：4.1–4.4。
+- **Selected Approach**：`foundation` の `AMARK_ERROR_UNREPRESENTABLE` を返し、`options->report` があれば最初の報告のノードと分類を書く。分類は開いた集合（`0x100` から拡張）。
+- **Rationale**：入口の形を HTML と揃えたまま、原因を利用者に渡せる。
+
+### Decision: GFM 相当の部品の置き場所と、拡張オートリンクの保護
+- **Context**：11.1–11.4。
+- **Selected Approach**：`tests/markdown/support/gfm_md_ext.{h,c}`（INTERFACE、Naos なし）。型は登録せず、HTML の部品とインラインの部品の記述子を参照する。`amark_test_gfm_set_create` の末尾で足す（`inline-parser` の拡張点）。拡張オートリンクとして検出されうるテキストは、最初の文字を文字参照にして検出を避ける（text のスロットの連鎖）。
+- **Rationale**：text が再パースで `test.ext_autolink` になると意味が変わる。連鎖の `write_next` の使い方の検証にもなる。
 
 ## Design Synthesis
+- **Generalization**：帯の決定は、引用、項目、脚注の定義、拡張のコンテナの 1 つの規則（元の帯、遅延継続、FIRST、合成の関数）である。強調、強い強調、取り消し線は、区切り文字の並びの 1 つの仕組み（候補の文字、照合の確かめ）である。行頭の保護は、中身の行のフィルタの 1 つの仕組みである。
+- **Build vs. Adopt**：既存の書き戻しのライブラリは採らない（C でない、モデルが違う）。照合、文字の宣言、HTML とリンクの部品の判定は上流の関数を使う。
+- **Simplification**：入れ子の出力、出力のバイトの分類つきのフィルタ、必要最小限のエスケープは持たない。ブロックの区切りは保守的に空行を置き、`follow` はタイトな文脈でだけ使う。定義の確かめはラベルで絞らない。
 
-### Generalization
-- 接頭辞の付け直し、遅延継続、移動、部分的なタブ、マーカーの幅の変化を、「行のアンカーと、その元の行のコンテナのトークン」の 1 つの規則にまとめた。
-- テキストのエスケープ、行頭のブロックの構文、行頭と行末の空白、ATX の末尾の `#`、表のセルの `|`、拡張オートリンク、短縮の参照リンクの後ろを、「テキストの文字の保護」と「保護の要求」（エンジンの規則、葉の指定、フックの検出、次の文字の要求）にまとめた。
-- リンク参照定義と脚注の定義の依存を、`begin` の汚れの印にまとめた。
+## Consulted skills
+- `kiro-spec-requirements`（ears-format、requirements-review-gate）、`kiro-spec-design`（design-principles、design-discovery-light と full の考え方、design-synthesis、design-review-gate）、`kiro-validate-design`（design-review）、`kiro-spec-tasks`（tasks-generation、tasks-parallel-analysis）の規則を読み、その手順に従った。対話の確認はできないため、推奨の選択肢を選び、ここと最終の報告に記録した。
 
-### Build vs. Adopt
-- 再パースによる実行時の検証は採らず、プロパティテストで同じ検証を行う。照合だけは `inline-parser` の純粋な関数を使う（規則を重複させない）。HTML のリテラルの妥当性も上流の走査の関数を使う。
+## 要件のレビュー（Requirements Review Gate、2026-11-27）
+- 機械的な確かめ：13 の要件、79 の受け入れ基準。見出しはすべて数字の ID、すべての基準が EARS の形。技術の名前は Markdown と CommonMark の概念だけ。
+- 判断：往復、意味の保存、表現できない木、局所性、msgstr、新しいノード、帯、スロット、組み込み、GFM、プロパティテスト、規約を覆う。1 回目で合格。
 
-### Simplification
-- HTML の入れ子の出力とフィルタは持たない。エスケープの方式は 1 つだけ。新しいノードの表記はオプションの値と、ノード自身のトークンだけから決める（周りの文書から推定しない）。オートリンクと拡張オートリンクは、編集したら常にインラインのリンクの形にする。
+## 設計のレビュー（Design Review Gate、2026-11-27）
+- 1 回目：機械的な確かめ（79 の ID がすべて design にある、境界の節、File Structure Plan、部品とファイルの対応）は合格。判断で次を直した。
+  - MdJudge が MdLines の枠に問い合わせる形が、依存の向き（judge → lines）に反していた。→ 「元の帯を出せる」の判定を MdJudge に置き、MdLines がそれを使う形にした。
+  - 遅延継続の帯の条件が UNIT の行に当てはまるかが書かれていなかった。→ UNIT の行では常に成り立つと書いた。
+  - 組み込みの `follow` の規則（引用の後の段落、リストの後、定義の後、HTML の種類 6・7、閉じのないフェンス）が不正確だった。→ 表を直し、共通の規則を足した。
+  - 項目の続く行の幅（記号だけの FIRST の帯）、タイトな list の下の UNIT の item、LOOSE の空行の数え方、定義の確かめの条件（UNIT は文脈によるので `amark_node_verbatim` にする）、`commonmark.h` の役割の番号の依存を直した。
+- 2 回目：合格。
+
+## 設計の検証（`/kiro-validate-design`、2026-11-27、inline）
+- **Review Summary**：境界、依存の向き、判断の表、行の組み立てが、上流（`syntax-tree` の実装と Implementation Notes、改訂した `html-renderer`、`block-parser`、`inline-parser` の design）と一致し、79 の受け入れ基準すべてが部品と契約に対応している。msgstr の流れ（`tests/tree/msgstr_flow_test.c` の木）を設計の規則でたどり、`> - いち *に さん* よん\n> - five\n` になることを確かめた。次の 2 つをレビューの中で design に直した。
+- **Issue 1（直した）**：出力の根がインラインのノードのときの出力が書かれていなかった（1.1 の「木の途中のノード」）。→ MdEngine に「インラインの根」の規則（元のバイトか作り直し、帯なし、既定の改行）を足し、render_entry のテストに足した。
+- **Issue 2（直した）**：作り直した中身に空の行（続く 2 つのソフトブレーク、中身の端の改行、フィルタが渡さなかった行）ができると、再パースで段落が切れる。表には最初と最後の改行しかなかった（3.1、4.1）。→ MdContent に「空の行」の規則（NESTING）を足し、softbreak と linebreak の行とフィルタの説明をそれに合わせた。
+- **Design Strengths**：元の帯の決定を「部分木が元の表記で出せる」と「祖先が元の帯を出せる」に分けたので、移動、帯を捨てたコンテナ、項目の記号の行、遅延継続が 1 つの規則で扱える。区切り文字と行頭の保護が、上流の純粋な関数と拡張のフィルタに乗り、規則を重複しない。
+- **Final Assessment**：GO。エンジンから parse 層の公開の純粋な関数を呼ぶこと、解決できない参照の形のリンクを表現できないとすることは、利用者の確認を待つ決定として残す。
 
 ## Risks & Mitigations
-- 境目の規則の漏れ（意味が変わる出力）— 構文トークンを取り除いた木の作り直しと、編集の手順のプロパティテストを spec.txt の全例・コーパス・ファジングで回し、再パースの比較を受け入れ基準にする。
-- 保守的なエスケープで、編集した葉のバックスラッシュが増える — エスケープの判断をエンジンにまとめ、後で必要最小限の方式を足せるようにする。
-- 区切り文字の構成的な割り当てで文字参照が増える（`&#111;`）— 照合による検証で、元の表記が成り立つときはそれを保つ。
-- 上流の変更（エラーコード、走査と照合の公開、テキストの走査の規則）が遅れる — 統合の節に明記し、この spec の実装の前に上流の spec を更新する。
-
-## Revision Notes
-
-### 2026-11-25：上流の spec による依頼の取り込み（この spec の承認後）
-- **Context**：design の Integration & Upstream Changes の依頼は、それぞれの上流の spec に反映された。この spec の承認済みの要件・設計・タスクの意図は変えず、取り込まれた形に記述を合わせた。
-- **`foundation`**：`AMARK_ERROR_UNREPRESENTABLE = 6` と `amark_error_string` の文字列が取り込まれた（`foundation` の要件 10.9、タスク 2.1、Downstream Extension Points）。
-- **`block-parser`**：`scan.h` のバイト列の HTML ブロックの開始と終わりの条件とタグの走査（`block-parser` の 7.7、7.8）と、構築関数の出力の core 拡張の一覧への `amark.core.markdown` の 1 行（この spec のタスク 3.7 が足す）が取り込まれた。
-- **`inline-parser`**：
-  - `amark_inline_delimiter_flanks` と `amark_inline_match_delimiters`（5.7）。取り込まれた形では `amark_inline_run_t` が `max_run_length` ではなく `use_mask` を持ち、`capacity` は「長さの合計の半分（切り捨て）以上」になった。この spec の `amark_markdown_run(_match)_t` は形を変えず、対応の表を MdDispatch に置いた（下の 13）。
-  - raw HTML のバイト列の走査（7.7）。`inline-parser` の改訂で名前が `amark_scan_raw_html` から `bool amark_inline_scan_raw_html(const char *data, size_t length, size_t *out_end)`（`inline.h`）に決まったので、design の html_inline の行と Integration をその名前にした。
-  - テキストの走査の採否の規則（4.5）。
-  - `gen_examples.cmake` の `CHECK=` と `amark_test_example_check_fn_t`（14.4。`inline-parser` のタスク 1.4）。`CHECK=` の所有と実装は `inline-parser` にある。
-  - `gfm_set.c` の部品の並びは 1 つの配列で、Markdown の部品を加える編集だけをこの spec のタスク 4.2 が行う。
-
-### 2026-11-25：spec 間のレビュー（1 回目）の反映
-- **Context**：全 spec を横断したレビューで、この spec に関わる 6 つの指摘（1、2、6、7、10、13）があった。承認は保ち、要件の Adjacent expectations、design、タスクを更新した。
-- **1. ファジングと Naos**：`-DAMARK_FUZZ=ON -DAMARK_BUILD_TESTS=OFF` で、ファジングのターゲットがリンクする `amark_test_md` が Naos を引き込んでいた。`foundation` が「ファジングのターゲットがリンクするテストの補助は Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義される」規則を定めたので、検査の本体（判定を状態と説明で返す。`amark_test_md`）と Naos の検査（`amark_test_md_check`：作り直し、生成テストの検査の関数、`AMARK_CHECK_MD`）に分けた。`amark_test_md` は `AMARK_CHECK_TREE_DUMP` を宣言する `amark_test_tree` にもリンクしない。`amark_test_md_gfm` も Naos に依存しない（`amark_test_gfm` を通じてリンクされる）。タスク 1.3、4.1、5.5 に反映した。
-- **2. 所有の整理**：`tests/support/gen_examples.cmake` の `CHECK=` は `inline-parser` のタスク 1.4 が所有するので、Modified Files から外した。Upstream の `inline-parser` の 4 は、この spec が上流のファイルに行う編集が `gfm_set.c` と `tests/extensions/CMakeLists.txt` だけであると書き直した。この Revision Notes を加えた。
-- **6. 拡張オートリンクの局所性**：`test.inline.autolink` の link はブラケットも括弧のトークンも持たず、長さ 0 の `TEXT` だけを持つ。CoreMarkdown の `begin` は `LINK_PAREN_OPEN` のない link をすべて短縮の参照とみなしていたので、定義を編集すると無編集の拡張オートリンクに汚れの印が付き、局所性が崩れた。参照の形を「`LINK_REF_*` を持つか、`LINK_OPEN` を持ち `LINK_PAREN_OPEN` を持たない」に限り、ブラケットと括弧のトークンを持たない link を拡張の定めた形として無編集なら元の表記で出す。`inline-parser` が `gfm_inline_ext.h` に公開する拡張オートリンクの役割の定数 `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK`（0x0E50u）で、`amark_test_md_gfm` の `link` の処理が明示的に扱う。組み込みのリンクと画像は必ず `LINK_OPEN` と `LINK_CLOSE` を持ち（短縮の参照はその 2 つだけ）、拡張の定めたリンクは `LINK_OPEN`・`LINK_PAREN_*`・`LINK_REF_*` をどれも持たない（`inline-parser` の確定）ので、分類は役割だけで曖昧なく決まる。`amark_test_gfm` は Naos に依存せず、Naos の補助は `amark_test_gfm_check` に分かれた。拡張の型を知らないエンジンの規則（トークンの役割による分類）に一般化したので、他の拡張の link も同じ扱いになる。
-- **7. `amark.h`**：`foundation` が正準の順を 1 つ定めたので、「`html.h` の後」ではなく「正準の順に従い、`markdown.h` を最後」と書いた。
-- **10. 生成の手順の重複**：`gen_md_cases.cmake` は `html-renderer` の `gen_html_cases.cmake` の形式を作り直すものだった。`html-renderer` が共有の契約（`### name [options]`、S 式、`---`、期待する出力、`===`。オプションは解釈せず 1 つの文字列。ARGS `CHECK=`、`INCLUDE=`。`CHECK(name, options, sexpr, sexpr_length, expected, expected_length)`）を定めたので、`gen_md_cases.cmake` を削り、`CHECK=amark_test_md_check_case INCLUDE=md_check.h` で再利用する。検査の関数が未知のオプションを拒否する。spec.txt の版と SHA-256 は `inline-parser` の `tests/spec/spec_version.cmake` を include して同じ規則で照合・スキップし、この spec で持たない。
-- **13. 照合の対応**：`amark_markdown_run(_match)_t` と `amark_inline_run(_match)_t` は別の型で、上限の表し方（`max_run_length` と `use_mask`）と `capacity` の規則が違う。MdDispatch に要素ごとの対応の表（添字・`struct_size`・`rule` の値・上限から `use_mask` への変換・照合の結果の写し）と、`capacity`（エンジンは長さの合計以上を渡し、上流の半分以上の要求を満たす）・作業の配列（グローバルのアロケータ、状態に持って使い回し `finish` で解放）・失敗の規則を書いた。`amark_markdown_run_t` の公開の形は変えない（拡張が別の照合を提供できる形を保つ）。
-- **Implications**：Revalidation Triggers に、`amark_inline_run(_match)_t` の形と `capacity`、拡張オートリンクの役割の定数、`gen_html_cases.cmake` の契約、`spec_version.cmake`、`foundation` の `amark.h` の順とファジングの規則、`amark_test_md`・`amark_test_md_gfm` が Naos に依存しないことを加えた。
-
-### 2026-11-25：spec 間のレビュー（2 回目、cross-spec review r2）の反映
-- `tests/support/gen_examples.cmake` の所有の記述を直した：ファイルと基本の契約は `block-parser` が所有し、`inline-parser` は `EXPECT=html`・`FACTORY=`・`CHECK=` の追加だけを所有する（design の Allowed Dependencies と File Structure Plan の該当箇所）。この spec は引き続きこのファイルを編集しない。承認の状態は変えない。
-
-### 2026-11-25：内部ヘッダの命名の規則の変更（steering の更新の反映）
-- **Context**：steering（structure.md）の規則を、「内部ヘッダにはすべて `_internal.h` を付ける」から「内部ヘッダは原則として接尾辞を付けず、同じ名前の公開ヘッダがあるときだけ `_internal.h` を付ける」に改めた。公開ヘッダとは置き場所（`include/amark/` と `src/`）と include の書き方で区別できるため。
-- **変更**：`src/syntax/md_core_internal.h` を `src/syntax/md_core.h` に改名した（File Structure Plan、フックの記述）。同じ名前の公開ヘッダがある内部ヘッダ（`base/allocator_internal.h`、`base/buffer_internal.h`、`parse/inline_internal.h`、`render/html_internal.h`、`render/markdown_internal.h`）は名前を変えない。
-- **Implications**：ファイル名だけの変更で、API・要件・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：スロットの種類の番号を、`syntax-tree` の通し番号の一覧に合わせる
-- **Context**：スロットの種類の番号は、各 spec の design を別々に書いていた段階で衝突を防ぐため、spec ごとに 256 ずつの範囲（`0x0100`–`0x04FF`）を割り当て、利用者の範囲を `0x10000` 以上としていた。全 spec の design が揃い、Amark の種類は 14 個に確定した。種類は 1 つの公開ヘッダ（`extension.h`）の 1 か所で管理するので、範囲の区切りがなくても、一覧への追記で衝突を防げる。範囲と桁は必要に対して過剰だった。`syntax-tree` が要件 8.13 を改め、spec ごとの範囲をやめて通し番号の一覧にした。
-- **変更**：この spec のスロットの種類の番号を、一覧で割り当てた 13–14 に置き換えた。範囲の注記は削除した。種類の名前と構造体は変えない。
-- **Implications**：番号の値と記述だけの変更で、この spec の要件・API の形・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-25：スロットの基底の型の改名（`syntax-tree`）に合わせる
-- **Context**：スロットの基底の型 `amark_slot_header_t`（メンバー名 `header`）は、API の上で受け渡すもの（拡張の `slots`、`amark_syntax_set_slot_at` の戻り値）が「スロットそのもの」なのに「スロットのヘッダ」と読める名前だった。また日本語の文書では「スロットの見出し」と訳しており、ノード型の heading の「見出し」やヘッダファイルと紛れた。`syntax-tree` が型を `amark_slot_t` に改名した。
-- **変更**：この spec のスロットの構造体の先頭のメンバーを `amark_slot_header_t header` から `amark_slot_t base` にし、型の名前と「スロットの見出し」という記述を合わせた。構造体の形と API の振る舞いは変えない。
-- **Implications**：名前だけの変更で、要件・タスクの範囲は変わらない。承認は維持する。
-
-### 2026-11-26：定数の集合の分類を規約にそろえる
-- **Context**：全 spec の定数の集合を、開いた集合（`uint32_t` と `#define` の連番）、ビットの印、閉じた選択肢（`typedef enum`）の 3 つに分類し直した（steering の tech.md の規約）。この spec では 2 つが規約と食い違っていた。
-- **`amark_markdown_problem_t` を `#define` にする**：問題の種類は `AMARK_MARKDOWN_PROBLEM_EXTENSION_FIRST`（0x100）以上を拡張が定める開いた集合で、報告の `problem` と `amark_markdown_fail` の引数はすでに `uint32_t` だった。開いた集合に enum 型を作ると、型の値の範囲が閉じているように読め、拡張の値を enum 型の変数に入れることになる。同じ名前と値の `#define`（`u` 付き）にし、型の名前 `amark_markdown_problem_t` をなくした。値と使い方（比較、`switch` の `case`）は変わらない。
-- **`AMARK_MARKDOWN_BYTE_*` を enum にする**：バイトの分類（`TEXT`、`FIXED`、`MARKUP`、`DELIMITER`）は 1 つのバイトが 1 つだけを持つ閉じた集合で、`#define` の連番だった。`typedef enum amark_markdown_byte_kind`（値は同じ 1–4）にした。`amark_markdown_line_t` の `kinds` は 1 バイトずつ詰めて持つため `const unsigned char *` のままとする（`syntax-tree` の内部のトークンの記録が `uint8_t kind` で enum の値を持つのと同じ）。
-- **変えないもの**：`amark_markdown_delimiter_t` の `uint32_t rule` は `inline-parser` の閉じた enum `amark_delimiter_rule_t` の値を持つが、`src/render/` と `markdown.h` は `inline.h` を include しないレイヤーの規則があるため、型を使わずに整数で受け取る。`AMARK_MARKDOWN_STATE_*`、`AMARK_MARKDOWN_INLINE_*`、`AMARK_MARKDOWN_ENCODE_*`、`AMARK_MARKDOWN_LINE_*`、`AMARK_MARKDOWN_VERBATIM_NO_INDENT` は組み合わせるビットの印で、正しい。
-- **Implications**：要件・タスクの範囲は変わらない。承認は維持する。
+- 行頭の保護とブロックの区切りの規則の漏れで、意味の保存が破れる — spec の全例のプロパティテスト、コーパス、ファジングで見つけ、表に足す。
+- 区切り文字の決定が収束しない並び — 候補と文字参照の直し直しの回数を並びごとに有界にし、合わなければ報告する。
+- 判断と帯の決定の時間が深さに比例して増える — scale_test で測る。必要なら枠ごとの帯の検索を行の順の走査に変える。
+- `src/render/` から parse 層の公開 API への依存 — 純粋な関数とスロットの構造体に限り、レビューで確かめる。利用者が拒めば、照合を `syntax-tree` か共通の層へ移す改訂を上流に求める。
 
 ## References
-- [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — エスケープ、文字参照、ブロックの構造、flanking と照合の規則
-- [cmark](https://github.com/commonmark/cmark) — `inlines.c`（照合）、`commonmark.c`（正規化した書き戻し）
-- [mdast-util-to-markdown](https://github.com/syntax-tree/mdast-util-to-markdown) — unsafe パターンと文字参照による端の表し方
-- [recast](https://github.com/benjamn/recast) — 変更部分だけを印刷し直す書き戻し
-- `.kiro/specs/syntax-tree/design.md`、`.kiro/specs/block-parser/design.md`、`.kiro/specs/inline-parser/design.md`、`.kiro/specs/html-renderer/design.md`
+- [CommonMark Spec 0.31.2](https://spec.commonmark.org/0.31.2/) — 再パースの規則の基準
+- [cmark](https://github.com/commonmark/cmark) — 参照実装（参照のみ）
+- [mdast-util-to-markdown](https://github.com/syntax-tree/mdast-util-to-markdown) — unsafe のパターンと文字参照による端の表し方（考え方のみ）
+- [recast](https://github.com/benjamn/recast) — 変更のない部分のソースの範囲を出す書き戻し（考え方のみ）
+- [GitHub Flavored Markdown Spec](https://github.github.com/gfm/) — 検証用の部品の入力の参考
+
+## タスクの計画のレビュー（`/kiro-spec-tasks`、2026-11-27）
+- **Task Plan Review Gate**：79 の受け入れ基準すべてがタスクに対応し、design の部品（MdEscape、MdOutput、MdDispatch、MdSource、MdJudge、MdLines、MdContent、MdEngine、CoreMarkdown、MdTestSupport、MdEdits、GfmMdExt、MdTests、MdFuzz）、変更するファイル、テストのファイルがすべてタスクにある。1 回目で合格。
+- **Task-graph sanity review**：mode は inline（このセッションには新しいレビュー用のサブエージェントを起こす道具がない）。
+  - 1 回目：NEEDS_FIXES。(1) 2.6 の「処理のない型の葉の既定」が、後の 2.8 の中身の行の出力を前提にしていた。(2) 前提の注記が「2.4–2.8 は `syntax-tree` だけで確かめられる」としていたが、2.3 以降は `inline.h` が要る。(3) 3.7 のケースの語 `gfm` が、5.2 の GFM 相当の構文セットを前提にしていた。(4) 3 のテストの構文セット（構築関数に `amark.core.markdown` が入る 4.1 より前）が書かれていなかった。(5) 4.1 が、構築関数の変更とスロット・文脈・オプションの契約のテストを 1 つにしていて大きすぎた。
+  - 直したこと：葉の既定を 2.8 に移した。前提の注記を書き直した。`gfm` の語を 5.2 に移した。3.1 にテストの補助の構文セットを足した。4.1 を構築関数の統合（4.1）と契約のテスト（4.2）に分け、番号と `_Depends:_` を直した。
+  - 2 回目：PASS。
+- 並列の印は 6.3（ファジング。`fuzz/` だけを変える）だけに付けた。2 と 3 のタスクは `md_internal.h`、ソースの一覧、テストの登録を共有するので並列にしない。

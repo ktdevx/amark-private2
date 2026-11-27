@@ -1,210 +1,234 @@
 # Design Document: markdown-renderer
 
 ## Overview
-**Purpose**：`markdown-renderer` は、Amark の利用者に、`syntax-tree` の構文木（パースしたもの、編集したもの、手で組み立てたもの）を Markdown に書き戻す手段を提供する。編集していない部分は構文トークンから元の表記をバイト単位で出し、編集した部分は、周りの元の表記と組み合わさっても編集後の木と同じ意味に再パースされるように作り直す。どの表記でも表せない木は、専用のエラーコードと理由で報告する。
+**Purpose**：`markdown-renderer` は、`syntax-tree` の構文木（パースしたもの、編集したもの、手で組み立てたもの）を Markdown に書き戻す手段を、利用者と拡張の実装者に提供する。書き戻しは行の単位で進める。各出力の行で、祖先の帯、空行、葉自身の表記、中身を並べ、元の表記が残る部分は元のバイトを、残らない部分は style と値から合成したバイトを出す。どの部分に元の表記が残るかは、`syntax-tree` の問い合わせ（綴りの状態、帯の検索、中身と部分木を元の表記で出せるか、新しいノードか）だけで決め、編集の記録は使わない。
 
-**Users**：利用者（翻訳、リンクの書き換え、文書の生成のツールの開発者）は、出力の入口と、新しいノードの表記のオプションを使う。拡張の実装者は、ノード型ごとの Markdown 出力のスロット、前後のフック、出力の文脈（元の表記の出力、エスケープつきの書き出し、区切り文字、接頭辞、ブロックの区切りの規則、保護の要求、汚れの印）を使う。`block-parser` の CommonMark の構文セットの構築関数は、組み込みの出力の構文拡張 `amark.core.markdown` を `amark.core.html` の直後に加える。
+**Users**：
+- 利用者（翻訳、po との相互変換、リンクの書き換えなどの編集ツールの開発者）は、出力の入口、新しいノードの表記のオプション、表現できない木の報告を使う。主な流れは msgstr の差し込みである。原文の段落の中身を、インラインの断片のパースで作った自由な中身と置き換え（`amark_block_replace_content`）、書き戻す。
+- 拡張の実装者は、ノード型ごとの出力のスロット（種類 13）、前後のフックと中身の行のフィルタ（種類 14）、出力の文脈の API を使う。
+- `block-parser` の CommonMark の構文セットの構築関数は `amark.core.markdown` を含め、`inline-parser` の GFM 相当の構文セットの補助は、この spec の検証用の部品を含める。
 
-**Impact**：公開ヘッダ `markdown.h`、`extension.h` へのスロットの種類の番号の追記、`src/render/` の Markdown のエンジン、`src/syntax/` の `amark.core.markdown`、`tests/markdown/`、2 つのファジングのターゲットを追加する。上流には、エラーコードの追加（`foundation`）、走査と照合の関数の公開とテキストの走査の規則の追加（`block-parser`、`inline-parser`）を求める（Integration & Upstream Changes）。
+**Impact**：公開ヘッダ `markdown.h`、`src/render/` の Markdown のエンジン、`src/syntax/` の組み込みの Markdown 出力の構文拡張 `amark.core.markdown`、`tests/markdown/`、`fuzz/markdown_render_fuzz.c` を新しく作る。`block-parser` と `inline-parser` の拡張点に追記する。`syntax-tree`、`html-renderer`、`block-parser`、`inline-parser` の公開 API には何も足さない。前の版の design（構文トークンのヒープによる合流の MdSource、接頭辞の探索の MdLines、編集の状態の印の表）は引き継がない（research.md の「前の版の design を持ち込まない」）。
 
 ### Goals
-- 構文トークンが全バイトを覆う無編集の文書を、タブ、CRLF、行末の空白、遅延継続、NUL、BOM を含めてバイト単位で同じに書き戻す。
-- 編集した木の出力を再パースすると、編集後の木と `amark_node_equal(…, AMARK_EQUAL_NORMALIZE_TEXT)` で等しい。表せない木は `AMARK_ERROR_UNREPRESENTABLE` と理由で報告し、パースで作った木は報告しない。
-- 出力の変化を、編集したノード、それを含む葉、区切りと隣のブロックの最小の変更、作り直した行の接頭辞、意味が編集に依存するノードに限る。
-- エンジンは個別のノード型を知らず、組み込みの出力も拡張の出力も同じ公開のスロットと文脈で書かれる。エスケープと区切り文字の判断はエンジンにまとめ、後で方式を改善しても出力の処理を変えずに済む。
+- 無編集の文書の根を出力すると、入力とバイト単位で同じになる（BOM、タブ、改行の種類、遅延継続、NUL を含む）。根拠は `amark_node_verbatim` の判定だけである。
+- 編集した木の出力を同じ構文セットで再パースすると、`amark_node_equal(AMARK_EQUAL_NORMALIZE_TEXT)` で編集後の木と等しい。表せない木は `AMARK_ERROR_UNREPRESENTABLE` と報告で知らせる。
+- 元の表記で出せる部分木の行は、祖先の帯が元のまま出せる限り、元の行のまま出る。作り直すのは編集した葉の中身と、その前後の区切りだけである。
+- msgstr の差し込みで、置き換えた段落は祖先の元の帯（i 行目は元の i 行目の帯）と翻訳者のバイトで出る。
+- エンジンは個別のノード型を知らず、組み込みの 19 の型も拡張と同じ公開のスロットで出力する。
+- 深さ 10 万の木を、スタックを深さに比例して使わずに出力する。
 
 ### Non-Goals
-- 必要最小限のエスケープ、周りの文書からの表記の推定、フォーマッタとしての整形（後の改善。オプションのフラグとフィールドを末尾に足して選べるようにする）
-- パース、断片のパースと挿入（`block-parser`）、HTML の出力（`html-renderer`）
-- HTML の出力にある入れ子の出力とフィルタ（Markdown の要件にない。必要になればスロットとフックの構造体の末尾に足す）
-- 出力を実行時に再パースして検証すること（検証はプロパティテストで行う）
+- 整形（編集していない部分の正規化）、必要最小限のエスケープ（オプションの選択肢を後で足す）
+- パース、断片のパース、中身の置き換えの操作（`block-parser`、`inline-parser`、`syntax-tree`）
+- 値の導出、参照の解決、タイトの導出、元の表記の判定（`syntax-tree`）
+- 入れ子の出力（`html-renderer` の `render_subtree` に当たるもの）。要件がないので持たない（後で足せる）
 
 ## Boundary Commitments
 
 ### This Spec Owns
-- 公開ヘッダ `include/amark/markdown.h`（オプション、報告、入口、2 種類のスロットの構造体、出力の文脈の API、エスケープのユーティリティ、`amark.core.markdown` の取得、CommonMark の補助関数）と、`amark.h`・`extension.h` への追記（`AMARK_SLOT_MARKDOWN_NODE` 13、`AMARK_SLOT_MARKDOWN_HOOKS` 14。`syntax-tree` の一覧で割り当てた番号）
-- `src/render/markdown_*` の Markdown のエンジンのすべて：元の表記と作り直しの判定、トークンの出力順の列挙、行と接頭辞、葉の中身の解決（エスケープ、保護、区切り文字）、ブロックの区切り、スロットの検査と連鎖、入口とたどり
-- 組み込みの Markdown 出力の構文拡張 `amark.core.markdown`（19 のノード型のスロット、フック）と、その実装 `src/syntax/md_core.c`、`md_blocks.c`、`md_inlines.c`
-- 元の表記の出力の規則、保守的なエスケープの規則、区切り文字の選び直しの規則、ブロックの区切りの規則、接頭辞の付け直しの規則（このファイルの各コンポーネント）
-- `tests/markdown/` のテストと補助（Naos に依存しない検査の本体 `amark_test_md` と、Naos の検査 `amark_test_md_check` の 2 つの INTERFACE ライブラリ）、GFM 相当の Markdown の検証用の部品 `tests/markdown/support/gfm_md_ext.{h,c}`（INTERFACE ライブラリ `amark_test_md_gfm`。Naos に依存しない）、`fuzz/md_roundtrip_fuzz.c`、`fuzz/md_edit_fuzz.c`
+- 公開ヘッダ `include/amark/markdown.h`（オプション、報告、入口、スロットの構造体、出力の文脈の API、ユーティリティ、組み込みの構文拡張の取得）
+- スロットの種類 `AMARK_SLOT_MARKDOWN_NODE`（13）と `AMARK_SLOT_MARKDOWN_HOOKS`（14）の意味と構造体（番号は `extension.h` にある）
+- `src/render/` の Markdown のエンジンのすべて：判断の表、元の行の読み取り、行の組み立て（帯の決定と合成の呼び出し、タブの展開、改行）、中身の準備（元の部分、綴りの揃った自由な中身、作り直し）、エスケープと位置の保護、区切り文字の並びの決定、子の区切りとリストの空行、フックとフィルタ、報告
+- 表現できない木の理由の分類（`AMARK_MARKDOWN_PROBLEM_*`）と報告の形
+- 組み込みの Markdown 出力の構文拡張 `amark.core.markdown`（19 の型のスロット、前後のフックと行頭の保護のフィルタ）と、その実装 `src/syntax/md_*.c`
+- `tests/markdown/` のテスト、テスト専用の Markdown の検証用の部品（`amark_test_markdown_gfm`）、編集の操作と検査の補助（`amark_test_markdown_edit`）、`fuzz/markdown_render_fuzz.c`
 
 ### Out of Boundary
-- 構文トークンの種類・印・編集の記録・比較の定義（`syntax-tree`）
-- 構文トークンの記録と役割の番号の値、文字の宣言（`block-parser`、`inline-parser`）。このレンダラは公開された値を読むだけ
-- HTML のブロックとタグの走査の規則、raw HTML の走査、区切り文字の flanking と照合の規則（上流が公開する関数を使い、ここでは作らない）
-- 断片のパースと挿入（`block-parser` の `amark_parse_fragment`）
-- GFM 相当の構文のパースと HTML の部品（`block-parser`、`inline-parser`、`html-renderer` のテストの中）
-- 木の変更（出力は木を変えない）
+- 行の表、帯、空行、表記、中身、トークンの形と検査、値と style、定義の索引、意味の比較、元の表記の判定（`syntax-tree`）。この spec は問い合わせるだけで、同じ判定を持たない。
+- 記録の規約、区切り文字の規則と照合、文字の宣言、HTML ブロックと生の HTML とリンクの部品の走査（`block-parser`、`inline-parser`）。この spec は公開の関数を呼ぶだけである。
+- CommonMark の構文セットの構築関数の本体（`block-parser`）と GFM 相当の構文セットの補助の本体（`inline-parser`）。この spec は拡張点に 1 行ずつ足すだけである。
+- 検証用のノード型の登録（`html-renderer` の `amark_test_html_gfm` と `inline-parser` の `test.ext_autolink`）
+- 出力先の型（`render.h`）、ケースの生成の手順（`gen_html_cases.cmake`、`gen_spec_examples.cmake`）、spec のデータと版の定義（`tests/spec/`）
 
 ### Allowed Dependencies
-- `foundation` の公開 API（`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`、`unicode.h`）と内部 API（`base/allocator_internal.h`、`base/buffer_internal.h`）。内部 API は `src/render/` だけが使う
-- `syntax-tree` の公開 API（`node.h`、`document.h`、`token.h`、`extension.h`）。`src/tree/` の内部ヘッダは使わない
-- `html-renderer` の `render.h`（`amark_write_fn_t`）
-- `src/syntax/md_*.c` だけが、`block-parser` の公開 API（`parser.h` の `amark_label_normalize`・`amark_label_map_*`、`scan.h` の走査、`commonmark.h` の役割の番号）と `inline-parser` の公開 API（`inline.h` の文字の宣言・ノードの性質・flanking と照合の関数・raw HTML の走査、役割の番号）を使う
-- テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`AmarkTestGen.cmake`、`amark_test_support`、`amark_test_tree`、`amark_test_parse`、`amark_test_inline`、`amark_test_gfm`、`tests/support/gen_examples.cmake`（ファイルと基本の契約は `block-parser`、`EXPECT=html`・`FACTORY=`・`CHECK=` の追加は `inline-parser`）、`html-renderer` の `gen_html_cases.cmake`（ケースの形式と生成の手順。`CHECK=`）、`inline-parser` の `tests/spec/spec_version.cmake`（spec.txt の版と SHA-256）、`inline-parser` の `tests/extensions/gfm_inline_ext.h`（拡張オートリンクの役割の定数）、`amark_add_fuzzer`
-- ファジングの規則（`foundation`）：ファジングのターゲットがリンクするテストの補助ライブラリは Naos に依存せず、`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義される。この spec の `amark_test_md` と `amark_test_md_gfm` はこの規則に従い、Naos に依存する検査は別のライブラリ `amark_test_md_check` に分ける（ファジングのターゲットはリンクしない）
-- レイヤーの規則：`src/render/` は `src/parse/` と `src/syntax/` を参照せず、`parser.h`・`scan.h`・`inline.h`・`commonmark.h` も include しない（エンジンはパースの知識を持たない）。`src/syntax/md_*.c` は公開ヘッダだけを include する。公開ヘッダは他の公開ヘッダだけを include する
+- `foundation`：公開 API（`export.h`、`error.h`、`allocator.h`、`buffer.h`、`utf8.h`）。内部 API（`base/allocator_internal.h` の `amark_size_add`・`amark_size_mul`、`base/buffer_internal.h`）は `src/render/` だけが使う。
+- `syntax-tree` の公開 API：`node.h`、`document.h`（行の表、列とバイトの変換、既定の改行、ソースと BOM、`amark_label_normalize`）、`value.h`、`spelling.h`（帯、空行、表記、中身、トークンの読み取り、綴りの状態、判定、`amark_node_content_base`）、`extension.h`（スロットの列挙）。`src/tree/` の内部ヘッダは使わない。
+- `inline-parser` の公開 API：`inline.h` の `amark_inline_delimiter_flanks`、`amark_inline_match_delimiters`、`amark_inline_special_chars`、`amark_inline_scan_raw_html`、区切り文字のスロットの構造体（`AMARK_SLOT_INLINE_DELIMITER`）。`src/render/md_dispatch.c`、`md_content.c` と `src/syntax/md_*.c` が使う。
+- `block-parser` の公開 API：`scan.h` の `amark_scan_html_block_start`・`_end`、`amark_scan_link_label`・`_destination`、`commonmark.h` の役割の番号。`src/syntax/md_*.c` だけが使う。
+- `src/render/` から `src/parse/` の公開の関数を呼ぶのは上の純粋な関数とスロットの構造体の読み取りだけで、内部ヘッダは使わない（`src/parse/` を include しない）。上流の spec が「書き戻しが使う」として公開したものである（research.md の「エンジンから区切り文字の照合を呼ぶ」）。
+- `html-renderer` の公開 API：`render.h` の `amark_write_fn_t`
+- テスト時：Naos、`amark_add_test`、`amark_add_generated_tests`、`amark_test_support`、`amark_test_tree`、`amark_test_parse`、`amark_test_inline`、`amark_test_html_gfm`、`amark_test_parse_gfm`、`amark_test_inline_gfm`、`tests/spec/spec_version.cmake` と `data/spec.txt`、`amark_add_fuzzer`
+- 層の向き：`src/render/md_*.c` は `src/syntax/` を参照しない。`src/syntax/md_*.c` は公開ヘッダと `src/syntax/` の中の内部ヘッダ（`md_core.h`）だけを include する。公開ヘッダは他の公開ヘッダだけを include する。
 
 ### Revalidation Triggers
-- スロットの構造体、文脈の API の意味（状態の印、書き出しの分類、保護、区切り文字、空行の規則、汚れの印）、種類の番号の変更 → 利用者の拡張、`amark_test_md_gfm`、`inline-parser` の `gfm_set`
-- `amark.core.markdown` の名前・取得関数・登録の規則の変更 → `block-parser`（構築関数）
-- エスケープの方式の変更（必要最小限の方式の追加など）→ 期待する出力を書いたテスト（意味の保存のテストは変わらない）
-- 上流：トークンの種類・印・編集の記録・比較（`syntax-tree`）、役割の番号・トークンの所有の規則・文字の宣言・照合と走査の関数（`block-parser`、`inline-parser`）、`amark_inline_run_t` / `amark_inline_run_match_t` の形と `capacity` の規則（`inline-parser`。MdDispatch の対応づけ）、`gfm_inline_ext.h` の拡張オートリンクの役割の定数と拡張オートリンクのトークンの形（`inline-parser`）、`gen_examples.cmake` の `CHECK=`・`spec_version.cmake`（`inline-parser`）、`render.h`・`gen_html_cases.cmake` のケースの形式と `CHECK=`（`html-renderer`）、エラーコード・`amark.h` の正準の順・テストの補助ライブラリとファジングの規則（`foundation`）の変更 → この spec
-- `amark_test_md`・`amark_test_md_gfm` の依存の変更（Naos に依存しないことの維持）→ `fuzz/` の 2 つのターゲットと、`amark_test_gfm`（`inline-parser`）を通じてそれをリンクするファジングのターゲット
+- `amark_markdown_node_slot_t` / `amark_markdown_hooks_slot_t` のフィールド、連鎖とフックとフィルタの順の規則 → 利用者の拡張、`amark_test_markdown_gfm`
+- 出力の文脈の API の意味（行、元の列、中身の準備、区切り文字の並び、区切り、報告）→ 利用者の拡張、検証用の部品
+- 判断の表（UNIT、KEEP、REBUILD、NEW と中身の 4 つの種類）の規則 → 拡張の出力の処理
+- `AMARK_MARKDOWN_PROBLEM_*` の値 → 利用者
+- `amark.core.markdown` の名前と取得関数 → `block-parser`（構築関数）、`inline-parser`（GFM 相当の構文セット）
+- 上流からの見直し：`syntax-tree` の判定（`amark_node_verbatim`、`amark_block_content_verbatim`）、帯の印と遅延継続の列、空行の持ち主、タイトの導出、綴りを捨てる操作の値の保ち方。`block-parser` と `inline-parser` の記録の規約と役割の番号、区切り文字の照合と文字の宣言の関数。`html-renderer` の `render.h` とケースの形式。
 
 ## Architecture
 
+### Existing Architecture Analysis
+- `src/render/` と `src/syntax/` はまだない。`include/amark/amark.h` と `cmake/scripts/check_public_headers.cmake` は、正規の順の 5 番目の組として `markdown.h` の位置を持つ（組がないうちは飛ばされる）。
+- `syntax-tree` は実装済みである。判定の関数はキャッシュを持ち、文書のすべてのノードの判定の合計がノードと記録の数に比例する。`amark_node_verbatim` は部分木の根の外の帯（c0 より左の列）を判定しない。`amark_block_content_verbatim` は配置済みの中身だけを真とする。
+- 中身の置き換えの後の段落（`tests/tree/msgstr_flow_test.c`）は、行の範囲（元の行）と帯を保ち、自由な中身を持ち、インラインはすべての綴りを保つ（`complete`）が、`amark_node_verbatim` は偽である。この spec は、この状態を「綴りの揃った自由な中身」として扱う。
+- 綴りを捨てた値（改行を含む text など）と、すべての綴りを捨てる操作が写す list の tight の上書きは、設定の関数の検査を通らない形でも残る（`syntax-tree` の Implementation Notes）。
+
 ### Architecture Pattern & Boundary Map
-**Selected pattern**：スロット駆動・行指向のレンダラ。エンジン（`src/render/`）は部分木を反復でたどり、無編集で文脈も元のままの部分木はトークンをソース上の順にそのまま出し、それ以外のノードは型ごとの連鎖の最後の処理を呼ぶ。出力はすべて「行」を通り、行の終わりに祖先のコンテナの接頭辞が付く。作り直す葉の中身は、いったん断片としてためてから、エスケープ・保護・区切り文字をまとめて解決して行に流す。エンジンは個別のノード型もパースの規則も知らず、CommonMark の知識はすべて `amark.core.markdown` のスロットとフックにある。
+**Selected pattern**：スロット駆動の、行の単位の書き戻し。エンジンは文書の構文セットからスロットを集め、ブロックの木を反復でたどる。各ブロックを判断の表で分類し、元の行のまま出せる部分木はエンジンが元のバイトで出し、それ以外はノード型の出力の処理を呼ぶ。出力の処理は、行の開始と終わり、元の列の範囲、表記、中身の行を、出力の文脈の関数で書く。エンジンは帯を行ごとに決め、元の帯がなければコンテナの型の帯の合成の処理を呼ぶ。
 
 ```mermaid
 graph TB
     subgraph PublicApi
-        MdHeader[markdown h]
-        RenderHeader[render h]
+        MarkdownH[markdown h]
+        RenderH[render h]
     end
-    subgraph RenderEngine
-        Engine[MdEngine]
-        Dispatch[MdDispatch]
-        Blocks[MdBlocks]
-        Inline[MdInline]
-        Lines[MdLines]
-        Source[MdSource]
+    subgraph Engine
         Escape[MdEscape]
+        Output[MdOutput]
+        Dispatch[MdDispatch]
+        Source[MdSource]
+        Judge[MdJudge]
+        Lines[MdLines]
+        Content[MdContent]
+        Render[MdEngine]
     end
     subgraph Syntax
-        Core[CoreMarkdown]
+        CoreMd[CoreMarkdown]
     end
     subgraph Upstream
-        Tree[syntax tree]
-        Parsers[block and inline parser public api]
-        Base[foundation]
+        Tree[syntax tree queries]
+        InlineFns[inline parser pure functions]
+        Scan[block parser scanners]
     end
-    Engine --> Dispatch
-    Engine --> Blocks
-    Engine --> Inline
-    Blocks --> Lines
-    Inline --> Lines
-    Inline --> Escape
-    Lines --> Source
-    Blocks --> Source
-    Dispatch --> Tree
+    Output --> Escape
+    Dispatch --> InlineFns
     Source --> Tree
-    Core --> MdHeader
-    Core --> Parsers
-    RenderEngine --> Base
+    Judge --> Tree
+    Lines --> Output
+    Lines --> Source
+    Content --> Lines
+    Content --> Judge
+    Content --> Dispatch
+    Content --> InlineFns
+    Render --> Content
+    Render --> Dispatch
+    CoreMd --> MarkdownH
+    CoreMd --> Scan
+    CoreMd --> InlineFns
+    MarkdownH --> RenderH
 ```
 
-**Dependency direction（`src/render/` の中）**：`markdown_escape` → `markdown_source` → `markdown_lines` → `markdown_inline` → `markdown_blocks` → `markdown_dispatch` → `markdown_render`。左のファイルは右のファイルの関数を呼ばない。`markdown_internal.h` は構造体と、ファイルをまたぐ `amark_md_*` の宣言だけを持つ。`src/syntax/md_*.c` は `markdown.h` を通してだけエンジンを使う。違反はレビューでエラーとする。
+**Dependency direction（`src/render/` の中）**：`md_escape.c` → `md_output.c` → `md_dispatch.c` → `md_source.c` → `md_judge.c` → `md_lines.c` → `md_content.c` → `md_render.c`。左のファイルは右のファイルの関数を呼ばない。`md_internal.h` は文脈の構造体とファイル間の内部関数の宣言を持つ。`src/syntax/md_blocks.c` と `md_inlines.c` → `md_core.c`。違反はレビューでエラーとする。
 
 **Architecture Integration**：
-- Existing patterns preserved：`html-renderer` の Renderer slot conventions（ノード型ごとのスロットとフックのスロット、名前でのノード型の指定、構文セットの順の連鎖と `render_next`、子の省略、拡張ごとの状態、`begin` は順・`end` と `finish` は逆順、不透明な文脈、バッファと `amark_write_fn_t` の 2 つの入口、`struct_size` と未知のビットの拒否、組み込みの出力は 1 つの core 拡張）。`foundation` のエラーコード・アロケータ・`struct_size`。`syntax-tree` のトークンと編集の記録。
-- New components rationale：行（接頭辞）、葉（エスケープと区切り文字）、ブロックの区切り（空行）の 3 つの境目は、ノードごとの処理では判断できないため、エンジンのコンポーネントにする。
-- Steering compliance：C99、`amark_` / `AMARK_`、`AMARK_API`、不透明型、アロケータの設定のほかにグローバルな可変状態なし、ライセンスヘッダ、組み込みも公開 API だけを使う、spec の境界を守るための回避策を作らない（上流の変更として示す）。
+- **境界**：判断の材料（綴りと帯の有無）は `syntax-tree`、構文の規則（区切り文字、HTML、リンクの部品）は `block-parser` と `inline-parser` の公開の関数が持つ。エンジンは「どこを元のバイトにし、どこを合成し、どう行に並べるか」だけを持つ。CommonMark の個別の型の表記の決め方は `amark.core.markdown` が持つ。
+- **受け継ぐ形**：`html-renderer` のスロットの規約（2 種類のスロット、名前による型の指定、構文セットの順の連鎖と前の処理の呼び出し、子の省略、拡張ごとの状態、`begin` は順・`end` と `finish` は逆の順、不透明な文脈、2 つの入口）。Markdown に固有のもの（帯の合成、隣接の判断、行、中身、区切り文字、報告）は、スロットの任意の関数と文脈の API として足す。
+- **Steering compliance**：C99、`amark_` / `AMARK_`、`AMARK_API`、不透明型、`struct_size`、アロケータの設定のほかにグローバルな可変状態なし、組み込みも公開 API だけを使う、開いた集合（理由の分類、行の印）は `#define`、閉じた集合（状態、中身の種類、帯の種類、空行の扱い、エスケープの方式）は `typedef enum`。
 
-### ノードの扱いの判定
-エンジンは、各ノードについて次の印（`amark_markdown_node_state` で処理にも渡す）を求める。
+### 判断の表（状態の表）
+エンジンは、ブロックと中身を、`syntax-tree` の問い合わせだけで次のように分類する（MdJudge）。`amark_markdown_judge` で出力の処理にも渡す。
 
-| 印 | 条件 |
-|----|------|
-| `TOKENS` | 部分木のどこかが構文トークンを持つ |
-| `EDITED` | `CONTENT`、`CREATED`、未知のビットのどれか（`syntax-tree` の規則） |
-| `STRUCTURE` | `CHILDREN` か `DESCENDANTS` |
-| `RELOCATED` | `RELOCATED` |
-| `DIRTY` | フックか処理が `amark_markdown_mark_dirty` で印を付けたノード、または汚れの印を持つ子孫を持つノード |
-| `NEW_BEFORE` / `NEW_AFTER` | ブロック：前の兄弟／後ろの兄弟との隣接が「元の隣接」でない（MdBlocks） |
-| `EDITED_LEAF` | インライン：祖先の葉のブロックが作り直し（エンジンが元の表記をそのまま出さない）になった |
+| 状態 | 条件 | 出力 |
+|---|---|---|
+| UNIT | `amark_node_verbatim` が真、親が SHARE_LINES でない、行の範囲 R のすべての行で、出力中のすべての祖先のコンテナが元の帯を出せる（下の「元の帯を出せる」）。親の枠が TIGHT（list）なら、そのブロック（item）が子の間の空行の記録を持たない | エンジンが R の各行を「祖先の帯 ＋ 元の行の c0 から行の終わり」で出す。出力の処理は呼ばない |
+| KEEP | UNIT でなく、`amark_node_spelling_state` の `has_spelling` が真で `complete` が真 | 出力の処理（なければエンジンの既定）が、残った帯と表記を使い、子と中身を出す |
+| REBUILD | 綴りを持ち、`complete` が偽（項目の綴りか構造の綴りを捨てた） | 出力の処理が、残った綴りのうち使えるものと、style と値から合成する |
+| NEW | `amark_node_is_new` が真 | 出力の処理が、style（未設定ならオプション）と値から合成する |
 
-- **元の表記をそのまま出す（verbatim）**：`TOKENS` があり、`EDITED`・`STRUCTURE`・`RELOCATED`・`DIRTY`・`NEW_BEFORE`・`NEW_AFTER`・`EDITED_LEAF` がどれもないノード。エンジンは処理を呼ばず、部分木のトークンを出力順に出す（MdSource、MdLines）。
-- **処理を呼ぶ**：それ以外。処理は印を見て、元の表記を使う（`amark_markdown_write_verbatim`、`amark_markdown_write_own_tokens`、`amark_markdown_write_token`）か、作り直す。トークンを持つノードを作り直すときは、元の表記の選択（マーカーの文字など）を希望として使う（5.4）。
-- **処理がない型**：部分木が無編集で `TOKENS` があれば元の表記を出す（9.9）。そうでなければ `AMARK_MARKDOWN_PROBLEM_NO_OUTPUT` で表現できないと報告する（4.4）。
-- 葉のブロック（`amark_node_can_contain(node, AMARK_NODE_TEXT)` が真のブロック）が処理を呼ぶ扱いになったら、その子孫のインラインはすべて `EDITED_LEAF` になり、処理を呼ぶ扱いになる（局所性の単位は葉。5.2(b)）。
+| 中身の種類 | 条件 | 中身の行 |
+|---|---|---|
+| VERBATIM | `amark_block_content_verbatim` が真で、作り直しを求められていない | 元の部分（仮想の改行で分けた中身。i 行目は i 番目の部分の行） |
+| SPELLED | 中身が自由で、子孫のインラインがすべて `complete` でトークンを持ち、トークンの土台がこの葉の今の中身で（`amark_node_content_base` の `is_own_leaf_content`）、トークンが中身をちょうど 1 回、入れ子の順に覆う | 中身のバイト（LF で分けた行。i 行目は行の範囲の i 番目の行） |
+| REBUILT | ほかのすべて（インラインを持たない葉では、値の設定で中身が自由になった場合を含む） | インラインを持つ葉はインラインの CST から作り直す。持たない葉は中身のバイトを LF で分ける |
+| NONE | 中身がない | なし |
+
+- **元の帯を出せる**：祖先のコンテナ A が行 L で元の帯を出せるのは、次のすべてが成り立つときである。
+  - A が構造の綴りを捨てておらず（`structure_dropped` が偽）、`amark_block_find_margin(A, L)` が帯を返す。
+  - 帯が `AMARK_MARGIN_FIRST` なら、L が A の最初の出力の行である。A の最初の出力の行に使える元の帯は、`FIRST` の帯か、A が `FIRST` の帯を 1 つも持たないときのその行の帯である（項目の記号の行が重ならないため）。
+  - 帯が LAZY なら、L がインラインを持つ葉の 2 行目以降の中身の行として出力される（UNIT の部分木の行では、部分木も祖先の帯も元のままなので常に成り立つ）。
+- **c0**：UNIT の部分木の行 L の始まりの列は、出力中の一番内側の祖先のコンテナの L の帯の終わりの列（なければ 0）とする。部分木の根を出力するときの根の祖先の帯も、同じ規則で除く（1.8）。
+- **作り直しを求められた葉**：`amark.core.markdown` の `begin` のフックが、`amark_markdown_force_rebuild` で指定する（3.8）。
+- 判定は `syntax-tree` のキャッシュを使うので、文書のすべてのブロックと葉の判断の合計は、ノードと記録の数に比例する。祖先の帯の条件の確かめは、行の数と深さの積に比例する。
 
 ### 組み込みの Markdown 出力の登録の規則
-1. 組み込みの 19 のノード型の Markdown の処理は、この spec が `src/syntax/md_blocks.c`（ブロックの 10 型）と `src/syntax/md_inlines.c`（インラインの 9 型）に実装し、`src/syntax/md_core.c` の構文拡張 `amark.core.markdown` のスロットとしてだけ登録する。
-2. `amark.core.markdown` はノード型とパースのスロットを持たず、`AMARK_SLOT_MARKDOWN_NODE` を 19 個と `AMARK_SLOT_MARKDOWN_HOOKS` を 1 個持つ。公開の `amark_markdown_core_extension()` で取得する。
-3. CommonMark の構文の構文拡張（`commonmark.*`）は Markdown のスロットを持たない。表記（ATX と setext、フェンスとインデント、インラインと参照とオートリンク）は、トークンの役割の番号で区別する。
-4. `block-parser` の構築関数 `amark_syntax_set_add_commonmark` の「出力の core 拡張の一覧」に、`amark_html_core_extension()` の次として `amark_markdown_core_extension()` を 1 行足す（`block-parser` の design が予定する変更。この spec のタスクが行う）。
-5. 利用者が `amark_syntax_set_create` から構文セットを作る場合は、`amark.core.markdown` を加える。加えなければ、組み込みのノード型は処理を持たない型として扱われる（無編集なら往復できる）。
-6. 組み込みの出力を差し替える利用者は、`amark.core.markdown` より後に同じノード型のスロットを持つ構文拡張を加え、必要なら `amark_markdown_render_next` で元の処理を呼ぶ。
+1. 組み込みの 19 のノード型の Markdown の出力の処理は、`src/syntax/md_blocks.c`（ブロックの 10 型）と `src/syntax/md_inlines.c`（インラインの 9 型）に実装し、`src/syntax/md_core.c` の構文拡張 `amark.core.markdown` のスロットとしてだけ登録する。
+2. `amark.core.markdown` はノード型とパースのスロットを持たず、`AMARK_SLOT_MARKDOWN_NODE` のスロット 19 と、`AMARK_SLOT_MARKDOWN_HOOKS` のスロット 1（文字の宣言、定義の確かめ、行頭の保護のフィルタ）を持つ。公開の `amark_markdown_core_extension()` で取得する。
+3. `commonmark.*` 拡張は Markdown のスロットを持たない。
+4. `block-parser` の構築関数の出力の拡張の表に、`amark.core.html` の後に `amark.core.markdown` を 1 行足す（`block-parser` の Downstream Extension Point）。
+5. 自分で構文セットを作る利用者は `amark.core.markdown` を追加する。追加しなければ、組み込みの型は出力の処理を持たない型になる（10.3）。
+6. 差し替える利用者は、`amark.core.markdown` より後に同じ型のスロットを持つ構文拡張を追加する（10.4）。
 
 ### Technology Stack
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Language | C99 | ライブラリ、テスト、ファジング | `amark_target_defaults()` |
-| Base | `foundation`（error、allocator、buffer、utf8、unicode） | 確保、出力の組み立て、空白と句読点の判定 | エラーコードを 1 つ追加（上流） |
-| Tree | `syntax-tree`（node、document、token、extension） | トークン、編集の記録、ソースと位置、スロットの列挙 | 内部ヘッダは使わない |
-| Parse rules | `block-parser`・`inline-parser` の公開 API | 役割の番号、文字の宣言、ラベルの正規化、HTML の走査、flanking と照合 | `src/syntax/md_*.c` だけが使う |
-| Reference | CommonMark Spec 0.31.2 | エスケープ、ブロックの境目、flanking の規則 | 規則だけ |
-| Test | Naos v0.4.0、`amark_test_*`、`gen_examples.cmake`、`gen_html_cases.cmake`、`spec_version.cmake` | 往復・作り直し・編集のプロパティテスト | `amark_test_md`、`amark_test_md_gfm`（どちらも Naos なし）、`amark_test_md_check`（Naos）を追加。生成の手順は上流のものを使い、作り直さない |
-| Fuzz | `amark_add_fuzzer` | 往復と編集のファジング | 2 つのターゲット。リンクするのは Naos に依存しないライブラリだけ |
+| Base | `foundation`（error、allocator、buffer、utf8） | 確保、出力の組み立て | 新しい依存なし |
+| Tree | `syntax-tree`（node、document、value、spelling、extension） | 判断、元の行、値、style | 公開 API だけ |
+| Syntax rules | `inline-parser`（`inline.h`）、`block-parser`（`scan.h`） | 区切り文字の照合、文字の宣言、HTML とリンクの部品の判定 | 公開 API だけ |
+| Reference | CommonMark 0.31.2、cmark 0.31.1 | 再パースの規則の基準 | コードは取り込まない |
+| Test | Naos v0.4.0、上流のテストの補助と生成の手順 | 往復と意味の保存のプロパティテスト | `amark_test_markdown_gfm`、`amark_test_markdown_edit` を追加 |
+| Fuzz | `amark_add_fuzzer` | 入力と編集の操作列 | `fuzz/markdown_render_fuzz.c` |
 
 ## File Structure Plan
 
 ### Directory Structure
 ```
 include/amark/
-└── markdown.h               # オプション、報告、入口、スロットの構造体、文脈の API、ユーティリティ、core 拡張の取得、CommonMark の補助
+└── markdown.h              # MarkdownApi：オプション、報告、入口、スロット、文脈の API、ユーティリティ、amark_markdown_core_extension()
 src/render/
-├── markdown_internal.h      # struct amark_markdown_context、断片、行、ノードの情報の表、ファイル間の amark_md_* の宣言
-├── markdown_escape.c        # MdEscape：エスケープと文字参照のユーティリティ（文脈なしの純粋な関数）、文字の分類の判定
-├── markdown_source.c        # MdSource：部分木のトークンの出力順の列挙、元の行の特定、タブの元の幅、文書の改行コードの判定
-├── markdown_lines.c         # MdLines：出力先、行のため置き、アンカー、接頭辞の積み重ねと選択、部分的なタブ、列の規則、改行
-├── markdown_inline.c        # MdInline：葉の断片、エスケープ、行頭と行末の保護、保護のフック、次の文字の要求、区切り文字の解決
-├── markdown_blocks.c        # MdBlocks：ノードの情報の表（事前の後順のたどり）、状態の印、汚れの伝播、ブロックの区切りと空行
-├── markdown_dispatch.c      # MdDispatch：スロットの検査、型ごとの連鎖の表、フックの一覧と状態
-└── markdown_render.c        # MdEngine：入口、オプションの検査、反復のたどり、呼び出しの文脈、render_next、報告、フックの寿命
+├── md_internal.h           # struct amark_markdown_context、枠、行と中身のバッファ、並び、ファイル間の内部関数の宣言
+├── md_escape.c             # MdEscape：エスケープと文字参照（文脈を使わない）
+├── md_output.c             # MdOutput：出力先、中継のバッファ、最初の失敗、BOM、改行の保留（CR と LF の結合の回避）
+├── md_dispatch.c           # MdDispatch：スロットの検査、型ごとの連鎖、フックとフィルタの一覧、区切り文字の表、エスケープする文字
+├── md_source.c             # MdSource：元の行の読み取り（列の範囲のバイト、タブの途中、葉の行の対応、ブロックの記録の列）
+├── md_judge.c              # MdJudge：判断の表、綴りの揃った自由な中身の確かめ、祖先の帯の条件
+├── md_lines.c              # MdLines：祖先の枠、行の組み立て、帯の決定と合成の呼び出し、記号だけの行、タブの展開、改行
+├── md_content.c            # MdContent：中身の準備、インラインのたどり、エスケープと端の保護、区切り文字の並びの決定、フィルタ
+└── md_render.c             # MdEngine：入口、オプションの検査、ブロックのたどり、子の区切り、空行、フック、報告
 src/syntax/
-├── md_core.h                # 19 のスロットとフックの extern 宣言、core の状態の構造体、ブロックの共通の判定（md_*.c だけが使う）
-├── md_core.c                # amark.core.markdown の表と取得関数、フック（構文の有無、エスケープの集合、符号化、定義と参照の検査、行頭の保護、照合）
-├── md_blocks.c              # document、block_quote、list、item、code_block、html_block、paragraph、heading、thematic_break、link_definition と amark_markdown_write_item_prefix
-└── md_inlines.c             # text、softbreak、linebreak、code、html_inline、emph、strong、link、image と amark_markdown_commonmark_flanks
+├── md_core.h               # 19 のスロットの extern 宣言、値と style を読む補助（src/syntax/md_*.c だけが使う）
+├── md_core.c               # amark.core.markdown の表、amark_markdown_core_extension()、フック（文字の宣言、定義の確かめ、行頭の保護）
+├── md_blocks.c             # document、block_quote、list、item、code_block、html_block、paragraph、heading、thematic_break、link_definition
+└── md_inlines.c            # text、softbreak、linebreak、code、html_inline、emph、strong、link、image
 tests/markdown/
-├── CMakeLists.txt           # amark_test_md・amark_test_md_gfm（Naos なし。AMARK_FUZZ か AMARK_BUILD_TESTS）、amark_test_md_check とテストの登録・生成テスト（AMARK_BUILD_TESTS）
+├── CMakeLists.txt          # テストの登録、amark_test_markdown_gfm と amark_test_markdown_edit（INTERFACE、Naos なし）、生成テスト
 ├── support/
-│   ├── md_test_support.h    # amark_test_md（Naos なし）：往復・全ノードの編集・編集の手順の判定を状態と失敗の説明で返す関数
+│   ├── md_test_support.h   # 構文セットと文書の用意、出力の照合、生成テストの検査の関数（Naos）
 │   ├── md_test_support.c
-│   ├── md_edit_script.h     # amark_test_md（Naos なし）：決まった編集の手順（種から決まる操作の列）と局所性の追跡
-│   ├── md_edit_script.c
-│   ├── md_check.h           # amark_test_md_check（Naos）：作り直しの検査、生成テストの検査の関数、AMARK_CHECK_MD
-│   ├── md_check.c
-│   ├── gfm_md_ext.h         # 表、取り消し線、タスク項目、脚注の Markdown のスロット、拡張オートリンクと区切りの行の保護のフック
+│   ├── md_edits.h          # MdEdits：決まった編集の操作、意味の保存と局所性の検査（Naos なし）
+│   ├── md_edits.c
+│   ├── gfm_md_ext.h        # GfmMdExt：GFM 相当の Markdown の部品の拡張の取得関数
 │   └── gfm_md_ext.c
-├── data/
-│   ├── block_cases.txt      # ブロックの組み込みの型の作り直しの表記（html-renderer の gen_html_cases.cmake の形式。S 式と期待する Markdown）
-│   ├── inline_cases.txt     # インラインの組み込みの型の作り直しの表記、エスケープ、区切り文字
-│   ├── corpus.txt           # 往復のコーパス（例の形式。タブ、CRLF、行末の空白、遅延継続、NUL、BOM、不正な UTF-8、深い入れ子）
-│   └── gfm_corpus.txt       # GFM 相当の構文の往復のコーパス
-├── entry_test.c             # 入口、出力先、失敗の扱い、決定性、部分木と切り離したノード、木を変えないこと
-├── options_test.c           # オプションの既定・検査・各表記・改行コード・報告のポインタ
-├── slot_test.c              # 登録、順、render_next、処理のない型、子の省略、不正なスロット、汚れの印、状態
-├── lines_test.c             # 接頭辞の選択、遅延継続、移動、部分的なタブ、列の規則、マーカーの幅、改行コード（INTERNAL）
-├── inline_test.c            # エスケープ、行頭と行末の保護、保護のフック、次の文字の要求、区切り文字の解決（INTERNAL）
-├── blocks_test.c            # 元の隣接の判定、空行の規則、can_follow、末尾の空行の省略
-├── core_blocks_test.c       # 組み込みのブロックの処理の分岐（表記の引き継ぎ、切り替え、表現できない木）
-├── core_inlines_test.c      # 組み込みのインラインの処理の分岐（リンクの書式、参照の検査、コードの長さ、HTML の検査）
-├── report_test.c            # 表現できない木の種類と報告
-├── gfm_md_test.c            # GFM 相当の部品の往復・作り直し・編集
-├── property_test.c          # コーパスに対する往復・作り直し・全ノードの編集・編集の手順・局所性
-├── oom_test.c               # 確保失敗の総当たり
-└── scale_test.c             # 深い木、計算量のカウンタ（INTERNAL）
+├── data/new_block_cases.txt    # 新しいブロックの S 式と期待する Markdown（gen_html_cases の形式）
+├── data/new_inline_cases.txt   # 新しいインラインと値の S 式と期待する Markdown
+├── data/roundtrip_cases.txt    # 往復の入力（spec の例の形式。期待値は入力と同じ）
+├── data/edit_cases.txt         # 編集の操作と期待する出力（spec の例の形式）
+├── data/gfm_cases.txt          # GFM 相当の往復と編集
+├── output_test.c           # MdOutput（INTERNAL）
+├── dispatch_test.c         # MdDispatch（INTERNAL）
+├── lines_test.c            # MdSource と MdLines（INTERNAL）：帯の決定、遅延継続、記号だけの行、タブの展開、改行
+├── content_test.c          # MdContent（INTERNAL）：中身の 4 つの種類、エスケープと端の保護、区切り文字の決定
+├── escape_test.c           # ユーティリティ
+├── render_entry_test.c     # 入口、出力先、失敗、決定性、部分木、木を変えないこと
+├── options_test.c          # オプションの検査と新しいノードの表記
+├── slot_test.c             # 登録、連鎖、write_next、処理のない型、不正なスロット、amark.core.markdown の有無と差し替え
+├── context_test.c          # 文脈の API の契約と誤用
+├── hooks_filter_test.c     # 前後のフック、状態、フィルタ、文字の宣言、作り直しの指定
+├── msgstr_test.c           # msgstr の差し込みの流れ（6.1–6.6）
+├── separation_test.c       # 子の区切り、リストの空行、タイトの上書き、移動、削除、挿入
+├── unrepresentable_test.c  # 表現できない木の報告
+├── gfm_md_test.c           # GFM 相当の部品
+├── oom_test.c              # 確保の失敗の総当たり
+└── scale_test.c            # 深い木、計算量
 fuzz/
-├── md_roundtrip_fuzz.c      # 入力をパースして書き戻し、バイト単位の一致を確かめる
-├── md_edit_fuzz.c           # 入力の後半を編集の手順として適用し、意味の保存か報告を確かめる
-├── corpus/md_roundtrip/
-└── corpus/md_edit/
+├── markdown_render_fuzz.c  # 入力と編集の操作列から出力し、再パースで確かめる
+└── corpus/markdown_render/ # 種
 ```
 
 ### Modified Files
-- `include/amark/amark.h` — `foundation` が定める正準の順に従い、`markdown.h` を最後に追加する。
-- `include/amark/extension.h` — スロットの種類の一覧で割り当てた番号で `AMARK_SLOT_MARKDOWN_NODE`（13）、`AMARK_SLOT_MARKDOWN_HOOKS`（14）を追記する。
-- `src/CMakeLists.txt` — `amark_objects` に `src/render/markdown_*.c` と `src/syntax/md_*.c` を追加する。
-- `src/syntax/commonmark.c` — 出力の core 拡張の一覧に `amark_markdown_core_extension()` を `amark_html_core_extension()` の次に 1 行足す（登録の規則 4）。
-- `tests/CMakeLists.txt` — `add_subdirectory(markdown)` を `add_subdirectory(extensions)` の前に追加する（`foundation` の規則に従い、Naos に依存しない補助ライブラリは `AMARK_FUZZ` だけのときも定義される）。
-- `tests/extensions/gfm_set.c`、`tests/extensions/CMakeLists.txt` — `amark_test_gfm_set_create` が HTML の部品の後に `amark_test_md_gfm` の拡張を加え、`amark_test_gfm` が `amark_test_md_gfm` に依存する（brief の Existing Spec Touchpoints）。
-- `fuzz/CMakeLists.txt` — `amark_add_fuzzer(md_roundtrip …)`、`amark_add_fuzzer(md_edit …)`（どちらも `LIBRARIES amark_test_gfm amark_test_md`。どちらも Naos に依存しない。Naos に依存する `amark_test_md_check` はリンクしない）。
-- `tests/support/gen_examples.cmake`（ファイルと基本の契約は `block-parser` が所有し、`inline-parser` は `EXPECT=html`・`FACTORY=`・`CHECK=` の追加だけを所有する）と `gen_html_cases.cmake`（`html-renderer`）は編集しない。`CHECK=` は、`gen_examples.cmake` では `inline-parser`、`gen_html_cases.cmake` では `html-renderer` が実装する（Integration & Upstream Changes）。
+- `include/amark/amark.h` — 5 番目の組（Markdown output）に `markdown.h` を含める。
+- `src/CMakeLists.txt` — `src/render/md_*.c` と `src/syntax/md_*.c` をライブラリのソースに足す。
+- `src/syntax/commonmark.c`（`block-parser` の Downstream Extension Point）— 出力の拡張の表の `amark_html_core_extension()` の後に `amark_markdown_core_extension()` を 1 行足す。`tests/syntax/commonmark_set_test.c` が出力の拡張の数か順を数えているなら、期待値に 1 つ足す。
+- `tests/inline/support/gfm_inline_ext.c`（`inline-parser` の Downstream Extension Point）— `amark_test_gfm_set_create` の末尾で、Markdown の部品の拡張（`gfm_md_ext.h`）を足す。
+- `tests/inline/CMakeLists.txt` — `amark_test_inline_gfm` が `amark_test_markdown_gfm` に依存する。
+- `tests/CMakeLists.txt` — `add_subdirectory(markdown)`（`AMARK_FUZZ` だけの構成でも INTERFACE の部品を定義するので条件なし。Naos を使うターゲットは中で `AMARK_BUILD_TESTS` のときだけ）。`inline` より前に置く。
+- `tests/headers/cxx_include_test.cpp` — `markdown.h` の関数を呼ぶ。
+- `fuzz/CMakeLists.txt` — `amark_add_fuzzer(markdown_render SOURCES markdown_render_fuzz.c CORPUS corpus/markdown_render LIBRARIES amark_test_markdown_edit amark_test_inline_gfm amark_test_parse_gfm amark_test_html_gfm amark_test_markdown_gfm)`。
 
 ## System Flows
 
@@ -215,123 +239,153 @@ sequenceDiagram
     participant E as MdEngine
     participant D as MdDispatch
     participant H as Hooks
-    participant B as MdBlocks
+    participant J as MdJudge
     participant S as Node slots
-    participant I as MdInline
     participant L as MdLines
+    participant O as MdOutput
     U->>E: render markdown node options out
     E->>E: validate options
-    E->>D: build chains and hooks
-    E->>H: allocate states and call begin in set order
-    H->>E: add escape chars set encodings mark dirty
-    E->>B: compute node info for non verbatim region
-    loop each node enter and exit
-        alt verbatim
-            E->>L: emit subtree tokens in output order
-        else slot
-            E->>S: call last handler in chain
-            S->>I: write text delimiters markup in a leaf
-            S->>L: write markup lines tokens
+    E->>D: chains hooks delimiter table special chars
+    E->>H: zeroed states and begin in set order
+    loop each block in tree order
+        E->>J: judge block
+        alt unit
+            E->>L: lines with ancestor margins and original bytes from c0
+        else keep rebuild new
+            E->>S: write entering
+            S->>L: begin line write original write text content lines end line
+            E->>E: children with separation and blank lines
+            E->>S: write exiting
         end
-        E->>B: emit gap between block siblings
-        I->>H: protect hooks per content line
-        I->>L: flush resolved content lines
-        L->>L: add prefixes and line endings then sink
+        L->>O: margins composed per line and eol
     end
-    E->>H: call end in reverse order
-    E->>H: call finish in reverse order and free states
+    E->>H: end in reverse order then finish
+    E->>O: flush or truncate buffer on failure
     E-->>U: error code and report
 ```
-- 失敗したら、たどりを止めて `end` を呼ばずに `finish` を呼び、表と状態を解放し、バッファを呼び出し前の長さに戻す。表現できないときは `AMARK_ERROR_UNREPRESENTABLE` を返し、オプションの `report` に理由とノードを書く。
-- 書き出しの関数の出力先には、確定した行だけを渡す（作り直す葉の中身は解決が終わるまで渡さない）。
+- 失敗したら、たどりを止めて `end` を呼ばずに `finish` を呼び、バッファを呼び出し前の長さに戻す。表現できない木は `AMARK_ERROR_UNREPRESENTABLE` で同じ経路をたどり、報告先があれば最初の報告を書く。
 
-### 作り直す葉の解決
+### ブロックの判断
 ```mermaid
 graph TB
-    Begin[begin inline] --> Collect[Collect pieces text fixed markup delimiters]
-    Collect --> End[end inline]
-    End --> View[Build line views]
-    View --> Protect[Run protect hooks per line]
-    Protect --> Escape[Escape special chars and protected ranges]
-    Escape --> Edge[Guard line start and end whitespace and trailing chars]
-    Edge --> Next[Apply next char requests]
-    Next --> Prefer[Assign preferred delimiter chars]
-    Prefer --> Verify{Matcher confirms pairs}
-    Verify -->|yes| Flush[Flush lines]
-    Verify -->|no| Strict[Strict assignment with encodings]
-    Strict --> Verify2{Pairs confirmed or no matcher}
-    Verify2 -->|yes| Flush
-    Verify2 -->|no| Fail[Report delimiter problem]
+    Start[Block] --> Unit{Unit}
+    Unit -->|yes| Original[Original lines from c0]
+    Unit -->|no| Frame[Push frame]
+    Frame --> Slot{Has write handler}
+    Slot -->|yes| Call[Call last handler]
+    Slot -->|no| Keep{Keep}
+    Keep -->|yes| Default[Engine default with own records]
+    Keep -->|no| Report[Unrepresentable no output]
+    Call --> Children[Children with separation]
+    Default --> Children
+    Children --> Pop[Pop frame]
 ```
 
-### ブロックの区切り
+### 中身の準備
 ```mermaid
 graph TB
-    Gap[Between siblings A and B] --> Orig{Original adjacency}
-    Orig -->|yes| Keep[Emit source blank lines]
-    Orig -->|no| Policy{Parent gap policy}
-    Policy -->|keep or blank| Blank[Emit source blank lines and at least one]
-    Policy -->|none| Direct{B can follow A}
-    Direct -->|yes| Drop[Drop blank lines]
-    Direct -->|no| Fail[Report adjacency problem]
+    Prepare[Prepare content] --> Kind{Content kind}
+    Kind -->|verbatim| Pieces[Lines of pieces]
+    Kind -->|spelled| Split[Free bytes split at LF]
+    Kind -->|rebuilt| Walk[Inline walk with slots]
+    Walk --> Runs[Choose delimiter characters and verify]
+    Runs --> Edges[Guard line edges]
+    Edges --> SplitBreaks[Split at line breaks]
+    Pieces --> Map[Map line i to original line i]
+    Split --> Map
+    SplitBreaks --> Map
+    Map --> Filter{Inline leaf not in place or not verbatim}
+    Filter -->|yes| Filters[Line filters in set order]
+    Filter -->|no| Ready[Content lines]
+    Filters --> Ready
 ```
-- 元の隣接：A と B がどちらも `RELOCATED` でなく、元の位置（トークン）を持ち、同じソースで、B の最初の行の番号が「A の最後の内容の行 ＋ 間の空行の数 ＋ 1」に等しい。間の行がトークンの空行だけなので、削除されたノードがあれば元の隣接にならない。
-- 空行の規則が `BLANK` のときは、元の隣接でも空行がなければ 1 つ置く。`NONE` のときは、元の隣接でも間の空行（A の末尾の空行を含む）を出さない。
+
+### msgstr の差し込みの書き戻し
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant P as block parser
+    participant T as Tree
+    participant E as MdEngine
+    U->>P: parse inline fragment of msgstr into paragraph
+    P->>T: replace content with free content and spelled inlines
+    U->>E: render markdown document
+    E->>E: block quote and item keep margins on line 0
+    E->>E: paragraph content spelled split at LF
+    E->>E: line 0 gets original margins of line 0 and translator bytes
+    E->>E: extra lines get synthesized margins and unused lines are dropped
+    E->>E: other item is unit and keeps its original line
+```
 
 ## Requirements Traceability
 
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
-| 1.1–1.4 | 入口、部分木、2 つの出力先、書き出しの失敗 | MdEngine, MdLines | `amark_render_markdown`, `amark_render_markdown_to` | 1 回の出力 |
-| 1.5 | 失敗時の巻き戻しとリークなし | MdEngine, MdLines | エラーコード | 1 回の出力 |
-| 1.6, 1.7 | 木を変えない、決定性 | MdEngine, MdBlocks | const のノード、外部の表 | — |
-| 2.1–2.5 | 無編集の往復 | MdSource, MdLines, MdBlocks | verbatim の判定、出力順の列挙 | 1 回の出力 |
-| 2.6 | 無編集の部分木 | MdSource, MdEngine | 出力順の列挙 | — |
-| 3.1, 3.2 | 意味の保存 | 全コンポーネント, CoreMarkdown | 判定、スロット | 全フロー |
-| 3.3, 3.4 | 記号と空白の保護 | MdInline, MdEscape, CoreMarkdown | `amark_markdown_write_text`, `protect` | 葉の解決 |
-| 3.5 | 区切り文字 | MdInline, CoreMarkdown | `amark_markdown_write_delimiter`, `match_delimiters` | 葉の解決 |
-| 3.6 | ブロックの隣接 | MdBlocks, CoreMarkdown | `amark_markdown_set_gap`, `can_follow`, `NEW_BEFORE`/`NEW_AFTER` | ブロックの区切り |
-| 3.7 | 参照の依存 | CoreMarkdown, MdBlocks | `begin`, `amark_markdown_mark_dirty` | 1 回の出力 |
-| 3.8 | 構文の有無 | CoreMarkdown, MdInline | `amark_markdown_set_encodings`, `NO_SYNTAX` | — |
-| 4.1–4.4 | 表現できない木の報告 | MdEngine, CoreMarkdown | `AMARK_ERROR_UNREPRESENTABLE`, `amark_markdown_report_t`, `amark_markdown_fail` | 1 回の出力 |
-| 4.5 | パースで作った木は報告しない | CoreMarkdown, MdInline, MdBlocks | 構成的な割り当て、作り直しの規則 | 全フロー |
-| 5.1, 5.2 | 局所性の範囲 | MdBlocks, MdInline, MdLines | 判定、元の隣接、行のアンカー | 全フロー |
-| 5.3 | 葉の中の無編集のノード | MdInline, CoreMarkdown | `amark_markdown_write_text_tokens`, verbatim の書き出し | 葉の解決 |
-| 5.4 | 元の表記の引き継ぎ | CoreMarkdown | トークンの役割による希望 | — |
-| 6.1–6.5 | 新しいノード | CoreMarkdown, MdInline | 作り直し、オプション | — |
-| 7.1–7.5 | オプション | MdEngine, CoreMarkdown | `amark_markdown_options_t` | — |
-| 8.1–8.6 | 接頭辞 | MdLines, CoreMarkdown | `prefix`, `amark_markdown_write_item_prefix` | 1 回の出力 |
-| 9.1–9.3 | スロットとフック | MdDispatch, MdEngine | `amark_markdown_node_slot_t`, `amark_markdown_hooks_slot_t` | 1 回の出力 |
-| 9.4–9.7 | 文脈の API | MdEngine, MdInline, MdLines, MdBlocks | 文脈の関数 | 全フロー |
-| 9.8 | 不正なスロット | MdDispatch | 検査 | — |
-| 9.9 | 処理のない無編集の型 | MdEngine | 判定 | — |
-| 9.10 | CommonMark の構文セット | CoreMarkdown | 登録の規則 4 | — |
-| 10.1–10.5 | GFM 相当の部品 | GfmMdExt | 公開のスロットとフック | — |
-| 11.1–11.6 | プロパティテスト | MdTestSupport, MdTests, MdFuzz | 往復、作り直し、編集の手順、局所性 | — |
-| 12.1–12.4 | 計算量と堅牢性 | MdBlocks, MdSource, MdInline, MdEngine | 反復、表、カウンタ | — |
-| 13.1–13.4 | API の規約 | MarkdownApi, MdEscape | 公開ヘッダ、`struct_size` | — |
+| 1.1, 1.8 | 部分木の出力（インラインの根を含む）、根の祖先の帯を除く | MdEngine, MdJudge, MdContent | `amark_render_markdown`、c0 の規則 | 1 回の出力 |
+| 1.2, 1.3, 1.4, 1.5 | 出力先と失敗 | MdOutput, MdEngine | `amark_buffer_t`、`amark_write_fn_t` | 1 回の出力 |
+| 1.6, 1.7 | 木を変えない、決定性 | MdEngine | const のノード、読み取りの問い合わせ | — |
+| 2.1, 2.2, 2.3, 2.4 | 無編集の往復 | MdJudge, MdLines, MdSource, MdOutput | UNIT、`amark_node_verbatim`、元の帯 | ブロックの判断 |
+| 2.5 | BOM | MdOutput | `amark_document_source_data` | — |
+| 3.1 | 意味の保存 | MdContent, MdEngine, CoreMarkdown | 判断の表、作り直し | 中身の準備 |
+| 3.2, 3.3 | エスケープ、残った値 | MdContent, MdEscape, CoreMarkdown | `amark_markdown_write_text`、`_write_char_ref` | 中身の準備 |
+| 3.4 | 区切り文字の並び | MdContent, MdDispatch | `amark_markdown_write_run`、`_scope` | 中身の準備 |
+| 3.5 | 区切りの選び方 | CoreMarkdown | 出力の表 | — |
+| 3.6 | ブロックの区切り | MdEngine, CoreMarkdown | 子の区切りの規則、`follow` | — |
+| 3.7, 3.8 | 参照と定義 | CoreMarkdown, MdJudge | `amark_markdown_force_rebuild`、`amark_markdown_guard_next` | — |
+| 3.9 | タイト | MdEngine, CoreMarkdown | `amark_markdown_set_spacing` | — |
+| 3.10 | 遅延継続に頼った行 | MdContent, CoreMarkdown | 行頭の保護のフィルタ | 中身の準備 |
+| 4.1, 4.2, 4.3, 4.4 | 表現できない木 | MdEngine, CoreMarkdown | `amark_markdown_report_t`、`amark_markdown_unrepresentable` | 1 回の出力 |
+| 5.1 | UNIT の行 | MdJudge, MdLines | UNIT と元の帯の条件 | ブロックの判断 |
+| 5.2, 5.4 | 葉の中だけの作り直し | MdContent | 中身の種類 | 中身の準備 |
+| 5.3 | 残った綴りの再利用 | CoreMarkdown, MdLines | KEEP、REBUILD、`amark_markdown_write_original`、`_write_spelling` | — |
+| 5.5 | style に従う | CoreMarkdown | 出力の表 | — |
+| 6.1, 6.2, 6.3, 6.4 | msgstr の差し込み | MdContent, MdLines, MdJudge | SPELLED、行の対応 | msgstr |
+| 6.5 | 翻訳者のバイトの保護 | MdContent, CoreMarkdown | フィルタ、`force_rebuild` | 中身の準備 |
+| 6.6 | 置き換えていない部分 | MdJudge | UNIT | msgstr |
+| 7.1, 7.2, 7.3 | 新しいノードの表記 | CoreMarkdown, MdEngine | `amark_markdown_styles_t` | — |
+| 7.4 | 既定の改行 | MdOutput | `amark_document_default_eol` | — |
+| 7.5, 7.6 | オプションの検査、エスケープの方式 | MdEngine | `amark_markdown_options_t` | 1 回の出力 |
+| 8.1, 8.2, 8.3, 8.7 | 帯の決定 | MdLines, MdJudge | 元の帯の条件、`margin` | — |
+| 8.4 | タブの展開 | MdLines, MdSource | 元の範囲の連結 | — |
+| 8.5, 8.6 | 合成する帯 | CoreMarkdown, MdLines | `amark_markdown_margin_kind_t`、`marker_only` | — |
+| 8.8, 8.9 | 改行 | MdOutput | 改行の保留 | — |
+| 9.1, 9.2, 9.3, 9.4 | スロット | MdDispatch, MdEngine | `amark_markdown_node_slot_t`、`amark_markdown_write_next` | ブロックの判断 |
+| 9.5 | フック、状態、フィルタ | MdDispatch, MdEngine, MdContent | `amark_markdown_hooks_slot_t` | 1 回の出力 |
+| 9.6 | 文脈の API | MdLines, MdContent, MdEngine | 文脈の関数 | — |
+| 9.7 | 文字の宣言と行頭の保護 | MdDispatch, MdContent | `amark_markdown_declare_special`、`filter` | 中身の準備 |
+| 9.8 | HTML と揃える | MarkdownApi | 規約 | — |
+| 10.1, 10.2, 10.3, 10.4 | 組み込みの出力 | CoreMarkdown, MdDispatch | `amark_markdown_core_extension`、登録の規則 | — |
+| 11.1, 11.2, 11.3, 11.4 | GFM 相当 | GfmMdExt, MdTests | 公開のスロット | — |
+| 12.1, 12.2, 12.3, 12.4, 12.5 | プロパティテスト | MdTestSupport, MdEdits, MdTests, MdFuzz | 生成テスト | — |
+| 13.1 | 規約 | MarkdownApi と全コンポーネント | `struct_size`、不透明型 | — |
+| 13.2 | アロケータ | 全コンポーネント | `amark_malloc` | — |
+| 13.3 | 深い木 | MdEngine, MdContent | 反復のたどり、枠の配列 | — |
+| 13.4 | 計算量 | 全コンポーネント | 判定のキャッシュ、行ごとの帯 | — |
+| 13.5 | NUL と不正な UTF-8 | MdEscape, MdContent | バイトを変えない書き出し | — |
 
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies (P0/P1) | Contracts |
 |-----------|--------------|--------|--------------|--------------------------|-----------|
-| MarkdownApi | Public headers | 公開の型・関数・定数の宣言 | 9.1, 13.1, 13.2 | extension.h (P0), render.h (P0) | Service |
-| MdEscape | Render | エスケープと文字参照の純粋な関数 | 3.3, 13.4 | buffer (P0), utf8 (P0) | Service |
-| MdSource | Render | トークンの出力順、元の行、タブの幅 | 2.1–2.6, 8.4, 12.1 | token.h (P0), document.h (P0) | Service |
-| MdLines | Render | 出力先、行、接頭辞、改行 | 1.2–1.5, 2.1–2.4, 6.4, 8.1–8.5 | MdSource (P0), buffer (P0) | Service, State |
-| MdInline | Render | 葉の断片、エスケープ、保護、区切り文字 | 3.3–3.5, 3.8, 5.3, 6.5, 9.4, 9.6, 9.7 | MdLines (P0), MdEscape (P0), unicode (P0) | Service, State |
-| MdBlocks | Render | ノードの情報、状態の印、汚れ、ブロックの区切り | 3.6, 5.1, 5.2, 9.4, 12.1, 12.2 | MdSource (P0), MdLines (P0) | Service, State |
-| MdDispatch | Render | スロットの検査と連鎖、フック | 9.1, 9.3, 9.8 | syntax set (P0) | Service |
-| MdEngine | Render | 入口、たどり、呼び出しの文脈、報告 | 1.1–1.7, 4.1–4.4, 7.1–7.5, 9.1–9.3, 9.9, 12.2–12.4 | MdDispatch (P0), MdBlocks (P0), MdInline (P0) | Service, State |
-| CoreMarkdown | Syntax | `amark.core.markdown` と 19 の型の出力、フック | 3.1–3.8, 4.3, 4.5, 5.4, 6.1–6.5, 7.4, 8.1, 8.5, 8.6, 9.2, 9.10 | markdown.h (P0), parser.h・scan.h・inline.h・commonmark.h (P0) | Service |
-| MdTestSupport | Test | 往復・作り直し・編集の検査、出力の照合 | 11.1–11.4, 11.6 | amark_test_tree (P0), amark_test_inline (P0) | Service |
-| GfmMdExt | Test | GFM 相当の Markdown の部品 | 10.1–10.5 | markdown.h (P0), amark_test_html_gfm (P0) | Service |
-| MdTests / MdFuzz | Test / Fuzz | 要件の検証 | 全要件, 11.5 | MdTestSupport (P0) | Batch |
+| MarkdownApi | Public headers | 公開の型と関数 | 9.8, 13.1 | extension.h (P0), render.h (P0) | Service |
+| MdEscape | Render | エスケープと文字参照 | 3.2, 13.5 | buffer (P0) | Service |
+| MdOutput | Render | 出力先、BOM、改行 | 1.2–1.5, 2.5, 7.4, 8.8, 8.9 | buffer (P0), line table (P0) | Service, State |
+| MdDispatch | Render | スロットと区切り文字と文字の表 | 9.1–9.5, 9.7, 10.3, 10.4 | syntax set (P0), inline.h (P0) | Service |
+| MdSource | Render | 元の行の読み取り | 2.2, 8.4 | spelling.h (P0), document.h (P0) | Service |
+| MdJudge | Render | 判断の表 | 2.1, 2.3, 2.4, 5.1, 6.6 | spelling.h (P0) | Service |
+| MdLines | Render | 行の組み立てと帯 | 2.4, 8.1–8.7 | MdSource (P0), MdOutput (P0) | Service, State |
+| MdContent | Render | 中身の準備と作り直し | 3.1–3.4, 3.10, 5.2, 5.4, 6.1–6.5, 9.6, 9.7 | MdLines (P0), MdJudge (P0), inline.h (P0) | Service, State |
+| MdEngine | Render | 入口、たどり、区切り、フック、報告 | 1.1, 1.5–1.8, 3.6, 3.9, 4.1–4.4, 7.5, 7.6, 9.2, 9.5, 13.2–13.4 | すべて (P0) | Service, State |
+| CoreMarkdown | Syntax | `amark.core.markdown` と 19 の型 | 3.2–3.10, 4.1, 5.3, 5.5, 7.1–7.3, 8.5, 8.6, 10.1, 10.2 | markdown.h (P0), scan.h (P1), inline.h (P1) | Service |
+| MdTestSupport | Test | 照合と生成テストの検査 | 12.1–12.3, 12.5 | 上流のテストの補助 (P0) | Service |
+| MdEdits | Test | 編集の操作と検査 | 12.2–12.4 | 公開 API (P0) | Service |
+| GfmMdExt | Test | GFM 相当の Markdown の部品 | 11.1–11.4 | markdown.h (P0), gfm_html_ext.h (P0) | Service |
+| MdTests / MdFuzz | Test / Fuzz | 要件の検証 | 全要件 | MdTestSupport (P0) | Batch |
 
 ### 共通の規約
-- `foundation` の規約に従う：失敗しうる関数は `amark_error_t` を返す。必須のポインタ引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。問い合わせの関数は値を直接返す。公開の構造体は先頭に `size_t struct_size`（スロットは `amark_slot_t`）を持ち、ライブラリは v1 の最小の大きさ以上であることを確かめ、知らない末尾のフィールドを読まない。
-- 文脈の関数は、出力の処理・接頭辞の処理・`can_follow`・フックの呼び出しの間だけ使える。外での呼び出し、使えない場面での呼び出しは `AMARK_ERROR_INVALID_STATE`（void の関数は何もしない、問い合わせは「なし」を返す）。
-- 表現できないことは、エンジンの検査か `amark_markdown_fail` で記録し、最初の 1 つを報告する。以後の書き出しは何もせずにその失敗を返す。
+- 失敗しうる関数は `amark_error_t` を返し、結果を出力引数で返す。必須の引数が NULL なら `AMARK_ERROR_INVALID_ARGUMENT`。
+- 公開の構造体は先頭に `size_t struct_size` を持つ（スロットは `amark_slot_t` の `struct_size`）。最初の版の最小の大きさより小さければ不正な引数とし、知らない末尾のフィールドは読まない。
+- 出力の文脈は、出力の処理、帯の合成、隣接の判断、フック、フィルタの呼び出しの間だけ有効である。文書は同時に 1 つのスレッドだけが使う（出力も値の問い合わせでキャッシュを書く）。この規約を `markdown.h` の冒頭のコメントに書く。
 
 ### Public headers
 
@@ -339,20 +393,77 @@ graph TB
 
 | Field | Detail |
 |-------|--------|
-| Intent | 公開の型・関数・定数を、依存の順に宣言する |
-| Requirements | 9.1, 13.1, 13.2 |
+| Intent | 公開の型、関数、定数を、依存の順に宣言する |
+| Requirements | 9.8, 13.1 |
 
 **Responsibilities & Constraints**
-- `markdown.h` は `node.h`、`token.h`、`buffer.h`、`extension.h`、`render.h` を include する。`AMARK_BEGIN_DECLS` / `AMARK_END_DECLS` で囲み、ガードは `AMARK_MARKDOWN_H`。
-- 宣言は各コンポーネントの Contracts に分けて示す。スロットの種類の番号は `extension.h` に置く。
+- `markdown.h` は `node.h`、`buffer.h`、`extension.h`、`render.h` を include し、`AMARK_BEGIN_DECLS` / `AMARK_END_DECLS` で囲む。ガードは `AMARK_MARKDOWN_H`。
+- 入口と出力先の形は `html-renderer` と同じ（`amark_render_<format>` と `_to`）。
 
 **Contracts**: Service [x]
 ```c
-/* include/amark/extension.h（追記） */
-/* markdown-renderer（syntax-tree の一覧の 13–14） */
-#define AMARK_SLOT_MARKDOWN_NODE  13u   /* amark_markdown_node_slot_t */
-#define AMARK_SLOT_MARKDOWN_HOOKS 14u   /* amark_markdown_hooks_slot_t */
+/* include/amark/markdown.h */
+typedef struct amark_markdown_context amark_markdown_context_t;   /* 不透明。呼び出しの間だけ有効 */
+
+/* 表現できない理由の分類（開いた集合） */
+#define AMARK_MARKDOWN_PROBLEM_NO_OUTPUT  1u   /* 元の表記で出せない型に出力の処理がない */
+#define AMARK_MARKDOWN_PROBLEM_EMPTY      2u   /* 空では表せない（段落、コード、強調、HTML） */
+#define AMARK_MARKDOWN_PROBLEM_NESTING    3u   /* その位置に置けない（リンクの中のリンク、末尾の改行、ATX の中の改行） */
+#define AMARK_MARKDOWN_PROBLEM_LITERAL    4u   /* リテラルが構文として成り立たない（HTML ブロック、生の HTML、保護できない行頭） */
+#define AMARK_MARKDOWN_PROBLEM_DELIMITER  5u   /* 区切り文字の並びが意図した対にならない */
+#define AMARK_MARKDOWN_PROBLEM_ADJACENT   6u   /* 隣と区別できない（空行なしのタイトな文脈、隣り合うコードスパン） */
+#define AMARK_MARKDOWN_PROBLEM_UNRESOLVED 7u   /* 参照の形のリンクが定義で解決できない */
+#define AMARK_MARKDOWN_PROBLEM_ATTRIBUTE  8u   /* 値の組み合わせを表せない（ルーズにできないリスト） */
+#define AMARK_MARKDOWN_PROBLEM_EXTENSION_FIRST 0x100u   /* これ以上は拡張が定める */
+
+typedef struct amark_markdown_report
+{
+    size_t struct_size;
+    const amark_node_t *node;      /* 原因のノード */
+    uint32_t problem;              /* AMARK_MARKDOWN_PROBLEM_* */
+} amark_markdown_report_t;
+
+/* エスケープの方式。0 は保守的な方式。後の版で選択肢を足す */
+typedef enum amark_markdown_escape
+{
+    AMARK_MARKDOWN_ESCAPE_CONSERVATIVE = 0
+} amark_markdown_escape_t;
+
+/* 新しいノードと style が未設定のノードの表記。0 は既定、それ以外は value.h の列挙の値 */
+typedef struct amark_markdown_styles
+{
+    int32_t list_bullet;           /* AMARK_LIST_BULLET_*（既定 DASH） */
+    int32_t list_delimiter;        /* AMARK_LIST_DELIMITER_*（既定 PERIOD） */
+    int32_t emph_delimiter;        /* AMARK_EMPH_DELIMITER_*（既定 ASTERISK） */
+    int32_t strong_delimiter;      /* AMARK_STRONG_DELIMITER_*（既定 ASTERISK） */
+    int32_t code_block_form;       /* AMARK_CODE_BLOCK_FORM_*（既定 FENCED） */
+    int32_t fence_char;            /* AMARK_CODE_BLOCK_FENCE_CHAR_*（既定 BACKTICK） */
+    int32_t fence_length;          /* 0 は 3。3–100 */
+    int32_t heading_form;          /* AMARK_HEADING_FORM_*（既定 ATX） */
+    int32_t thematic_break_char;   /* AMARK_THEMATIC_BREAK_CHAR_*（既定 ASTERISK） */
+    int32_t thematic_break_count;  /* 0 は 3。3–100 */
+    bool thematic_break_spaced;    /* 既定 false */
+    int32_t linebreak_form;        /* AMARK_LINEBREAK_FORM_*（既定 BACKSLASH） */
+    int32_t title_quote;           /* AMARK_LINK_TITLE_QUOTE_*（既定 DOUBLE） */
+} amark_markdown_styles_t;
+
+typedef struct amark_markdown_options
+{
+    size_t struct_size;
+    uint32_t flags;                     /* 予約。0 以外は不正な引数 */
+    amark_markdown_escape_t escape;
+    amark_markdown_styles_t styles;
+    amark_markdown_report_t *report;    /* NULL 可。表現できないときに書く（struct_size は呼び出し側） */
+} amark_markdown_options_t;
+
+AMARK_API void amark_markdown_options_init(amark_markdown_options_t *options);
+AMARK_API amark_error_t amark_render_markdown(const amark_node_t *node, const amark_markdown_options_t *options,
+                                              amark_buffer_t *out);
+AMARK_API amark_error_t amark_render_markdown_to(const amark_node_t *node, const amark_markdown_options_t *options,
+                                                 amark_write_fn_t write, void *user_data);
+AMARK_API const amark_extension_t *amark_markdown_core_extension(void);  /* "amark.core.markdown"。静的 */
 ```
+- スロットと文脈の API は、MdDispatch、MdLines、MdContent、MdEngine の各節に示す（すべて `markdown.h` で宣言する）。
 
 ### Render
 
@@ -360,381 +471,321 @@ graph TB
 
 | Field | Detail |
 |-------|--------|
-| Intent | 文脈なしで使えるエスケープと文字参照の関数 |
-| Requirements | 3.3, 13.4 |
+| Intent | 文脈を使わないエスケープと文字参照 |
+| Requirements | 3.2, 13.5 |
 
 **Responsibilities & Constraints**
-- `amark_markdown_escape`：`chars`（256 ビットの集合）に含まれるバイトのうち、ASCII の句読点は `\` を前に置き、それ以外（空白、英数字など）は 10 進の数値文字参照 `&#N;` にする。UTF-8 の多バイトの並びは変えない。
-- `amark_markdown_char_ref`：符号位置を `&#N;` で追加する（範囲外とサロゲートは `AMARK_ERROR_INVALID_ARGUMENT`）。
-- 失敗時は出力のバッファを呼び出し前の長さに戻す。数の書式は内部の 10 進の変換で書く（ロケールに依存しない）。
-- 内部の契約（`markdown_internal.h`）：`bool amark_md_is_ascii_punct(unsigned char c)`、`size_t amark_md_char_ref_length(uint32_t cp)`。
+- `amark_markdown_escape`：`characters`（NUL で終わる ASCII の句読点の列）に含まれるバイトの前に `\` を置き、LF を `&#10;`、CR を `&#13;` にする。ほかのバイト（NUL、不正な UTF-8 を含む）はそのまま。
+- `amark_markdown_char_ref`：符号位置を 10 進の `&#N;` で足す（0、サロゲート、0x10FFFF を超える値は不正な引数）。数の書式は内部の 10 進の変換で書く。
+- 失敗したら出力のバッファを呼び出し前の長さに戻す。
 
 **Contracts**: Service [x]
 ```c
-/* include/amark/markdown.h */
 AMARK_API amark_error_t amark_markdown_escape(amark_buffer_t *out, const char *data, size_t length,
-                                              const unsigned char chars[32]);
+                                              const char *characters);
 AMARK_API amark_error_t amark_markdown_char_ref(amark_buffer_t *out, uint32_t codepoint);
 ```
+- 内部の契約（`md_internal.h`）：`bool amark_md_is_ascii_punct(unsigned char c)`、`size_t amark_md_write_decimal(char *buffer, uint32_t value)`。
+
+#### MdOutput
+
+| Field | Detail |
+|-------|--------|
+| Intent | 出力先への書き出し、BOM、改行の保留、最初の失敗 |
+| Requirements | 1.2–1.5, 2.5, 7.4, 8.8, 8.9 |
+
+**Responsibilities & Constraints**
+- 出力先：バッファは開始時の長さを記録して直接追加し、失敗で終われば `amark_buffer_truncate` で戻す。書き出しの関数は 8 KiB の中継のバッファにため、超えたら渡し、終わりに残りを渡す。最初の失敗を保持し、以後は何もせずにその失敗を返す。
+- BOM：出力の根が文書のノードで、行の表の行 0 のソースが BOM を持てば（`amark_document_source_data`）、最初に EF BB BF を書く（2.5）。
+- 改行：行の終わりの改行は、次の行の始まりまで保留する。
+  - 元の行の改行はその種類（LF、CRLF、CR）、新しい行の改行は `amark_document_default_eol`（7.4）。
+  - 保留した改行が CR で、次の行が空で LF で終わるなら、保留した改行を CRLF にする（8.8）。
+  - 元の改行が NONE の行の後に行が続くなら、既定の改行にする。出力の最後の行の NONE はそのまま（8.9）。
+- 内部の契約：`amark_md_output_init(ctx, buffer | write)`、`amark_md_output_bytes(ctx, data, length)`、`amark_md_output_eol(ctx, line)`、`amark_md_output_finish(ctx, error)`。
+
+#### MdDispatch
+
+| Field | Detail |
+|-------|--------|
+| Intent | 構文セットのスロットを検査し、型ごとの連鎖、フックとフィルタ、区切り文字の表、エスケープする文字を作る |
+| Requirements | 9.1–9.5, 9.7, 10.3, 10.4 |
+
+**Responsibilities & Constraints**
+- `AMARK_SLOT_MARKDOWN_NODE` を構文セットの順に列挙し、検査する：`struct_size` が最小以上、`node_type` と `write` が NULL でない、`amark_syntax_set_find_node_type` で型が見つかる。違反は `AMARK_ERROR_INVALID_ARGUMENT` で何も出力しない（9.4）。
+- 連鎖の表：型の識別子で引く配列。`write` の連鎖（構文セットの順）と、`margin` と `follow` を持つものの最後。
+- `AMARK_SLOT_MARKDOWN_HOOKS` を構文セットの順に列挙し、検査する：大きさ、`state_size` が `AMARK_MARKDOWN_MAX_STATE_SIZE` 以下、1 つの拡張に 2 つ以上ない。`filter` を持つものを順に並べる。
+- 区切り文字の表：`AMARK_SLOT_INLINE_DELIMITER` のスロットから、文字ごとの flanking と規則（同じ文字は構文セットの後のもの）。
+- エスケープする文字：`begin` のフックが `amark_markdown_declare_special` で宣言した文字の和。`amark.core.markdown` の `begin` は `amark_inline_special_chars(set, NULL)` の文字を宣言する。
+
+**Contracts**: Service [x]
+```c
+typedef amark_error_t (*amark_markdown_write_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                   bool entering, void *user_data);
+
+typedef enum amark_markdown_margin_kind
+{
+    AMARK_MARKDOWN_MARGIN_FIRST = 1,         /* コンテナの最初の出力の行 */
+    AMARK_MARKDOWN_MARGIN_CONTINUATION = 2,  /* 続く行 */
+    AMARK_MARKDOWN_MARGIN_BLANK = 3,         /* 空の空行 */
+    AMARK_MARKDOWN_MARGIN_BLANK_SPACE = 4    /* 空白だけの空行 */
+} amark_markdown_margin_kind_t;
+
+/* 帯を合成して amark_markdown_write で書く。rest はその帯より右に出す行のバイト。
+ * *marker_only を真にすると、エンジンは帯だけの行を出し、rest を続く行の帯の後に置く（FIRST のときだけ） */
+typedef amark_error_t (*amark_markdown_margin_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *container,
+                                                    amark_markdown_margin_kind_t kind, const char *rest,
+                                                    size_t rest_length, bool *marker_only, void *user_data);
+
+/* node を previous の直後に空行なしで置いても、どちらの意味も変わらないか */
+typedef amark_error_t (*amark_markdown_follow_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                    const amark_node_t *previous, bool *direct, void *user_data);
+
+typedef struct amark_markdown_node_slot
+{
+    amark_slot_t base;                      /* kind = AMARK_SLOT_MARKDOWN_NODE */
+    const char *node_type;                  /* ノード型の名前 */
+    amark_markdown_write_fn_t write;        /* 必須。入るときと出るときに呼ぶ */
+    amark_markdown_margin_fn_t margin;      /* 任意。MARGINS の型の帯の合成 */
+    amark_markdown_follow_fn_t follow;      /* 任意。ないときは空行が要るとみなす */
+    void *user_data;
+} amark_markdown_node_slot_t;
+
+#define AMARK_MARKDOWN_MAX_STATE_SIZE 65536u
+
+typedef enum amark_markdown_line_kind
+{
+    AMARK_MARKDOWN_LINE_FIRST = 1,          /* 葉の中身の最初の行 */
+    AMARK_MARKDOWN_LINE_CONTINUATION = 2
+} amark_markdown_line_kind_t;
+
+typedef struct amark_markdown_hooks_slot
+{
+    amark_slot_t base;                      /* kind = AMARK_SLOT_MARKDOWN_HOOKS */
+    size_t state_size;
+    amark_error_t (*begin)(amark_markdown_context_t *ctx, void *state, void *user_data);
+    amark_error_t (*end)(amark_markdown_context_t *ctx, void *state, void *user_data);
+    void (*finish)(amark_markdown_context_t *ctx, void *state, void *user_data);
+    /* 中身の行のフィルタ。amark_markdown_filter_forward で次へ渡す。渡さなければ行は空になり、
+     * MdContent の空の行の規則で報告される */
+    amark_error_t (*filter)(amark_markdown_context_t *ctx, void *state, amark_markdown_line_kind_t kind,
+                            const char *data, size_t length, void *user_data);
+    void *user_data;
+} amark_markdown_hooks_slot_t;
+
+AMARK_API amark_error_t amark_markdown_declare_special(amark_markdown_context_t *ctx, const char *characters);
+```
+- 内部の契約：`amark_md_dispatch_init(ctx, set)`、`amark_md_dispatch_deinit(ctx)`、`amark_md_chain_of(ctx, type)`、`amark_md_delimiter_of(ctx, c, &flanking, &rule)`、`amark_md_is_special(ctx, c)`。
 
 #### MdSource
 
 | Field | Detail |
 |-------|--------|
-| Intent | 部分木のトークンを出力の順に並べ、元の行と列を求める |
-| Requirements | 2.1–2.6, 8.4, 12.1 |
+| Intent | 元の行のバイトと、ブロックの記録の列の読み取り |
+| Requirements | 2.2, 8.4 |
 
 **Responsibilities & Constraints**
-- 出力順の列挙（カーソル）：部分木のすべてのトークン（接頭辞の印のものを含む）を（ソース、オフセット、`tab_column_offset`）の順に返す。各ノードのトークンは整列済みなので、前順にたどりながら、子孫と位置が重なるコンテナのトークンだけを、深さで抑えた小さなヒープで合流させる（O(T log D)）。部分木が複数のソースを参照するときは、根の最初のトークンのソースだけを対象にし、他のソースのトークンがあればカーソルは「混在」を返す（呼び出し側は元の表記をそのまま出さない）。
-- 元の行：オフセットの行の先頭は `amark_document_position` の列から求める（1 行目は BOM の後）。行ごとの「コンテナの接頭辞のトークン」は、コンテナのトークンの二分探索で `[行の先頭, アンカー]` の範囲から取り出す。
-- タブの元の幅：行の先頭から 4 列のタブストップで列を数え、タブのバイトが表す列の数を返す。
-- 文書の改行コード：根の文書のソース 0 の最初の LF・CR・CRLF（なければ LF）。
-- 末尾の空行：部分木の、ソース上の最後の「SPACE と LINE_ENDING の種類だけからなる行」の並び（接頭辞のトークンを除く）とその最初のトークンの位置。
+- 元の範囲：行 L の列 `[s, e)` を、`amark_document_column_to_byte` でバイトに変える。始まりがタブの途中なら、そのタブの残りの列を空白にし、終わりがタブの途中なら、そのタブの中の列を空白にする。それ以外はバイトのまま。
+- 葉の行の対応：中身を持つ葉について、中身を持つ元の行の列（部分のある行。配置済みでなければ行の範囲の行）と、中身を持たない表記だけの行（setext の下線、フェンスの行）を返す。
+- 記録の列：ブロックの行 L の上のレイアウトのトークンと中身の部分を、列の順に返す（`amark_block_token_at`、`amark_block_content_piece_at` を行の順の添字で進める。葉ごとに 1 回の走査）。
+- 確保をしない（呼び出し側の作業領域を使う）。
+
+**Contracts**: Service [x]（内部）
+```c
+amark_error_t amark_md_source_range(ctx, amark_line_id_t line, uint32_t start, uint32_t end, amark_md_range_t *out);
+amark_error_t amark_md_source_leaf_lines(ctx, const amark_node_t *leaf, amark_md_leaf_lines_t *out);
+```
+
+#### MdJudge
+
+| Field | Detail |
+|-------|--------|
+| Intent | 判断の表の分類 |
+| Requirements | 2.1, 2.3, 2.4, 5.1, 6.6 |
+
+**Responsibilities & Constraints**
+- 「判断の表」の規則で、ブロックの状態、インラインのノードの状態（KEEP は `complete` でトークンを持つ、REBUILD は綴りを捨てた、NEW は新しい）、葉の中身の種類を決める。
+- SPELLED の確かめは、葉の子孫のインラインを 1 回たどり、トークンの範囲で被覆と入れ子の順を確かめる（`amark_block_content_verbatim` の規則を自由な中身に当てる。確保は作業領域だけ）。
+- 「元の帯を出せる」の判定 `amark_md_judge_original_margin(ctx, frame, line, &margin)` を持つ。枠の配列（`md_internal.h`）を読むだけで、MdLines も帯の決定にこの判定を使う（MdJudge は MdLines の関数を呼ばない）。
+- `amark_markdown_judge` で出力の処理に渡す。`in_place` は、そのブロックのすべての行で祖先の帯が元の帯を出せるときに真。
 
 **Contracts**: Service [x]
 ```c
-/* src/render/markdown_internal.h */
-amark_error_t amark_md_cursor_init(amark_md_cursor_t *cursor, const amark_node_t *root, amark_markdown_context_t *ctx);
-bool amark_md_cursor_next(amark_md_cursor_t *cursor, const amark_node_t **out_owner, amark_token_t *out_token);
-size_t amark_md_line_start(const amark_document_t *doc, amark_source_id_t source, size_t offset);
-unsigned amark_md_tab_width(const amark_document_t *doc, amark_source_id_t source, size_t offset);
+typedef enum amark_markdown_state
+{
+    AMARK_MARKDOWN_UNIT = 1, AMARK_MARKDOWN_KEEP = 2, AMARK_MARKDOWN_REBUILD = 3, AMARK_MARKDOWN_NEW = 4
+} amark_markdown_state_t;
+
+typedef enum amark_markdown_content_kind
+{
+    AMARK_MARKDOWN_CONTENT_NONE = 1, AMARK_MARKDOWN_CONTENT_VERBATIM = 2,
+    AMARK_MARKDOWN_CONTENT_SPELLED = 3, AMARK_MARKDOWN_CONTENT_REBUILT = 4
+} amark_markdown_content_kind_t;
+
+typedef struct amark_markdown_judgment
+{
+    size_t struct_size;
+    amark_markdown_state_t state;
+    amark_markdown_content_kind_t content;  /* 中身を持つ葉だけ。ほかは NONE */
+    uint32_t dropped_facets;                /* amark_spelling_state_t から写す */
+    bool structure_dropped;
+    bool in_place;
+} amark_markdown_judgment_t;
+
+AMARK_API amark_error_t amark_markdown_judge(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                             amark_markdown_judgment_t *out);
 ```
 
 #### MdLines
 
 | Field | Detail |
 |-------|--------|
-| Intent | 現在の行をため、接頭辞と改行を付けて出力先に渡す |
-| Requirements | 1.2–1.5, 2.1–2.4, 6.4, 8.1–8.5 |
+| Intent | 祖先の枠、出力の行の組み立て、帯の決定、タブの展開 |
+| Requirements | 2.4, 8.1–8.7 |
 
 **Responsibilities & Constraints**
-- 出力先：バッファは開始時の長さを記録し、失敗で戻す。書き出しの関数は中継のバッファにため、8 KiB を超えたら渡し、最後に残りを渡す。書き出しの関数の失敗は最初の失敗として保持する。
-- 行：`{断片の列（バイト、分類、所有者、元の位置）、アンカー（最初の元の位置の断片のソースの行）、改行（トークンか合成）}`。改行のトークン（`LINE_ENDING`）か `amark_markdown_end_line` で行が閉じる。閉じていない行の後に新しい行の内容やブロックが来たら、合成した改行で閉じる。出力の最後の行は、元の最後の行が改行を持たなければ改行なしで終わる。
-- 接頭辞の積み重ね：処理の `prefix` を持つノード（コンテナ）に入ると積み、出ると降ろす。元の表記をそのまま出す部分木の中のコンテナは積まない（その接頭辞はカーソルのトークンとして流れる）。各コンテナは「最初の行を出したか」を持つ。
-- 接頭辞の付け方（行を閉じるとき、積み重ねの外側から順に）：各コンテナの `prefix` を、コンテナの最初の出力の行なら `FIRST`、内容のない行なら `BLANK`、それ以外は `NEXT` で呼ぶ。`prefix` は `amark_markdown_write_prefix_tokens` で元の接頭辞のトークンを書くか、`amark_markdown_write` で合成する（元の表記を使うかの判断は処理が持つ。例：項目はマーカーを変えたら合成する）。
-- `amark_markdown_write_prefix_tokens` が書くトークン：`FIRST` では、コンテナの最初の元の行の接頭辞のトークン（その行がアンカーでなくても、表記の希望として使える）。`NEXT` と `BLANK` では、行のアンカーの元の行にコンテナが持つ接頭辞のトークン（`LAZY_CONTINUATION` を含む）。ただし、それがコンテナの最初の元の行のものなら書かない。同じ元の行をアンカーにできるのは最初の 1 つの出力の行だけ（2 つ目からはアンカーなしとして扱う）。書くトークンがなければ何も書かず、`*out_written` を偽にする。
-- 葉の続く行の字下げ：作り直す葉の中身で改行の後に始まる行がアンカーを持ち、葉がその元の行の先頭に自分の接頭辞でない `SPACE` のトークン（段落の行頭の字下げなど）を持てば、接頭辞の後にそれを書く（中身の最初の行の字下げは、処理が `amark_markdown_write_own_tokens` で書く）。
-- 部分的なタブ：同じタブのバイトの部分を、すべて元のトークンとして同じ行で続けて出すときだけタブのバイトを 1 回出す。それ以外は、出す部分を `tab_columns` 個の空白にする。
-- 列の規則：行の中で、合成した接頭辞か、元と異なる長さの断片の後ろに来る、列に依存するトークン（`SPACE` と `PARTIAL_TAB` と接頭辞のトークン）のタブは、`amark_md_tab_width` の元の幅の空白にする（8.4）。テキストとコードの中身のタブはそのまま。
-- 合成した改行は、オプション（`DOCUMENT` は文書の改行コード、`LF`、`CRLF`）。
-- 内部のカウンタ（INTERNAL）：行の数、合成した接頭辞の数、元の表記の行の数。テスト用に、元の表記をそのまま出したブロックの（ノード、出力の範囲）を報告する追跡の関数を持つ。
+- **枠**：出力中のブロックごとに 1 つ（動的な配列）。持つもの：ノード、種類（帯を持つコンテナ、通り抜け、葉）、最初の出力の行を出したか、子の出力の順、空行の扱い（spacing）、出力の処理が置く値（`set_frame_value`）。
+- **行の組み立て**：`begin_line(L)` から `end_line` までの書き出しを、区切り（元の範囲 `{L, s, e, 展開できる}` か、バイト）の列としてためる。`end_line` で、内側の枠から外側の枠の順に帯を決める。
+  1. 元の帯を出せる（判断の表の条件）なら、PRESENT は元の範囲（展開できる）、LAZY は何も足さない。
+  2. そうでなければ、その型の `margin` を呼ぶ。種類は、最初の出力の行なら FIRST、空行の行なら空白の有無で BLANK か BLANK_SPACE、それ以外は CONTINUATION。`rest` はその枠より右に出す行のバイト。`margin` がなければ、表現できない（NO_OUTPUT）。
+  3. FIRST で `marker_only` が返れば、帯だけの行（それより外の枠の帯を付ける）を出してから、同じ行を CONTINUATION で組み直す（8.6）。
+- **タブの展開**（8.4）：区切りを左から出し、出力の列を追う。同じ行の、列が連続する元の範囲はまとめる（分けたタブが 1 つのタブに戻る）。まとめた範囲の始まりの出力の列が元の列と等しければ元のバイトを出し、等しくなければ、帯と葉自身の表記の範囲（展開できる）のタブを元の幅の空白に、中身の範囲のタブはそのまま出す。タブの途中の端は MdSource の規則で空白にする。
+- 空行：`begin_line` に空行の印を付けた行（エンジンが空行の記録と合成する空行に使う）は、帯の決定で BLANK / BLANK_SPACE を使う。
+- **最初の行の規則**（8.7）：枠の最初の出力の行に、元の帯が `FIRST` でない（その型が `FIRST` の帯を持つとき）か、元の `FIRST` の帯が最初の出力の行でない行にあれば、元の帯を使わず合成する。
 
-**Contracts**: Service [x] / State [x]
-```c
-/* include/amark/markdown.h */
-typedef enum amark_markdown_line_kind {
-    AMARK_MARKDOWN_LINE_FIRST = 1,   /* コンテナの最初の行 */
-    AMARK_MARKDOWN_LINE_NEXT = 2,    /* 続く行 */
-    AMARK_MARKDOWN_LINE_BLANK = 3    /* 内容のない行 */
-} amark_markdown_line_kind_t;
-
-AMARK_API amark_error_t amark_markdown_write(amark_markdown_context_t *ctx, const char *data, size_t length);
-    /* マークアップ（改行を含めない）。接頭辞の処理の中では接頭辞に書く */
-AMARK_API amark_error_t amark_markdown_write_lines(amark_markdown_context_t *ctx, const char *data, size_t length);
-    /* LF で区切った行をそのまま書く（コードの内容、HTML のリテラル）。LF ごとに合成した改行で行を閉じる */
-AMARK_API amark_error_t amark_markdown_end_line(amark_markdown_context_t *ctx);   /* 合成した改行で行を閉じる */
-AMARK_API amark_error_t amark_markdown_write_prefix_tokens(amark_markdown_context_t *ctx, bool *out_written);
-    /* 接頭辞の処理の中だけ。現在のコンテナの、この行に使える元の接頭辞のトークンを書く */
-
-/* 元の表記 */
-#define AMARK_MARKDOWN_VERBATIM_NO_INDENT 0x01u   /* 最初の行の、接頭辞でない先頭の SPACE を出さない */
-AMARK_API amark_error_t amark_markdown_write_verbatim(amark_markdown_context_t *ctx, const amark_node_t *node,
-                                                      uint32_t flags);   /* 現在のノードの部分木。入るときだけ。子を省く */
-AMARK_API amark_error_t amark_markdown_write_own_tokens(amark_markdown_context_t *ctx, const amark_node_t *node,
-                                                        bool entering);
-    /* 自分のトークン（接頭辞と空行を除く）のうち、入るときは最初の子より前、出るときは最後の子より後ろのもの */
-AMARK_API amark_error_t amark_markdown_write_token(amark_markdown_context_t *ctx, const amark_node_t *node, size_t index);
-```
-- Preconditions：`write` と `end_line` は葉の中身の外では処理の中、中身の中では MdInline の断片として扱う。`write` の改行のバイト、`write_verbatim` の現在のノード以外の指定は `AMARK_ERROR_INVALID_ARGUMENT`。接頭辞の処理の中の `end_line` と元の表記の書き出しは `AMARK_ERROR_INVALID_STATE`。
-- State model：`{sink, start_length, staging, current_line, prefix_stack[{node, slot, first_done}], used_anchors, line_ending, counters}`。
-
-#### MdInline
-
-| Field | Detail |
-|-------|--------|
-| Intent | 作り直す葉の中身を断片としてため、エスケープ・保護・区切り文字を解決して行に流す |
-| Requirements | 3.3–3.5, 3.8, 5.3, 6.5, 9.4, 9.6, 9.7 |
-
-**Responsibilities & Constraints**
-- `amark_markdown_begin_inline` から `amark_markdown_end_inline` までの書き出しは、葉の中身の断片になる。断片の分類：`TEXT`（エスケープしうる値）、`FIXED`（元のエスケープ・文字参照・置換のトークン。表す文字は保護済み）、`MARKUP`（マークアップと元の表記の書き出し）、`DELIMITER`（区切り文字。文字は解決で決まる）。改行（`end_line` か改行のトークン）で中身の行が分かれる。`SINGLE_LINE` の葉での改行は `NESTING` で表現できない。
-- **エスケープの集合 E**：フックの `begin` が `amark_markdown_add_escape_chars` で足した文字の和（`amark.core.markdown` は構文セットのインラインの文字の宣言の和を足す）と、葉の指定の `escape_chars`。符号化の手段（`amark_markdown_set_encodings`。既定はバックスラッシュと文字参照の両方）がない文字の保護が要るときは `NO_SYNTAX` で表現できない。
-- 解決の手順（end_inline。System Flows の図）：
-  1. **行の表示**：中身の各行について、`TEXT` は値、`FIXED` は表す文字、`MARKUP` と `DELIMITER` はバイトとした表示と、バイトごとの分類と所有者を作り、フックの `protect` を構文セットの順に呼ぶ。`protect` は `amark_markdown_protect(ctx, start, end)` で、構文として解釈されうる範囲を報告する。
-  2. **エスケープ**：`TEXT` の E の文字をすべて符号化する（ASCII の句読点は `\`、それ以外は文字参照）。保護の範囲は、範囲の中の `TEXT` の ASCII の句読点を 1 つ（先頭に近いもの）、なければ最初の `TEXT` の文字を文字参照にする。範囲の中が `FIXED` を含めばすでに保護済みとする。範囲の中に `TEXT` がなく `FIXED` もなければ（マークアップだけ）`LITERAL` で表現できない。
-  3. **端の保護**（葉の指定 `TRIM`、既定で有効）：各行の先頭の空白の並びの最初の `TEXT` の空白と、末尾の空白の並び（分類を問わない）の最後の `TEXT` の空白を文字参照にする。葉の指定の `trailing_chars` に含まれる文字が中身の最後の `TEXT` なら保護する（ATX の `#`）。
-  4. **次の文字の要求**：`amark_markdown_guard_next(ctx, chars)` を書いた位置の直後の文字が `chars` に含まれ、`TEXT` なら符号化し、`MARKUP` なら `ADJACENT` で表現できない。
-  5. **区切り文字**：
-     - 希望の割り当て：各区切りの対（開きと閉じ、同じノード）に、`candidates` の先頭の文字を割り当てる。
-     - 検証：同じ文字の隣り合う `DELIMITER` を 1 つの並びにまとめ、並びの前後の出力の文字から `flanks` で開閉の可否を求め、フックの `match_delimiters`（最初に提供したフックのもの）で照合する。照合の結果を、開きの並びは内側（右端）から、閉じの並びは内側（左端）から使った文字の数として断片に割り当て、すべての対がちょうど自分の文字の数で対になり、他の対も残りもなければ成功。
-     - 失敗なら構成的な割り当て：開きの位置の順に、(a) 前に隣り合う区切りと、閉じの後ろに隣り合う割り当て済みの区切りと違う文字を `candidates` から選び、(b) 開きが「開くだけ」、閉じが「閉じるだけ」になるように、内側の隣の文字が空白なら文字参照にし、それでも足りなければ外側の隣の `TEXT` の文字を文字参照にする（文字参照は句読点として働く）。開きが閉じることもできる場合は、同じ文字の祖先の開きがないことを確かめる。満たせなければ `DELIMITER` で表現できない。割り当て直した後、照合があれば再び検証する。
-     - 照合を提供するフックがなければ、構成的な割り当てだけを使う（構成上、元の構造に照合される）。
-  6. 各文字の符号化は「素 → バックスラッシュ → 文字参照」の方向にだけ強め、1 文字につき高々 2 回なので、手順は中身の大きさに線形。
-  7. 解決した各行を MdLines に流す（行のアンカーは最初の元の位置の断片）。
-- `amark_markdown_write_text_tokens`：text のノードの元のトークンを、`TEXT` は値の断片、`ESCAPE`・`CHAR_REF`・`REPLACED` は `FIXED` として書く（5.3）。
-- `amark_markdown_write_value`：リンクの宛先やタイトルなどの値を、E と `extra_chars` でエスケープした `TEXT` として書く（保護のフックの対象にしない）。
-
-**Contracts**: Service [x] / State [x]
-```c
-/* include/amark/markdown.h */
-#define AMARK_MARKDOWN_INLINE_BLOCK_GUARD 0x01u   /* 各行の行頭のブロックの構文を保護の対象にする（段落の類） */
-#define AMARK_MARKDOWN_INLINE_SINGLE_LINE 0x02u   /* 中身に改行を許さない（ATX、表のセル） */
-#define AMARK_MARKDOWN_INLINE_NO_TRIM     0x04u   /* 端の空白の保護をしない */
-
-typedef struct amark_markdown_inline_options {
-    size_t struct_size;
-    uint32_t flags;
-    const unsigned char *escape_chars;     /* 32 バイトの集合。この葉の TEXT で追加でエスケープする。NULL 可 */
-    const unsigned char *trailing_chars;   /* 32 バイトの集合。中身の最後の TEXT の文字なら保護する。NULL 可 */
-} amark_markdown_inline_options_t;
-
-AMARK_API amark_error_t amark_markdown_begin_inline(amark_markdown_context_t *ctx,
-                                                    const amark_markdown_inline_options_t *options);
-AMARK_API amark_error_t amark_markdown_end_inline(amark_markdown_context_t *ctx);
-AMARK_API amark_error_t amark_markdown_write_text(amark_markdown_context_t *ctx, const char *data, size_t length);
-AMARK_API amark_error_t amark_markdown_write_text_tokens(amark_markdown_context_t *ctx, const amark_node_t *text);
-AMARK_API amark_error_t amark_markdown_write_value(amark_markdown_context_t *ctx, const char *data, size_t length,
-                                                   const unsigned char extra_chars[32]);   /* extra_chars は NULL 可 */
-AMARK_API amark_error_t amark_markdown_guard_next(amark_markdown_context_t *ctx, const unsigned char chars[32]);
-
-typedef void (*amark_markdown_flank_fn_t)(unsigned char character, uint32_t before, uint32_t after,
-                                          bool *out_can_open, bool *out_can_close);
-typedef struct amark_markdown_delimiter {
-    size_t struct_size;
-    const amark_node_t *node;              /* 区切りを持つノード。開きと閉じを対にする */
-    bool opening;
-    size_t length;                       /* 1 以上 */
-    const char *candidates;              /* 使える文字（NUL 終端）。先頭が希望（元の文字かオプション） */
-    amark_markdown_flank_fn_t flanks;    /* 必須 */
-    uint32_t rule;                       /* 照合に渡す規則（組み込みは inline.h の amark_delimiter_rule_t の値） */
-    size_t max_run_length;               /* 照合に渡す。0 は上限なし */
-} amark_markdown_delimiter_t;
-AMARK_API amark_error_t amark_markdown_write_delimiter(amark_markdown_context_t *ctx, const amark_markdown_delimiter_t *d);
-
-/* フックの begin の中だけ */
-#define AMARK_MARKDOWN_ENCODE_BACKSLASH 0x01u
-#define AMARK_MARKDOWN_ENCODE_CHAR_REF  0x02u
-AMARK_API amark_error_t amark_markdown_add_escape_chars(amark_markdown_context_t *ctx, const unsigned char chars[32]);
-AMARK_API amark_error_t amark_markdown_set_encodings(amark_markdown_context_t *ctx, uint32_t encodings);
-
-/* 保護のフックの中だけ */
-/* バイトの分類。1 つのバイトは 1 つの分類だけを持つ閉じた集合なので enum にする（kinds は 1 バイトずつ詰めて持つ） */
-typedef enum amark_markdown_byte_kind {
-    AMARK_MARKDOWN_BYTE_TEXT = 1,
-    AMARK_MARKDOWN_BYTE_FIXED = 2,
-    AMARK_MARKDOWN_BYTE_MARKUP = 3,
-    AMARK_MARKDOWN_BYTE_DELIMITER = 4
-} amark_markdown_byte_kind_t;
-#define AMARK_MARKDOWN_LINE_CONTENT_START 0x01u  /* 葉の中身の最初の行 */
-#define AMARK_MARKDOWN_LINE_BLOCK_GUARD   0x02u  /* 葉が BLOCK_GUARD を指定した */
-typedef struct amark_markdown_line {
-    size_t struct_size;
-    const char *text;                    /* 行の表示 */
-    size_t length;
-    const unsigned char *kinds;          /* バイトごとの amark_markdown_byte_kind_t の値（1 バイトに詰める） */
-    uint32_t flags;
-    const amark_node_t *leaf;
-} amark_markdown_line_t;
-AMARK_API const amark_node_t *amark_markdown_line_owner(const amark_markdown_context_t *ctx, size_t position);
-AMARK_API amark_error_t amark_markdown_protect(amark_markdown_context_t *ctx, size_t start, size_t end);
-```
-- Preconditions：`begin_inline` は葉のブロックの処理の入るときだけ、`end_inline` は同じ処理の出るときだけ（入れ子は `INVALID_STATE`）。`write_text` の改行のバイトは `INVALID_ARGUMENT`。区切りの `length` が 0、`flanks` か `candidates` が NULL か空、閉じの対になる開きがない場合は `INVALID_ARGUMENT`。
-- State model：`{pieces[], lines[], escape_set, encodings, leaf_options, open_delimiters[], guards[], protect_ranges[]}`。葉ごとに使い回す。
-
-#### MdBlocks
-
-| Field | Detail |
-|-------|--------|
-| Intent | 処理を呼ぶ部分のノードの情報、状態の印、汚れ、ブロックの区切り |
-| Requirements | 3.6, 5.1, 5.2, 9.4, 12.1, 12.2 |
-
-**Responsibilities & Constraints**
-- ノードの情報の表：フックの `begin` の後、処理を呼ぶ扱いになりうる部分（編集か汚れの印を持つノードの子）を後順に 1 回たどり、各ノードの `{状態の印, 最初の元の位置と行, 最後の内容の元の位置と行, 末尾の空行の数と位置, ソース}` を、ノードのポインタを鍵とする開番地の表に持つ。子の情報から親の情報を作るので、全体で O(n + T)。元の表記をそのまま出す部分木の内側は計算しない。
-- 汚れの伝播：`amark_markdown_mark_dirty` は、印を付けたノードから根の方へ「汚れた子孫を持つ」の印を、すでに持つ祖先で止めながら付ける（償却で定数）。
-- ブロックの区切り（System Flows）：親のブロックの子の間で、(1) 前の子の末尾の空行（前の子を元の表記で出したときはその中で出ている）と、(2) 親の自分の空行のトークン（接頭辞でない、SPACE と LINE_ENDING だけの元の行。親の子のうち、その行より前で最後に終わる子の後ろに属する。どの子より前なら最初の子の前）、を区切りとして出す。元の隣接でないときは、親の空行の規則に従って空行を足すか、`can_follow` を確かめる。
-- 空行の規則（`amark_markdown_set_gap`）：`KEEP`（既定）、`NONE`（子の間と最後の子の後ろの空行を出さない。元の表記で出す子の末尾の空行も出さない）、`BLANK`（すべての子の間に 1 つ以上）。最初の子の前の空行（項目の最初の行が空のときなど）は規則にかかわらず元のまま出す。
-- 合成した空行は、内容のない行として MdLines に渡す（祖先のコンテナが `BLANK` の接頭辞を付ける）。
-- `NEW_BEFORE` / `NEW_AFTER` は、元の隣接の判定の結果を前後のノードに付ける。
-
-**Contracts**: Service [x] / State [x]
-```c
-/* include/amark/markdown.h */
-#define AMARK_MARKDOWN_STATE_TOKENS      0x01u
-#define AMARK_MARKDOWN_STATE_EDITED      0x02u
-#define AMARK_MARKDOWN_STATE_STRUCTURE   0x04u
-#define AMARK_MARKDOWN_STATE_RELOCATED   0x08u
-#define AMARK_MARKDOWN_STATE_DIRTY       0x10u
-#define AMARK_MARKDOWN_STATE_NEW_BEFORE  0x20u
-#define AMARK_MARKDOWN_STATE_NEW_AFTER   0x40u
-#define AMARK_MARKDOWN_STATE_EDITED_LEAF 0x80u
-AMARK_API uint32_t amark_markdown_node_state(const amark_markdown_context_t *ctx, const amark_node_t *node);
-
-typedef enum amark_markdown_gap {
-    AMARK_MARKDOWN_GAP_KEEP = 0, AMARK_MARKDOWN_GAP_NONE = 1, AMARK_MARKDOWN_GAP_BLANK = 2
-} amark_markdown_gap_t;
-AMARK_API amark_error_t amark_markdown_set_gap(amark_markdown_context_t *ctx, amark_markdown_gap_t gap);
-    /* 現在のノード（コンテナ）に入るときだけ */
-AMARK_API amark_error_t amark_markdown_mark_dirty(amark_markdown_context_t *ctx, const amark_node_t *node);
-    /* begin の中か、まだ出力していないノードに対してだけ。出力の後のノードは INVALID_STATE */
-```
-
-#### MdDispatch
-
-| Field | Detail |
-|-------|--------|
-| Intent | 構文セットの Markdown のスロットを検査し、型ごとの連鎖とフックの一覧を作る |
-| Requirements | 9.1, 9.3, 9.8 |
-
-**Responsibilities & Constraints**
-- `AMARK_SLOT_MARKDOWN_NODE` を構文セットの順に列挙し、`struct_size` が v1 の最小以上、`node_type` と `render` が NULL でない、型が構文セットにあることを確かめる。型の識別子で引く連鎖の表を作る。
-- `AMARK_SLOT_MARKDOWN_HOOKS` を構文セットの順に列挙し、`struct_size`、`state_size` が `AMARK_MARKDOWN_MAX_STATE_SIZE`（64 KiB）以下、1 つの構文拡張に 2 つ以上ないことを確かめる。
-- 違反は `AMARK_ERROR_INVALID_ARGUMENT` で、何も出力しない。確保はグローバルのアロケータで、1 回の出力の中で作って壊す。
+- `margin` の関数の中では、`amark_markdown_write` と `amark_markdown_write_original` で帯を書く（行の組み立ての中の書き出しになる）。
 
 **Contracts**: Service [x]
 ```c
-/* include/amark/markdown.h */
-typedef struct amark_markdown_context amark_markdown_context_t;   /* 不透明。処理・接頭辞・can_follow・フックの間だけ有効 */
-
-typedef amark_error_t (*amark_markdown_node_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
-                                                  bool entering, void *user_data);
-typedef amark_error_t (*amark_markdown_prefix_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
-                                                    amark_markdown_line_kind_t kind, void *user_data);
-typedef bool (*amark_markdown_follow_fn_t)(amark_markdown_context_t *ctx, const amark_node_t *node,
-                                           const amark_node_t *previous, void *user_data);
-
-typedef struct amark_markdown_node_slot {
-    amark_slot_t base;                      /* kind = AMARK_SLOT_MARKDOWN_NODE */
-    const char *node_type;
-    amark_markdown_node_fn_t render;       /* 必須。入るときと出るとき（葉も両方） */
-    amark_markdown_prefix_fn_t prefix;     /* 任意。あれば子孫の行に接頭辞を付けるコンテナ */
-    amark_markdown_follow_fn_t can_follow; /* 任意。空行なしで previous の直後に置けるか。NULL なら置けない */
-    void *user_data;
-} amark_markdown_node_slot_t;
-
-#define AMARK_MARKDOWN_MAX_STATE_SIZE 65536u
-
-typedef struct amark_markdown_run {
-    size_t struct_size;
-    unsigned char character;
-    size_t length;
-    bool can_open, can_close;
-    uint32_t rule;
-    size_t max_run_length;
-} amark_markdown_run_t;
-typedef struct amark_markdown_run_match { size_t opener, closer, count; } amark_markdown_run_match_t;
-
-typedef struct amark_markdown_hooks_slot {
-    amark_slot_t base;                      /* kind = AMARK_SLOT_MARKDOWN_HOOKS */
-    size_t state_size;
-    amark_error_t (*begin)(amark_markdown_context_t *ctx, void *state, void *user_data);  /* 任意 */
-    amark_error_t (*end)(amark_markdown_context_t *ctx, void *state, void *user_data);    /* 任意 */
-    void (*finish)(amark_markdown_context_t *ctx, void *state, void *user_data);          /* 任意。後始末 */
-    amark_error_t (*protect)(amark_markdown_context_t *ctx, void *state, const amark_markdown_line_t *line,
-                             void *user_data);                                             /* 任意 */
-    amark_error_t (*match_delimiters)(amark_markdown_context_t *ctx, void *state, const amark_markdown_run_t *runs,
-                                      size_t count, amark_markdown_run_match_t *out_matches, size_t capacity,
-                                      size_t *out_count, void *user_data);                 /* 任意 */
-    void *user_data;
-} amark_markdown_hooks_slot_t;
+AMARK_API amark_error_t amark_markdown_begin_line(amark_markdown_context_t *ctx, amark_line_id_t line);  /* AMARK_LINE_NONE は新しい行 */
+AMARK_API amark_error_t amark_markdown_end_line(amark_markdown_context_t *ctx);
+AMARK_API amark_error_t amark_markdown_write(amark_markdown_context_t *ctx, const char *data, size_t length);  /* 表記をそのまま */
+AMARK_API amark_error_t amark_markdown_write_original(amark_markdown_context_t *ctx, amark_line_id_t line,
+                                                      uint32_t column_start, uint32_t column_end);
+AMARK_API void amark_markdown_set_frame_value(amark_markdown_context_t *ctx, int64_t value);
+AMARK_API bool amark_markdown_frame_value(const amark_markdown_context_t *ctx, const amark_node_t *node,
+                                          int64_t *value);   /* 出力中の祖先か、直前に出した兄弟 */
+AMARK_API size_t amark_markdown_child_index(const amark_markdown_context_t *ctx, const amark_node_t *node);
 ```
-- `match_delimiters` は CommonMark の照合（`process emphasis`）を並びの配列の上で行い、照合の順に（開きの並び、閉じの並び、使った数）を返す。エンジンは `capacity` を並びの長さの合計以上にして呼ぶ（照合の数は長さの合計の半分を超えないので、どの照合の実装にも足りる）。`*out_count` は `capacity` 以下。
-- **`amark_markdown_run(_match)_t` と `inline-parser` の `amark_inline_run(_match)_t` の対応**（`amark.core.markdown` の `match_delimiters` が行う。型は別なので、ポインタの読み替えはせず要素ごとに写す）：
+- Preconditions：行の外での書き出し、行の中での `begin_line`、中身の作り直しの中での `begin_line` / `end_line` / `write_original` は `AMARK_ERROR_INVALID_STATE`。行の表にない行は不正な引数。
+- State model：`{frames[], line: {original, blank, segments[], bytes}, output_column}`。
 
-| `amark_markdown_run_t` | `amark_inline_run_t` | 規則 |
-|----------------------|--------------------|------|
-| 添字 `i` | 添字 `i` | 同じ順・同じ数（照合の結果の添字をそのまま使える） |
-| `struct_size`（エンジンが設定） | `struct_size` | `sizeof(amark_inline_run_t)` を設定する |
-| `character`、`length`、`can_open`、`can_close` | 同じ名前 | そのまま写す |
-| `rule`（`uint32_t`） | `rule`（`amark_delimiter_rule_t`） | 値は同じ（`AMARK_DELIMITER_RULE_EMPHASIS` = 1、`_EXACT` = 2）。それ以外の値はフックが `AMARK_ERROR_INVALID_ARGUMENT` を返す（出力の失敗） |
-| `max_run_length`（0 は上限なし） | `use_mask` | 上限 L（0 なら上限なし）で、`length` > L なら 0。それ以外は L ≥ 1 で `AMARK_INLINE_RUN_USE_1`、L ≥ 2（か上限なし）で `AMARK_INLINE_RUN_USE_2` を立てる |
+#### MdContent
 
-| `amark_inline_run_match_t` | `amark_markdown_run_match_t` | 規則 |
-|--------------------------|----------------------------|------|
-| `opener`、`closer`、`count` | 同じ名前 | 返った順にそのまま写す（添字は上の対応で同じ） |
+| Field | Detail |
+|-------|--------|
+| Intent | 葉の中身の行の準備、インラインの作り直し、エスケープと位置の保護、区切り文字の並びの決定、行頭のフィルタ |
+| Requirements | 3.1–3.4, 3.10, 5.2, 5.4, 6.1–6.5, 9.6, 9.7 |
 
-  - `capacity`：`amark_inline_match_delimiters` は「長さの合計の半分（切り捨て）以上」を求める。フックは作業の配列（`amark_inline_run_t` を `count` 個、`amark_inline_run_match_t` を長さの合計の半分の個数）を、`amark_calloc` で確保して状態に持ち、葉の間で使い回して `finish` で解放する。受け取った `capacity`（長さの合計以上）は上流の要求を満たすので、上流の `INVALID_ARGUMENT` は起きない。写した `*out_count` は `capacity` 以下。
-  - 失敗：確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`、上流の失敗はそのまま返す。`count` が 0 なら確保せず `*out_count = 0`。
-- 内部の契約：`amark_md_dispatch_init(ctx)`、`amark_md_dispatch_deinit(ctx)`、`amark_md_chain_of(ctx, type)`。
+**Responsibilities & Constraints**
+- `amark_markdown_prepare_content(leaf)` は、中身の種類（MdJudge）で中身の行の列を作る。
+  - VERBATIM：仮想の改行で分けた中身。i 行目は i 番目の部分の行に置き、印 ORIGINAL。
+  - SPELLED：自由な中身を LF で分ける（6.1）。
+  - REBUILT：インラインを持つ葉は、子孫のインラインを反復の前順でたどり、各ノードの連鎖の最後の `write` を呼ぶ（処理がなければ、KEEP のノードは `amark_markdown_write_spelling` の既定、そうでなければ表現できない）。インラインを持たない葉は、中身のバイトを LF で分ける。
+  - 中身の i 行目の元の行は、MdSource の葉の行の対応の i 番目とする。超えた行は `AMARK_LINE_NONE`（6.2–6.4）。
+  - 各行に印 RELOCATED（その行の祖先の帯のどれかが元の帯を出せない）、REBUILT、RAW_START（行頭が生のバイトの中）を付ける。
+- **作り直しのバッファ**：バイトと、バイトごとの分類（TEXT：エスケープしたテキスト、RAW：表記と綴りのバイト、RUN：区切り文字の仮の位置）、改行の位置、区切り文字の並び、範囲、次の文字の保護の列を持つ。
+- **テキスト**（3.2、3.3）：`write_text` はエスケープする文字の前に `\` を置き、LF と CR を文字参照にする。
+- **端の保護**：作り直しの終わりに、各行の先頭と末尾の TEXT の空白とタブを `&#32;` / `&#9;` にする（段落の類の行の端の空白は値から除かれ、末尾の 2 つの空白はハードブレークになるため）。
+- **空の行**：インラインを持つ葉の作り直しで、空の行（中身の最初か最後の改行、続けて 2 つの改行、フィルタが渡さなかった行）ができたら、その行で段落が切れるので表現できない（NESTING。原因は空の行の前の改行のノード、なければ葉）。
+- **区切り文字の並び**（3.4）：`write_run` は仮の位置を置く。作り直しの終わりに、範囲（`scope`）ごとに次を行う。
+  1. 各並びに、候補の文字のうち、すぐ隣の並びの文字と違う最初の文字を割り当てる。
+  2. 各並びの前後の文字（中身と行の端は `AMARK_INLINE_BOUNDARY`）から `amark_inline_delimiter_flanks` で開閉を求め、`amark_inline_match_delimiters` で照合し、すべての対が意図した開きと閉じで、使った長さが並びの長さに等しいかを確かめる。
+  3. 合わなければ、合わない並びの内側、次に外側の隣の TEXT の 1 文字を文字参照にして確かめ直し、次に候補の別の文字を試す。どれも合わなければ表現できない（DELIMITER）。文字が構文セットの区切り文字の表にないときも同じ。
+- **次の文字の保護**：`guard_next(forbidden, insert)` は、作り直しの終わりに、その位置の次の文字が `forbidden` にあれば `insert` を挿す（ショートカットの参照のリンクの後の `[` と `(`）。
+- **綴りの再利用**：`write_spelling(node, entering)` は、KEEP のノードの自分のトークンのバイトを、トークンの土台（`amark_node_content_base`）から RAW として写す。入るときは最初の子の範囲より前のトークン、出るときは最後の子の範囲より後のトークン。子の間のトークンは、エンジンが子の間に写す。
+- **フィルタ**（3.10、6.5、9.7）：インラインを持つ葉の行で、中身が VERBATIM で RELOCATED でない行を除き、各行をフィルタの連鎖（構文セットの順）に通す。行の種類は、葉の最初の中身の行なら FIRST、それ以外は CONTINUATION。フィルタが行を変えたら、印 ORIGINAL を外す。
+- `write_content_line(k)`：ORIGINAL で出力の列が元の列に等しければ、その行の最初の部分の始まりから最後の部分の終わりまでを元の範囲として書く（部分の間の葉自身の表記を含む）。そうでなければ中身のバイトとして書く（タブを残す）。行が LAZY の帯の下で段落の類の 2 行目以降なら、MdLines に遅延継続を許す。
+
+**Contracts**: Service [x]
+```c
+#define AMARK_MARKDOWN_LINE_ORIGINAL  0x01u   /* 元の部分と同じバイト */
+#define AMARK_MARKDOWN_LINE_REBUILT   0x02u   /* 作り直した */
+#define AMARK_MARKDOWN_LINE_RELOCATED 0x04u   /* 祖先の帯のどれかを合成する */
+#define AMARK_MARKDOWN_LINE_RAW_START 0x08u   /* 行頭がエスケープできない生のバイトの中 */
+
+typedef struct amark_markdown_content_line
+{
+    size_t struct_size;
+    amark_line_id_t line;                   /* 置く元の行。AMARK_LINE_NONE は新しい行 */
+    const char *bytes;                      /* 次の prepare_content まで有効 */
+    size_t length;
+    uint32_t flags;
+} amark_markdown_content_line_t;
+
+AMARK_API amark_error_t amark_markdown_prepare_content(amark_markdown_context_t *ctx, const amark_node_t *leaf,
+                                                       size_t *line_count);
+AMARK_API amark_error_t amark_markdown_content_line(amark_markdown_context_t *ctx, size_t index,
+                                                    amark_markdown_content_line_t *out);
+AMARK_API amark_error_t amark_markdown_write_content_line(amark_markdown_context_t *ctx, size_t index);
+
+/* 作り直しの中（インラインの出力の処理）で使う */
+AMARK_API amark_error_t amark_markdown_write_text(amark_markdown_context_t *ctx, const char *data, size_t length);
+AMARK_API amark_error_t amark_markdown_write_char_ref(amark_markdown_context_t *ctx, uint32_t codepoint);
+AMARK_API amark_error_t amark_markdown_write_line_break(amark_markdown_context_t *ctx);
+AMARK_API amark_error_t amark_markdown_write_spelling(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                      bool entering);
+AMARK_API amark_error_t amark_markdown_write_run(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                 bool opening, const char *candidates, uint32_t length);
+AMARK_API amark_error_t amark_markdown_scope(amark_markdown_context_t *ctx, bool open);
+AMARK_API amark_error_t amark_markdown_guard_next(amark_markdown_context_t *ctx, const char *forbidden,
+                                                  const char *insert);
+AMARK_API uint32_t amark_markdown_previous_char(const amark_markdown_context_t *ctx);  /* 行の始まりは AMARK_INLINE_BOUNDARY と同じ 0x0A */
+
+/* フィルタの中で使う */
+AMARK_API const amark_node_t *amark_markdown_filter_leaf(const amark_markdown_context_t *ctx);
+AMARK_API uint32_t amark_markdown_filter_flags(const amark_markdown_context_t *ctx);
+AMARK_API amark_error_t amark_markdown_filter_forward(amark_markdown_context_t *ctx, amark_markdown_line_kind_t kind,
+                                                      const char *data, size_t length);
+```
+- `write_text` と `write_char_ref` と `write` は、作り直しの外（表記）でも使える（情報文字列、ラベル）。`write_line_break`、`write_spelling`、`write_run`、`scope`、`guard_next` を作り直しの外で呼ぶと `AMARK_ERROR_INVALID_STATE`。フィルタの外の `filter_forward` も同じ。
+- `prepare_content` は、出力中の葉か、その子孫の葉（表のセルのように出力の処理が子を自分で出すとき）に使える。作り直しの中での入れ子の `prepare_content` は `AMARK_ERROR_INVALID_STATE`。
 
 #### MdEngine
 
 | Field | Detail |
 |-------|--------|
-| Intent | 入口、オプション、たどり、呼び出しの文脈、フックの寿命、報告 |
-| Requirements | 1.1–1.7, 4.1–4.4, 7.1–7.5, 9.1–9.3, 9.9, 12.2–12.4 |
+| Intent | 入口、ブロックのたどり、子の区切りと空行、前後のフック、報告 |
+| Requirements | 1.1, 1.5–1.8, 3.6, 3.9, 4.1–4.4, 7.5, 7.6, 9.2, 9.5, 13.2–13.4 |
 
 **Responsibilities & Constraints**
-- 入口：`node` と出力先を検査し、`options` が NULL なら既定。`struct_size` が v1 の最小未満、未知の `flags` のビット、選べない値（文字の種類、列挙の範囲外）は `AMARK_ERROR_INVALID_ARGUMENT` で何も出力しない。値 0 は既定（`-`、`.`、`*`、`*`、`` ` ``、`*`、ATX、文書に合わせる）。文脈は呼び出し側のスタックに置き、確保はグローバルのアロケータだけ。
-- 手順：連鎖とフックの構築 → 状態の確保（0 で埋める）→ `begin` を構文セットの順 → ノードの情報の表 → 部分木のたどり → `end` を逆順 → `finish` を逆順（状態の確保に成功していれば成否にかかわらず全スロット）→ 解放 → 中継のバッファの残りを渡す。失敗の時点で以降の `begin` / たどり / `end` を飛ばす。
-- たどり：親・最初の子・次の兄弟のリンクで反復し、根の部分木の外へ出ない。各ノードで「ノードの扱いの判定」を行い、元の表記なら MdSource のカーソルで部分木を出して出るときへ進み、処理なら入るときと出るときに連鎖の最後の処理を呼ぶ。ブロックの兄弟の間で MdBlocks の区切りを出す。根の `BOM` のトークンは、根が文書でそれを持てば最初に出す。
-- 呼び出しの文脈：処理を呼ぶ前に `{node, entering, chain, position, extension}` を保存して設定し、戻ったら元に戻す。`render_next` は現在の `node` と `entering` に一致するときだけ `position - 1` の処理を呼ぶ（0 なら「処理がない型」の振る舞い）。
-- 報告：最初の表現できない問題を `{problem, node, extension}` として保持し、オプションの `report` が NULL でなければ書く（成功のときは `problem = NONE`、`node = NULL`）。
-- 部分木の出力：根でないノードは祖先の接頭辞なしに出す。インラインのノードを根にしたときは、`BLOCK_GUARD` のない暗黙の葉の中身として出す。
-- 木を変更しない（const のノードだけを扱う。情報と印は文脈の表に持つ）。グローバルな可変状態を足さない。
-- 深い木：たどり、接頭辞の積み重ね、区切りの対の開き、ノードの情報の表は配列か反復で持ち、呼び出しのスタックを深さに比例して使わない（12.2）。
+- **入口**：`node` と出力先を検査する。構文セットは `amark_document_syntax_set(amark_node_document(node))`。`options` が NULL なら既定。`struct_size` が小さい、`flags` が 0 でない、`escape` が未知、`styles` の値が範囲の外、`report` の `struct_size` が小さいなら不正な引数で何も出力しない（7.5）。文脈は呼び出し側のスタックに置く。
+- **手順**：スロットの表 → 状態の確保（0 で埋める）→ `begin`（構文セットの順）→ たどり → `end`（逆の順）→ `finish`（逆の順。状態を確保できていれば成否によらず）→ 出力の終わり。
+- **インラインの根**：出力の根がインラインのノードなら、その部分木を 1 つの中身として出す。根が KEEP で、トークンがその葉の配置済みの中身の上にあり、部分木が元の表記で出せる（`amark_node_verbatim`）なら、根の最初のトークンから最後のトークンまでの中身のバイトを書く。そうでなければ、根の部分木を作り直しの規則で書く（端の保護と区切り文字の決定を含む）。行は帯を持たず、改行は文書の既定の改行にする（1.1）。
+- **たどり**：`amark_node_first_child`、`amark_node_next`、`amark_node_parent` で反復し、根の部分木の外へ出ない。ブロックごとに判断の表で分ける。UNIT なら行を出して次へ進む。そうでなければ枠を積み、`write` の連鎖の最後を入るときに呼び、ブロックの子を持てる型なら子を区切りの規則で出し、出るときに呼び、枠を降ろす。出力の処理がない型は、KEEP ならエンジンの既定（コンテナは元の帯、葉は元の記録と中身の行）、そうでなければ表現できない（NO_OUTPUT、4.3）。
+- **子の区切り**（3.6）：ブロックの子を持てる P の、出力する子の並びで、隣り合う A と B ごとに決める。
+  - P の空行の記録は、行の順に、P の行の範囲の中にある（in place の）子の間に置く。
+  - **元の隣接**：A と B がどちらも P の行の範囲の中にあり、A の最後の行と B の最初の行の間の行が P の空行の記録だけなら、その空行をそのまま出す。
+  - **新しい隣接**：それ以外。間にある P の空行の記録を出し、1 つもなければ空行を 1 つ合成する。
+  - **空行の扱い**（3.9）：出力の処理が `amark_markdown_set_spacing` で TIGHT を置いた P（list）とその子（item）の子の並びでは、空行を出さない。A と B の間に空行が要る（B の `follow` が偽か、ないか）なら表現できない（ADJACENT）。LOOSE を置いた P では、子と孫の並びの区切りに出す元の空行を子を出す前に数え、1 つもなければ子の最初の区切り（子が 1 つなら孫の最初の区切り）に空行を 1 つ合成する。区切りがなければ表現できない（ATTRIBUTE）。NONE（ほかの型）では上の 2 つの規則だけを使う。
+  - `previous_block` は B の直前に出した兄弟、`separated` は B の前に空行を出したかを返す（出力の処理が表記を選ぶため）。
+- **報告**（4.1–4.4）：`amark_markdown_unrepresentable(node, problem)` は、最初の報告を文脈に記録し、`AMARK_ERROR_UNREPRESENTABLE` を返す。出力の処理はそれを返す。入口は、報告先があれば `node` と `problem` を書く。
+- **作り直しの指定**：`amark_markdown_force_rebuild(leaf)` は、`begin` のフックの中だけで、葉を文脈の集合（並べた配列）に足す。
+- 木を変更しない（const のノードと、読み取りの問い合わせだけを使う）。
 
 **Contracts**: Service [x] / State [x]
 ```c
-/* include/amark/markdown.h */
-typedef enum amark_markdown_heading_style {
-    AMARK_MARKDOWN_HEADING_ATX = 0, AMARK_MARKDOWN_HEADING_SETEXT = 1
-} amark_markdown_heading_style_t;
-typedef enum amark_markdown_line_ending {
-    AMARK_MARKDOWN_EOL_DOCUMENT = 0, AMARK_MARKDOWN_EOL_LF = 1, AMARK_MARKDOWN_EOL_CRLF = 2
-} amark_markdown_line_ending_t;
+typedef enum amark_markdown_spacing
+{
+    AMARK_MARKDOWN_SPACING_NONE = 0, AMARK_MARKDOWN_SPACING_TIGHT = 1, AMARK_MARKDOWN_SPACING_LOOSE = 2
+} amark_markdown_spacing_t;
 
-/* 問題の種類（報告の problem、amark_markdown_fail の problem）。拡張が 0x100 以上を定める開いた集合なので、
-   uint32_t に入れる #define にする（tech.md の規約）。0x100 未満はこの spec が定める */
-#define AMARK_MARKDOWN_PROBLEM_NONE            0u
-#define AMARK_MARKDOWN_PROBLEM_NO_OUTPUT       1u     /* 元の表記を使えないノードの型に出力の処理がない */
-#define AMARK_MARKDOWN_PROBLEM_NO_SYNTAX       2u     /* 必要な構文か符号化の手段が構文セットにない */
-#define AMARK_MARKDOWN_PROBLEM_EMPTY           3u     /* 空の中身では表せない（段落、強調、リンクの文字のない参照など） */
-#define AMARK_MARKDOWN_PROBLEM_NESTING         4u     /* 入れ子の文脈で表せない（リンクの中のリンク、ATX の改行） */
-#define AMARK_MARKDOWN_PROBLEM_ADJACENT        5u     /* 隣り合うノードを区別できない */
-#define AMARK_MARKDOWN_PROBLEM_DELIMITER       6u     /* 区切りの条件を満たせない */
-#define AMARK_MARKDOWN_PROBLEM_LITERAL         7u     /* リテラルが構文として成立しない */
-#define AMARK_MARKDOWN_PROBLEM_ATTRIBUTE       8u     /* 属性の組み合わせを表せない */
-#define AMARK_MARKDOWN_PROBLEM_EXTENSION_FIRST 0x100u /* これ以上は拡張が定める */
-
-typedef struct amark_markdown_report {
-    size_t struct_size;
-    uint32_t problem;
-    const amark_node_t *node;
-    const amark_extension_t *extension;      /* 報告した処理の構文拡張。エンジンの検査なら NULL */
-} amark_markdown_report_t;
-
-typedef struct amark_markdown_options {
-    size_t struct_size;
-    uint32_t flags;                        /* v1 で定義されたビットはない（将来：必要最小限のエスケープ、表記の推定） */
-    char bullet;                           /* 0 か '-' '*' '+' */
-    char ordered_delimiter;                /* 0 か '.' ')' */
-    char emphasis;                         /* 0 か '*' '_' */
-    char strong;                           /* 0 か '*' '_'（2 つ並べて書く） */
-    char fence;                            /* 0 か '`' '~' */
-    char thematic_break;                   /* 0 か '*' '-' '_' */
-    amark_markdown_heading_style_t heading;
-    amark_markdown_line_ending_t line_ending;
-    amark_markdown_report_t *report;         /* NULL 可。成否を問わず書く */
-} amark_markdown_options_t;
-
-AMARK_API void amark_markdown_options_init(amark_markdown_options_t *options);  /* struct_size を設定し、他を 0 に */
-AMARK_API amark_error_t amark_render_markdown(const amark_node_t *node, const amark_markdown_options_t *options,
-                                              amark_buffer_t *out);
-AMARK_API amark_error_t amark_render_markdown_to(const amark_node_t *node, const amark_markdown_options_t *options,
-                                                 amark_write_fn_t write, void *user_data);
-
-/* 出力の文脈 */
-AMARK_API const amark_markdown_options_t *amark_markdown_get_options(const amark_markdown_context_t *ctx); /* 既定を補った値 */
-AMARK_API const amark_node_t *amark_markdown_root(const amark_markdown_context_t *ctx);
-AMARK_API amark_error_t amark_markdown_render_next(amark_markdown_context_t *ctx, const amark_node_t *node, bool entering);
+AMARK_API amark_error_t amark_markdown_write_next(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                  bool entering);
 AMARK_API void amark_markdown_skip_children(amark_markdown_context_t *ctx);
+AMARK_API void amark_markdown_set_spacing(amark_markdown_context_t *ctx, amark_markdown_spacing_t spacing);
+AMARK_API const amark_node_t *amark_markdown_previous_block(const amark_markdown_context_t *ctx);
+AMARK_API bool amark_markdown_separated(const amark_markdown_context_t *ctx);
+AMARK_API const amark_markdown_options_t *amark_markdown_options(const amark_markdown_context_t *ctx);  /* 既定を補ったもの */
+AMARK_API const amark_node_t *amark_markdown_root(const amark_markdown_context_t *ctx);
 AMARK_API const amark_extension_t *amark_markdown_current_extension(const amark_markdown_context_t *ctx);
 AMARK_API void *amark_markdown_state(amark_markdown_context_t *ctx, const amark_extension_t *extension);
-AMARK_API amark_error_t amark_markdown_fail(amark_markdown_context_t *ctx, uint32_t problem, const amark_node_t *node);
-    /* 表現できないことを記録し、AMARK_ERROR_UNREPRESENTABLE を返す */
+AMARK_API amark_error_t amark_markdown_force_rebuild(amark_markdown_context_t *ctx, const amark_node_t *leaf);
+AMARK_API amark_error_t amark_markdown_unrepresentable(amark_markdown_context_t *ctx, const amark_node_t *node,
+                                                       uint32_t problem);
 ```
-- Postconditions：成功なら出力先に部分木の Markdown が追加されている。失敗なら、バッファは呼び出し前の長さで、確保したものはすべて解放されている（書き出しの関数には途中までの確定した行が渡っていてよい）。
-- Invariants：出力は同じ木・構文セット・オプションに対して決定的（1.7）。
-- State model：`{document, root, options, dispatch, hooks の状態, info の表, lines, inline, call, error, report}`。1 回の出力の呼び出しの中だけに存在する。
+- Preconditions：処理の外の `write_next` は `AMARK_ERROR_INVALID_STATE`、現在のノードでない `node` は不正な引数。`begin` の外の `force_rebuild` と `declare_special` は `AMARK_ERROR_INVALID_STATE`。`problem` が 0 は不正な引数。
+- Postconditions：成功なら出力先に部分木の Markdown が追加されている。失敗なら、バッファは呼び出し前の長さで、確保したものはすべて解放されている。
+- Invariants：出力は、木、構文セット、オプションだけで決まる。
 
 ### Syntax
 
@@ -742,60 +793,68 @@ AMARK_API amark_error_t amark_markdown_fail(amark_markdown_context_t *ctx, uint3
 
 | Field | Detail |
 |-------|--------|
-| Intent | 組み込みの 19 のノード型の Markdown 出力と、CommonMark の文脈の規則をフックとして提供する |
-| Requirements | 3.1–3.8, 4.3, 4.5, 5.4, 6.1–6.5, 7.4, 8.1, 8.5, 8.6, 9.2, 9.10 |
+| Intent | 組み込みの 19 のノード型の Markdown の出力と、CommonMark の行頭の保護 |
+| Requirements | 3.2–3.10, 4.1, 5.3, 5.5, 7.1–7.3, 8.5, 8.6, 10.1, 10.2 |
 
 **Responsibilities & Constraints**
-- `amark.core.markdown`：名前 `"amark.core.markdown"`、ノード型 0、ノードのスロット 19 とフックのスロット 1、静的な `const` の記憶域。公開 API（`markdown.h`、`node.h`、`token.h`、`parser.h`、`scan.h`、`inline.h`、`commonmark.h`）だけを使う。
-- **フック**（状態は `md_core.h` の構造体）：
-  - `begin`：(1) 構文の有無を `amark_syntax_set_find_extension` で `commonmark.*` の名前から求める。(2) `amark_inline_special_chars` の和を `amark_markdown_add_escape_chars` で足す。(3) `commonmark.backslash_escape` と `commonmark.char_ref` の有無から `amark_markdown_set_encodings`。(4) `AMARK_SLOT_INLINE_NODE_TRAITS` から LINK の性質の型を集める。(5) 文書の根に編集の記録があるときだけ、文書の link_definition を前順に集めて `amark_label_normalize` と `amark_label_map_t`（先勝ち）で表を作り、参照の形のリンクと画像（下の「リンクの書式の分類」で参照の形のもの）のラベルが、同じ宛先とタイトルの定義に解決されなければ `amark_markdown_mark_dirty`。link_definition に編集があれば、`AMARK_ROLE_INLINE_UNMATCHED` の `[` を持つ text に汚れの印を付ける。
-  - **リンクの書式の分類**（`begin` と link / image の処理が同じ規則を使う）：自分のトークンの役割で決める。組み込みのリンクと画像は必ず `LINK_OPEN` と `LINK_CLOSE` を持つ。`LINK_OPEN` を持ち `LINK_PAREN_OPEN` を持てばインラインの形、`LINK_OPEN` を持ち `LINK_PAREN_*` を持たなければ参照の形（`LINK_REF_LABEL` があれば完全、`LINK_REF_OPEN` だけなら省略、`LINK_OPEN` と `LINK_CLOSE` だけなら短縮）。`AUTOLINK_*` を持てばオートリンク。`LINK_OPEN`・`LINK_PAREN_*`・`LINK_REF_*`・`AUTOLINK_*` をどれも持たないトークンつきのリンクは拡張の定めた形（例：`inline-parser` の `test.inline.autolink` の拡張オートリンク。長さ 0 の `TEXT` に `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK` を持つ）とし、参照の検査の対象にせず汚れの印を付けない。トークンを持たない新しいリンクはこの分類の外（作り直す）。
-  - `protect`：`BLOCK_GUARD` の行の先頭について、`#`・`>`・`-`・`+`・`=`・`~` なら `[0, 1)`、1–9 桁の数字に `.` か `)` が続けばその区切りを保護する。先頭が `MARKUP` で、`amark_scan_html_block_start`（上流）が段落を中断する HTML ブロックの開始と判定すれば `[0, 1)` を保護する（マークアップなので表現できない）。
-  - `match_delimiters`：並びを MdDispatch の対応の表のとおり `amark_inline_run_t` に写して `amark_inline_match_delimiters`（上流）を呼び、結果を `amark_markdown_run_match_t` に写して返す（`capacity` と作業の配列の規則も同じ節）。
-  - `finish`：定義の表を解放する。
-- **ブロックの共通の判定**（`can_follow` が使う）：「自分で閉じる」ブロック（ATX と setext の見出し、区切り線、閉じたフェンスのコードブロック、種類 1–5 の HTML ブロック）の直後には、インデントのコードブロック以外を置ける。段落の類（段落、setext の見出し）の直後には、段落を中断できるもの（ATX の見出し、`*`／`_` の区切り線、フェンスのコードブロック、引用、種類 1–6 の HTML ブロック、空でない最初の項目を持つ箇条書きのリストと開始番号 1 の順序付きのリスト）だけを置ける。それ以外（リスト、引用、インデントのコード、種類 6・7 の HTML、リンク参照定義、拡張の型）の直後には置けない。
-- **構文の有無**（3.8）：表記に必要な構文の拡張（例：setext の見出しには `commonmark.setext_heading`、強調には `commonmark.emphasis`）が構文セットにないときは、その表記を選ばず、他の表記もなければ `NO_SYNTAX` で表現できないと報告する。
-- **ノードの処理**（表記の希望は、自分のトークンの役割とバイト → オプション、の順）：
+- `amark.core.markdown`：名前 `"amark.core.markdown"`、ノード型 0、`AMARK_SLOT_MARKDOWN_NODE` のスロット 19（識別子の順）とフックのスロット 1。静的な `const` の記憶域。公開 API（`markdown.h`、`node.h`、`value.h`、`spelling.h`、`document.h`、`scan.h`、`inline.h`、`commonmark.h` の役割の番号）だけを使う。
+- 値と style は `amark_node_get` で読む（補助 `amark_md_core_get`）。style が UNSET なら `amark_markdown_options` の既定を使う（7.1–7.3、5.5）。
+- 「元のトークン」は、KEEP か REBUILD のブロックの、捨てていない項目に関わるレイアウトのトークン（`amark_block_token_at`）を `write_original` で書くことを指す。RELOCATED の行では、行頭の字下げの SPACE のトークンを書かない（移した先で字下げが別の意味になるため）。
+- **フック**：
+  - `begin`：`amark_inline_special_chars(set, NULL)` の文字を宣言する。文書の link_definition のどれかが元の表記のまま出せなければ（`amark_node_verbatim` が偽。追加、編集）、文書の葉のうち、ブラケットの残りのテキスト（DELIMITER のトークンが `[`、`]`、`![` の text）を持つものを `force_rebuild` で指定する（3.8）。
+  - `filter`：paragraph と heading の中身の行に、下の行頭の保護を当てる。ほかの型の葉の行はそのまま渡す。保護が要る行が RAW_START なら表現できない（LITERAL）。
+- **行頭の保護**（3.10、6.5）：行の最初の文字の前に `\` を置く（数字の並びの後の `.` `)` は、その文字の前）。
 
-| 型 | 元の表記を使う場合 | 作り直し | 検査と切り替え |
-|----|--------------------|----------|----------------|
-| document | — | 子だけ（区切りはエンジン） | — |
-| block_quote | `write_prefix_tokens` | 接頭辞 FIRST/NEXT `> `、BLANK `>`（元の最初の行の接頭辞が `>` の後に空白を持たなければ空白なし） | `can_follow`：前が引用でない |
-| list | 項目のトークン | 項目の間の空行の規則：tight は `NONE`、`EDITED` で loose なら `BLANK`、他は `KEEP`。マーカーは最初の項目のトークン、なければオプション | 前の兄弟が同じ種類のリストで同じマーカーなら別のマーカー（箇条書きは `-` `*` `+`、順序付きは `.` `)`）。直前に出したリストのマーカーを状態に持つ。`can_follow`：前が段落の類なら中断できる形のとき、前が自分で閉じるブロックなら真 |
-| item | `write_prefix_tokens`（マーカーがリストの選んだものと同じで、`NEXT` ではマーカーの幅も同じとき） | FIRST：マーカー（箇条書きの文字か、番号と区切り）＋ 空白 1 つ（元の詰め物があればそれ）。NEXT：内容の幅の空白。BLANK：なし。子の間の空行の規則は、親のリストが tight なら `NONE`、それ以外は `KEEP` | 最初の項目の番号はリストの開始番号（8.6）。新しい項目の番号は前の項目 ＋ 1。マーカーの幅が元と違えば、続く行は合成（8.5）。`can_follow`：真（項目は項目の直後に置ける） |
-| code_block | `NEW_*` だけなら元の表記（`NEW_BEFORE` でインデントの形ならフェンスへ切り替え、`NEW_AFTER` で閉じていないフェンスなら閉じのフェンスを足す） | フェンス：文字はトークンかオプション、情報文字列に `` ` `` があれば `~`。長さは max(3, 内容の行頭（3 列以下の空白の後）の同じ文字の最長の並び ＋ 1)。情報文字列は `\`・`&`（と `` ` ``）をエスケープし、端の空白は文字参照。インデント：トークンがインデントの形で、内容が空でなく最初と最後の行が空行でなく、前が段落の類でないとき | `can_follow`：フェンスは真、インデントは前が自分で閉じるブロックのとき |
-| html_block | `NEW_*` だけなら元の表記 | リテラルを `write_lines` | `amark_scan_html_block_start` で最初の行の種類を求め、種類 1–5 は最後の行だけが終わりの条件を満たし、6・7 は空行を含まないこと。満たさなければ `LITERAL`。`NEW_BEFORE` で最初の行が字下げされ前の兄弟がリストなら `ADJACENT`。`NEW_AFTER` で種類 1–5 の終わりの条件がなければ `LITERAL`。`can_follow`：前が自分で閉じるブロック、または前が段落の類で種類 1–6 |
-| paragraph | `NEW_BEFORE` だけなら元の表記（`NO_INDENT`）、中身の編集なら自分のトークン ＋ 中身 | `begin_inline(BLOCK_GUARD)`、中身、合成した改行 | 中身が空（子がないか空の text だけ）なら `EMPTY`。`can_follow`：前が自分で閉じるブロック |
-| heading | 自分のトークン ＋ 中身 | ATX：`#` × レベル、中身があれば空白と中身、`begin_inline(SINGLE_LINE, trailing '#')`。setext：中身（`BLOCK_GUARD`）、改行、`=` か `-`（元の長さか 3） | setext はレベル 1–2 で中身が空でないときだけ。中身に改行があれば setext が要り、レベル 3 以上なら `NESTING`。`can_follow`：ATX は真、setext は段落と同じ |
-| thematic_break | 元の表記 | 文字（トークンかオプション）× 3 | 前の兄弟が段落の類で空行なしに続くなら `-` を `*` に切り替え。`can_follow`：真 |
-| link_definition | `NEW_*` だけなら元の表記 | `[ラベル]: 宛先`（タイトルがあれば空白と引用符で囲んだタイトル） | 宛先とタイトルは link と同じ規則。`can_follow`：前が自分で閉じるブロック |
-| text | — | 編集：`write_text`。`EDITED_LEAF` で無編集：`write_text_tokens` | — |
-| softbreak | 改行のトークンだけ（行末の空白のトークンは出さない） | `end_line` | — |
-| linebreak | 自分のトークン | `\` と `end_line`（元が空白の形なら空白 2 つ） | 葉の中で後ろに空でないインラインがなければ `NESTING` |
-| code | 元の表記 | フェンスの長さはリテラルにない最小のバッククォートの並びの長さ。先頭か末尾が `` ` `` なら、または両端が空白で全部が空白でなければ、両側に空白 1 つ | 出るときに `guard_next('`')`（隣り合うコードスパンは `ADJACENT`） |
-| html_inline | 元の表記 | リテラル（改行は `end_line`） | `amark_inline_scan_raw_html`（`inline.h`。上流）がリテラル全体を 1 つの raw HTML と判定しなければ `LITERAL` |
-| emph / strong | 区切り文字はトークンの文字を希望に | `write_delimiter`（候補は希望の文字 ＋ もう一方、長さ 1 か 2、`amark_markdown_commonmark_flanks`、規則 EMPHASIS） | 中身が空なら `EMPTY` |
-| link / image | オートリンクの形と拡張の定めた形（ブラケットと括弧のトークンを持たない）で無編集なら `write_verbatim`。参照の形は、ラベルが同じ宛先とタイトルの定義に解決されれば形を保つ（中身が変わった短縮・省略の形は、元のラベルで完全参照に） | インライン：`[` 中身 `](宛先` タイトル `)`。宛先が空か空白・制御文字を含めば `<…>`（`<` `>` をエスケープ）、それ以外は `(` `)` もエスケープ。タイトルは `"`（元の区切りの文字があればそれ）で、区切りの文字をエスケープ | LINK の性質の型の中の link は `NESTING`。短縮の形で次の兄弟が text でなければ省略の形にし、text なら `guard_next('(' '[')`。オートリンクと拡張の定めた形（拡張オートリンクなど）は、編集したらインラインの形 |
+| 行 | 保護する形 |
+|---|---|
+| FIRST（段落、setext の見出しの最初の行） | ATX の開き（`#`×1–6 と空白か行末）、`>`、リストの記号（`-` `+` `*` と空白か行末、数字 1–9 桁と `.` `)` と空白か行末）、フェンスの開き、区切り線、`amark_scan_html_block_start(行, false)` が 0 でない `<`、リンク参照定義の形（`amark_scan_link_label` の後が `:`） |
+| CONTINUATION（同じ葉の 2 行目以降） | setext の下線の形（`=` か `-` の並びと末尾の空白）、区切り線、ATX の開き、`>`、フェンスの開き、`amark_scan_html_block_start(行, true)` が 0 でない `<`、空でない箇条書きの記号と `1.` `1)` の開き（段落を中断するもの） |
+| ATX の見出しの行 | 末尾の空白と `#` の並び、`#` だけの中身（閉じの並びとして除かれる）の最初の `#` |
 
-- 公開の補助（GFM 相当の拡張などが使う）：
-  - `amark_markdown_write_item_prefix`：項目と同じ規則（リストのマーカー、詰め物、内容の幅）で接頭辞を書き、FIRST のときはマーカーと詰め物の後に `extra` を足す。
-  - `amark_markdown_commonmark_flanks`：`_` は UNDERSCORE、それ以外は ASTERISK の flanking を `amark_inline_delimiter_flanks`（上流）で求める。
+- **ブロックの出力の表**：
+
+| 型 | KEEP の出力 | 合成（REBUILD、NEW） | `margin` / `follow` |
+|---|---|---|---|
+| document | 何も書かない（子はエンジン） | 同じ | — / — |
+| block_quote | エンジンが元の帯を使う | — | FIRST・CONTINUATION は `> `、BLANK は `>`、BLANK_SPACE は `> ` / 真 |
+| list | 入るときに tight を読み `set_spacing`、記号と区切りを決めて `set_frame_value` | 記号は style か既定。直前に出した兄弟が同じ種類のリストで、その値の記号が同じなら別の記号（`-`↔`*`、`.`↔`)`。空行があってもリストはつながるため） | — / 前が段落なら、最初の項目が空でなく、順序付きなら start が 1 のときだけ真。それ以外は真 |
+| item | エンジンが元の帯を使う | — | FIRST は、元の FIRST の帯があればそのバイト（`write_original`）、なければ記号（順序付きは `start + child_index` と区切り）と空白 1 つ。CONTINUATION と BLANK_SPACE は項目の幅の空白、BLANK は空。項目の幅は、元の続く行の帯があればその幅、なければ FIRST の帯の幅（記号で終わる帯なら ＋1）。FIRST で `rest` が空白で始まるか、記号と `rest` が区切り線になるなら `marker_only`（8.6） / 真 |
+| paragraph | 中身の行ごとに、元の行なら字下げのトークン、中身の行。中身が空なら EMPTY | 中身の行だけ。中身が空なら EMPTY | — / 前が ATX の見出し、区切り線、フェンスのコードのときだけ真（段落、引用、リストの後は遅延継続になり、定義の後は title として読まれうる） |
+| heading | ATX：開きのトークン、中身の行、閉じのトークン（level と closing の綴りが残るとき）。setext：中身の行と下線の行のトークン（level の綴りが残るとき） | ATX：`#`×level、中身があれば空白と中身、closing なら空白と `#`×level。setext（level が 1–2 で中身が 1 行以上）：中身の行と `=`×3 か `-`×3。中身が 2 行以上なら setext（level 3 以上は NESTING）、中身が空なら ATX | — / ATX は真、setext は段落と同じ |
+| thematic_break | トークン（前が空行なしの段落で char が `-` なら合成にする） | char を count 回（spaced なら空白を挟む）。前が空行なしの段落なら `-` を使わない（setext の下線になるため） | — / 真 |
+| code_block（fenced） | 開きと閉じのフェンスの行のトークン、中身の行（元の行なら字下げのトークン）。元に閉じのフェンスがなく、最後のブロックでなければ閉じを合成する | フェンスの文字と長さは style か既定。長さは、中身の行頭（3 列まで）の同じ文字の並びの最長 ＋ 1 以上。情報文字列は `write_text`、情報文字列が `` ` `` を含むなら `~`。元のフェンスは、長さと文字が中身に対して成り立つときだけ使う | — / 真 |
+| code_block（indented） | 中身の行ごとに字下げのトークン | 中身の行ごとに空白 4 つ。中身が空、最初か最後の行が空白だけ、前が空行なしの段落か、前がリスト（項目に取り込まれる）なら fenced にする | — / 真（使えないときは fenced にするため） |
+| html_block | 中身の行 | 中身の行。literal の最初の行が `amark_scan_html_block_start` で種類を持ち、種類 1–5 の終わりの条件が最後の行だけにあり（最後のブロックなら終わりの条件はなくてよい）、種類 6・7 が空行を含まないときだけ。前がリストで literal が空白で始まるなら（項目に取り込まれる）LITERAL。空なら EMPTY | — / 前が段落で種類が 7 なら偽 |
+| link_definition | トークンと中身の行 | `[` label `]:` 空白 宛先（下のリンクの宛先の規則、angle の style）、title があれば空白と引用符で囲んだ title | — / 前が段落なら偽 |
+
+- **隣接の共通の規則**：組み込みの `follow` は、前が種類 6・7 の HTML ブロックか、閉じのないフェンスのコードなら、どの型でも偽を返す（後のブロックが取り込まれるため）。
+
+- **インラインの出力の表**（作り直しの中だけで呼ばれる）：
+
+| 型 | 出力 |
+|---|---|
+| text | KEEP：TEXT・TAB_REMAINDER・DELIMITER のトークンは `write_text`（残りの区切り文字もエスケープされる）、ESCAPE・CHAR_REF・REPLACED のトークンは元のバイト。そうでなければ literal を `write_text`（改行は文字参照になる、3.3） |
+| softbreak | `write_line_break`（中身の最初か最後、続く改行は MdContent の空の行の規則で NESTING） |
+| linebreak | form が backslash なら `\` と `write_line_break`、spaces なら空白 2 つと `write_line_break`。中身の最後なら NESTING（空の行の規則でも検出される）。ATX の見出しの中なら見出しが setext を選ぶ |
+| code | バッククォートの数 n は、backticks の style か 1 以上で、literal に長さ n の並びがない最小の値。literal が `` ` `` で始まるか終わる、または空白で始まり空白で終わり空白だけでないなら、両端に空白を足す（padded の style が真でも、空白だけの literal には足さない）。`previous_char` が `` ` `` なら ADJACENT。空なら EMPTY |
+| html_inline | `amark_inline_scan_raw_html(literal)` が literal の全体で成り立つときだけ、literal を書く。そうでなければ LITERAL |
+| emph、strong | `write_run`（候補は style の文字、次に別の文字。長さは 1 と 2） |
+| link、image | KEEP なら `write_spelling`（入るときと出るとき）、shortcut なら `guard_next("[(", "[]")`。合成：`[`（image は `![`）、`scope` の開き、子、`scope` の閉じ、`]` の後に形ごとの部分。full は `[` label `]`、collapsed は `[]`、shortcut は `guard_next`。参照の形で宛先が UNRESOLVED なら UNRESOLVED。inline は `(` 宛先 [空白 title] `)`。autolink は、子が 1 つの text で literal が宛先（か `mailto:` を除いた宛先）に等しく、オートリンクとして成り立つときだけ `<literal>`、そうでなければ inline。link の祖先に link があれば NESTING |
+
+- **リンクの宛先と title**（3.5）：宛先が空、空白か制御文字か `<` を含む、括弧が釣り合わない、style の angle が真なら `<` `>` で囲み、中の `<` `>` `\` をエスケープする。それ以外は `\` `(` `)` をエスケープする。オートリンクから inline の形に変わったリンクも、宛先は値から書き、元のトークンのバイトを写さない（オートリンクでは `\` が文字どおりなので）。title は style の引用符（未設定なら既定）で囲み、その引用符と `\` をエスケープし、改行はそのまま行を分ける。
 
 **Contracts**: Service [x]
 ```c
-/* include/amark/markdown.h */
-AMARK_API const amark_extension_t *amark_markdown_core_extension(void);   /* "amark.core.markdown"。静的、解放しない */
-AMARK_API amark_error_t amark_markdown_write_item_prefix(amark_markdown_context_t *ctx, const amark_node_t *item,
-                                                         amark_markdown_line_kind_t kind,
-                                                         const char *extra, size_t extra_length);
-AMARK_API void amark_markdown_commonmark_flanks(unsigned char character, uint32_t before, uint32_t after,
-                                                bool *out_can_open, bool *out_can_close);
+/* src/syntax/md_core.h（src/syntax/md_*.c だけが include する） */
+extern const amark_markdown_node_slot_t amark_md_slot_document;   /* … 19 の型のそれぞれ */
+extern const amark_markdown_hooks_slot_t amark_md_core_hooks;
+amark_error_t amark_md_core_get(const amark_node_t *node, amark_facet_t facet, amark_value_t *out);
 ```
 
 **Implementation Notes**
-- Integration：`block-parser` の構築関数に 1 行足す（登録の規則 4）。テストは `amark_syntax_set_create_commonmark`（`inline-parser` の後の構築関数）で作った構文セットを使う。
-- Validation：`data/block_cases.txt`、`data/inline_cases.txt` が表の各分岐を照合する。意味の保存は property テストで確かめる。
-- Risks：CommonMark の版を上げるときは、行頭の保護と `can_follow` の判定を再照合する。
+- Integration：`block-parser` の構築関数の表に 1 行足す（登録の規則 4）。この spec のテストは `amark_syntax_set_create_commonmark` と、`amark_markdown_core_extension()` だけを足した構文セットの両方を使う。
+- Validation：`new_block_cases.txt`、`new_inline_cases.txt` が表の各分岐を、spec の全例のプロパティテストが組み合わせを確かめる。
+- Risks：行頭の保護の表の漏れ。プロパティテストとファジングで見つけ、表に足す。
 
 ### Test
 
@@ -803,46 +862,88 @@ AMARK_API void amark_markdown_commonmark_flanks(unsigned char character, uint32_
 
 | Field | Detail |
 |-------|--------|
-| Intent | 往復・作り直し・編集の手順の検査と、S 式からの出力の照合 |
-| Requirements | 11.1–11.4, 11.6 |
+| Intent | 構文セットと文書の用意、出力の照合、生成テストの検査の関数 |
+| Requirements | 12.1–12.3, 12.5 |
 
-**Responsibilities & Constraints**
-- 2 つの INTERFACE ライブラリに分ける（`foundation` のファジングの規則。ファジングのターゲットがリンクするものは Naos に依存しない）：
-  - `amark_test_md`（`support/md_test_support.c`、`support/md_edit_script.c`）：Naos に依存しない。凍結した構文セット（`const amark_syntax_set_t *`）と入力を受け取り、往復・全ノードの編集・編集の手順の各判定を `amark_error_t` と失敗の説明（どの検査がどのノードで違ったか）で返す関数と、編集の手順と局所性の追跡を持つ。依存は Amark のライブラリと Naos に依存しない補助だけで、`amark_test_tree`（`AMARK_CHECK_TREE_DUMP` を宣言し Naos に依存しうる）にはリンクしない（S 式の木の組み立てとダンプからの作り直しは `amark_test_md_check` に置く）。`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義する。`md_roundtrip_fuzz` と `md_edit_fuzz` はこれをリンクする。
-  - `amark_test_md_check`（`support/md_check.c`）：Naos に依存し、`amark_test_md`、`amark_test_tree`、`amark_test_inline`（`amark_test_set_factory_t`、`amark_test_example_check_fn_t` の形）に依存する。`amark_test_md` の判定を Naos の検査にし、トークンなしのダンプからの作り直し（`amark_test_tree_build` を使う）と、生成テストの検査の関数と `AMARK_CHECK_MD` を持つ。`AMARK_BUILD_TESTS` のときだけ定義し、ファジングのターゲットはリンクしない。
-  - 公開 API だけを使う（局所性の追跡だけは INTERNAL の追跡の関数を使い、`amark_internal` と組むときだけ有効）。
-- 検査（`factory` は凍結した構文セットを作る関数。`amark_test_set_factory_t`。下の作り直しは `amark_test_md_check`、他は `amark_test_md` の判定を `amark_test_md_check` が Naos の検査にしたもの）：
-  - 往復：パースして根を出力し、入力とバイト単位で比べる。各トップレベルのブロックの部分木の出力が、そのトークンのバイトをつないだものと等しいことも比べる（2.6）。
-  - 作り直し：トークンなしのダンプ（`AMARK_DUMP_*` なし）から `amark_test_tree_build` で同じ構文セットの別の文書に木を作り、出力して再パースし、元の木と `AMARK_EQUAL_NORMALIZE_TEXT` で等しいこと。表現できないと報告されたら失敗（4.5）。
-  - 全ノードの編集：すべてのノードに `amark_node_mark_edited` を呼んでから同じ検査。
-  - 編集の手順：`md_edit_script` の操作（テキストの置換、一括設定、ブロックの削除・移動・新しい引用への移動、新しいノードの挿入、インラインの包み込みと展開、属性の変更）を種から決まる順に 1 つずつ適用し、出力の再パースが編集後の木と等しいか、表現できないと報告されること。テキストの置換と一括設定では報告されないこと、局所性の追跡で編集の影響を受けないブロックが元の表記で出ていることを確かめる（11.4）。
-- `amark_test_md_check`：`amark_test_md_check_example(factory, input, length, expected, expected_length)` は上の 4 つをまとめた生成テストの検査（`inline-parser` の `gen_examples.cmake` の `CHECK=`。形は `amark_test_example_check_fn_t`）。`void amark_test_md_check_case(const char *name, const char *options, const char *sexpr, size_t sexpr_length, const char *expected, size_t expected_length)` は、`html-renderer` の `gen_html_cases.cmake` の `CHECK=`（`INCLUDE=md_check.h`）で呼ばれるケースの検査で、`options`（見出しの `[options]` をスクリプトが解釈せずに 1 つの文字列で渡したもの。`bullet=*` などの空白で区切った `key=value`）をオプションに変え（未知の鍵や値はテストの失敗として拒否する）、CommonMark の構文セットで S 式から組み立てた木の出力と期待値を比べる。`AMARK_CHECK_MD(set, sexpr, options, expected_literal)`：手書きのテストの同じ照合。
+**Contracts**: Service [x]
+```c
+amark_error_t md_test_make_set(bool gfm, amark_syntax_set_t **out);   /* CommonMark か amark_test_gfm_set_create、凍結 */
+amark_error_t md_test_check_case(const char *name, const char *options, const char *sexpr, size_t sexpr_length,
+                                 const char *expected, size_t expected_length);
+amark_error_t md_test_check_example(const char *name, const char *options, const char *markdown,
+                                    size_t markdown_length, const char *expected, size_t expected_length);
+amark_error_t md_test_check_spec_example(const char *name, const char *options, const char *markdown,
+                                         size_t markdown_length, const char *expected, size_t expected_length);
+/* AMARK_CHECK_MARKDOWN(root, options, expected_literal) */
+```
+- `md_test_check_case`（`gen_html_cases.cmake` の `CHECK=`）：`amark_test_tree_build` で S 式から木を組み立てて出力し、期待値と比べる。オプションの語：`gfm`、`crlf`（文書の既定の改行のためのソース）、`problem=<名前>`（`AMARK_ERROR_UNREPRESENTABLE` と報告の分類を期待する）、`style.<名前>=<値>`（新しいノードの表記）。未知の語は失敗。成功した出力は、再パースして組み立てた木と意味的に等しいことも確かめる。
+- `md_test_check_example`（`gen_spec_examples.cmake` の `CHECK=`）：Markdown をパースし、オプションの `edit=<操作>`（MdEdits の名前付きの操作）を行って出力し、期待値と比べる。`edit` がなければ往復（期待値は入力と同じ）。`gfm`、`noeol`、`crlf`、`cr`、`bom` を解釈する。意味の保存と局所性の検査（MdEdits）も行う。
+- `md_test_check_spec_example`（`tests/spec/data/spec.txt` の `CHECK=`）：往復（12.1）と、MdEdits のすべての決まった操作の意味の保存と局所性（12.2、12.3）を確かめる。表現できないと報告した操作は、報告のノードと分類を記録して成功とする。
+- パースは `amark_test_parse_check` を使う（木の不変条件とロスレス性も確かめる）。`amark_tree_check` を使うので INTERNAL で登録する。
 
-#### GfmMdExt
+#### MdEdits（`amark_test_markdown_edit`）
 
 | Field | Detail |
 |-------|--------|
-| Intent | GFM 相当の構文の Markdown を公開のスロットとフックだけで書く検証用の部品 |
-| Requirements | 10.1–10.5 |
+| Intent | 決まった編集の操作と、意味の保存と局所性の検査（Naos に依存しない） |
+| Requirements | 12.2–12.4 |
+
+**Contracts**: Service [x]
+```c
+typedef enum amark_test_md_edit
+{
+    AMARK_TEST_MD_EDIT_REPLACE_TEXT = 1,   /* n 番目の text の literal を別の文字列（記号、改行、空白を含む）に */
+    AMARK_TEST_MD_EDIT_DISCARD_NODE,       /* n 番目のノードの綴りを捨てる */
+    AMARK_TEST_MD_EDIT_DISCARD_ALL,        /* すべてのノードの綴りを捨てる */
+    AMARK_TEST_MD_EDIT_INSERT_BLOCK,       /* n 番目のブロックの前に新しい段落か区切り線かコードを入れる */
+    AMARK_TEST_MD_EDIT_REMOVE_BLOCK,
+    AMARK_TEST_MD_EDIT_MOVE_BLOCK,         /* n 番目のブロックを別のコンテナの末尾へ */
+    AMARK_TEST_MD_EDIT_SET_STYLE,          /* n 番目のノードの style を別の値に */
+    AMARK_TEST_MD_EDIT_REPLACE_CONTENT,    /* n 番目の段落の中身を、断片のパースの中身に（msgstr） */
+    AMARK_TEST_MD_EDIT_ADD_DEFINITION      /* 文書のブラケットのテキストと同じラベルの定義を足す */
+} amark_test_md_edit_t;
+
+amark_error_t amark_test_md_edit_apply(amark_document_t *document, amark_test_md_edit_t edit, size_t n,
+                                       uint32_t seed, const amark_node_t **edited);  /* 対象がなければ INVALID_ARGUMENT */
+amark_error_t amark_test_md_edit_by_name(amark_document_t *document, const char *spec);
+amark_error_t amark_test_md_check_meaning(const amark_node_t *root, const char *output, size_t length,
+                                          char **reason);  /* 再パースして amark_node_equal(NORMALIZE_TEXT) */
+amark_error_t amark_test_md_check_locality(const char *before, size_t before_length, const char *after,
+                                           size_t after_length, uint32_t first_line, uint32_t last_line,
+                                           char **reason);
+void amark_test_md_free_reason(char *reason);
+```
+- 局所性（12.3）：編集の前の出力（入力）と後の出力の、共通の先頭の行と末尾の行が、編集したブロック（`edited` の最も外のブロック）の元の行の範囲 `[first_line, last_line]` より前のすべての行と後のすべての行を、それぞれ最大 1 行（区切りの空行）を除いて含むことを確かめる。
+
+#### GfmMdExt（`amark_test_markdown_gfm`）
+
+| Field | Detail |
+|-------|--------|
+| Intent | GFM 相当のノード型の Markdown の出力の部品 |
+| Requirements | 11.1–11.4 |
 
 **Responsibilities & Constraints**
-- INTERFACE ライブラリ `amark_test_md_gfm`（`support/gfm_md_ext.c`）。ノード型は `amark_test_html_gfm` の記述子を使い、`markdown.h` と `inline.h`・`parser.h` の公開 API と、`inline-parser` の `gfm_inline_ext.h` の役割の定数だけを使う。拡張の名前は `test.md.*`。Naos に依存しない（`amark_test_gfm` を通じてファジングのターゲットにリンクされる）。`AMARK_FUZZ` か `AMARK_BUILD_TESTS` のときに定義する。
+- INTERFACE ライブラリ（`support/gfm_md_ext.c`、インクルード `support/`）。公開 API と `gfm_html_ext.h`、`gfm_inline_ext.h` の記述子だけを使い、Naos と `src/` に依存しない。型を登録しない（HTML の部品とインラインの部品が登録する）。
+- 部品（拡張の取得関数をそれぞれ公開する）：
 
-| 部品 | スロット | 出力と検査 |
-|------|----------|------------|
-| 表 | `test.table`、`test.table_row`、`test.table_cell` | 無編集の行は元の表記。作り直し：見出しの行、揃えから作る区切りの行（`---` `:--` `--:` `:-:`）、本体の行を `| a | b |` で。セルは `begin_inline(SINGLE_LINE, escape '|')`。列の数より多いセルは `ATTRIBUTE`。`can_follow`：前が自分で閉じるブロック |
-| 取り消し線 | `test.strikethrough` | `write_delimiter`（候補 `~`、長さはトークンか 2、`amark_markdown_commonmark_flanks`、規則 EXACT、最大 2）。中身が空なら `EMPTY` |
-| タスクリスト | `test.task_item` | 接頭辞は `amark_markdown_write_item_prefix` に `[ ] ` か `[x] `（元のトークンがあればそれ）。最初の子が段落でなければ `ATTRIBUTE` |
-| 拡張オートリンク | `link`（`amark.core.markdown` の後に登録し、後の処理として優先される） | `inline-parser` が `gfm_inline_ext.h` に公開する拡張オートリンクの役割の定数 `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK`（0x0E50。長さ 0 の `TEXT`）のトークンを持つ link だけを扱い、他は `render_next`。無編集で汚れの印がなければ `write_verbatim`（元の表記。局所性を保つ）、編集されていれば `render_next`（組み込みのインラインの形）。CoreMarkdown のリンクの書式の分類でも拡張の定めた形として扱われ、汚れの印を受けない |
-| 脚注 | `test.footnote_def`、`test.footnote_ref` | 定義の接頭辞 FIRST `[^ラベル]: `、NEXT は空白 4 つ、BLANK はなし。参照は `[^ラベル]`（定義の表にないラベルは `ATTRIBUTE`） |
-| フック | `test.md.hooks` | `protect`：LINK の性質の祖先を持たない `TEXT` の `www.`・`http://`・`https://` で始まる語とメールの形の並び（GFM の拡張オートリンクの規則）、`BLOCK_GUARD` の行のうち表の区切りの行の形の行を保護する。`begin`：脚注の定義の表を作り、定義に編集があれば `UNMATCHED` の `[` を持つ text に汚れの印 |
-
-- `tests/extensions/gfm_set.c` の `amark_test_gfm_set_create` が、HTML の部品の後にこの拡張を加える（Modified Files）。
+| 型 | 出力 |
+|---|---|
+| `test.table`（表、行、セル） | UNIT でなければ、表のスロットが行ごとに出す：UNIT の行は、その行の最初の記録の列から行の終わりまでの元の範囲、そうでない行は `|`、セルごとに `prepare_content`（1 行。2 行以上なら NESTING）と ` | `、`|`。見出しの行の後に区切りの行（KEEP なら表のトークン、そうでなければ align から `---` `:--` `:-:` `--:`）。子を省く。フックの `begin` で `|` を宣言する |
+| `test.strikethrough` | `write_run`（候補 `~`、長さは tildes） |
+| `test.task_item` | `margin` は item と同じ規則（記号は親の list の style）。paragraph のスロット（連鎖）：親が task_item で、checked か mark の綴りがないか段落が新しいなら、最初の行に `[ ] ` か `[x] `（mark の style）を書き、最初の行の MARKER と続く SPACE のトークンを書かない。それ以外は `write_next` |
+| `test.footnote_def` | `margin`：FIRST は `[^` label `]: `、ほかは空白 4 つ（BLANK は空） |
+| `test.footnote_ref` | `[^` label（RAW）`]` |
+| `test.ext_autolink` | KEEP なら `write_spelling`。合成は text を `write` で書く。text が拡張オートリンクとして検出され、宛先（`www.` には `http://`、メールアドレスには `mailto:` を足したもの）が destination に等しく、`previous_char` が検出の前の文字の条件を満たすときだけ。そうでなければ拡張に割り当てた分類で報告する |
+| text（連鎖） | literal が拡張オートリンクとして検出されうる部分（`www.`、`http://`、`https://`、`@` の前後）を含むなら、その最初の文字を `write_char_ref` にし、残りを `write_text`。それ以外は `write_next` |
+| フィルタ | 段落の CONTINUATION の行が表の区切りの行の形なら、最初の文字の前に `\` を置く |
 
 #### MdTests / MdFuzz
-- 内容は Testing Strategy を参照する。`tests/markdown/CMakeLists.txt` は `amark_add_test` でテストごとの実行ファイルを、`amark_add_generated_tests(md_cases GENERATOR ${PROJECT_SOURCE_DIR}/tests/html/gen_html_cases.cmake DATA data/block_cases.txt data/inline_cases.txt ARGS CHECK=amark_test_md_check_case INCLUDE=md_check.h LIBRARIES amark_test_md_check …)` で表記の照合を（生成の手順を複製しない）、`inline-parser` の `gen_examples.cmake` の `CHECK=amark_test_md_check_example` で `data/corpus.txt`（`FACTORY=amark_syntax_set_create_commonmark`）・`data/gfm_corpus.txt`（`FACTORY=amark_test_gfm_set_create`）・`tests/spec/data/spec.txt` を登録する。
-- spec.txt の版：変数だけを定義する `include(${PROJECT_SOURCE_DIR}/tests/spec/spec_version.cmake)` で `AMARK_COMMONMARK_SPEC_VERSION` と `AMARK_COMMONMARK_SPEC_SHA256` を読み、`tests/spec` と同じ規則で照合する（データがあれば `file(SHA256)` で照合し、違えば版と両方の値を示して `FATAL_ERROR`。なければ `AMARK_SKIP: spec.txt not found` を出して終わる `md.spec_skipped` をスキップとして登録）。版と値をこの spec で持たない。
-- `data/*_cases.txt` の形式は `html-renderer` の `gen_html_cases.cmake` の形式そのもの（`### <name> [options]`、S 式、`---`、期待する Markdown、`===`）。オプションは `bullet=*` などの空白で区切った `key=value` で、スクリプトは解釈せず 1 つの文字列として `CHECK=` の関数に渡す（検査の関数が未知のオプションを拒否する）。
+- 内容は Testing Strategy を参照する。`tests/markdown/CMakeLists.txt` は次を登録する。
+  - `amark_add_test` で単体のテスト。`output_test`、`dispatch_test`、`lines_test`、`content_test` は `md_internal.h` を含めるので INTERNAL。
+  - `amark_add_generated_tests(md_new GENERATOR ${PROJECT_SOURCE_DIR}/tests/html/gen_html_cases.cmake DATA data/new_block_cases.txt data/new_inline_cases.txt ARGS CHECK=md_test_check_case INCLUDE=md_test_support.h SOURCES support/md_test_support.c LIBRARIES amark_test_tree amark_test_parse amark_test_markdown_edit INTERNAL)`
+  - `amark_add_generated_tests(md_cases GENERATOR ${PROJECT_SOURCE_DIR}/tests/support/gen_spec_examples.cmake DATA data/roundtrip_cases.txt data/edit_cases.txt data/gfm_cases.txt ARGS CHECK=md_test_check_example INCLUDE=md_test_support.h ...)`
+  - `include(${PROJECT_SOURCE_DIR}/tests/spec/spec_version.cmake)` の後、`data/spec.txt` があれば `amark_add_generated_tests(md_spec GENERATOR .../gen_spec_examples.cmake DATA ${PROJECT_SOURCE_DIR}/tests/spec/data/spec.txt ARGS CHECK=md_test_check_spec_example INCLUDE=md_test_support.h ...)`。なければ `tests/spec/` と同じ規則で飛ばす（`AMARK_REQUIRE_SPEC_TESTS`）。
+- `fuzz/markdown_render_fuzz.c` は、入力の先頭のバイトを構文セット（CommonMark か GFM 相当）と編集の操作の列にし、残りをパースして操作を行い、バッファと書き出しの関数へ出力する。確保の失敗を注入するアロケータを使う。成功した出力は `amark_test_md_check_meaning` で確かめ、無編集なら入力と比べる。
 
 ## Data Models
 
@@ -851,112 +952,115 @@ AMARK_API void amark_markdown_commonmark_flanks(unsigned char character, uint32_
 graph TB
     Call[Render call] --> Ctx[Context]
     Ctx --> Chains[Chains by type id]
-    Ctx --> Hooks[Hook slots and states]
-    Ctx --> Info[Node info table]
-    Ctx --> Lines[Line writer]
-    Ctx --> Leaf[Leaf pieces]
-    Lines --> Prefixes[Prefix stack]
-    Lines --> Sink[Output sink]
-    Leaf --> Pieces[Pieces and line views]
-    Info --> Tree[Tree nodes and tokens]
+    Ctx --> Hooks[Hook slots states filters]
+    Ctx --> Frames[Frames of blocks]
+    Ctx --> Line[Current line segments]
+    Ctx --> ContentBuf[Content lines and rebuild buffer]
+    Ctx --> Sink[Output sink and held eol]
+    Frames --> Tree[Tree queries read only]
+    ContentBuf --> Tree
 ```
-- 集約の境界は 1 回の出力の呼び出し。文脈・表・状態は呼び出しの中で作って壊す。木と構文セットは読むだけ。
-- 不変条件：(1) 出力した各バイトは、元のトークンのバイトか、処理かエンジンが合成したバイトである。(2) 元の表記をそのまま出した部分木は、そのトークンのバイトを出力順に、接頭辞の付け替えと部分的なタブ・列の規則による空白への置き換えだけを加えて出す。(3) 作り直す葉の `TEXT` の E の文字は、すべて符号化されている。
+- 集約の境界は 1 回の出力の呼び出し。木と構文セットは読むだけ。
+- 不変条件：(1) 枠は根から現在のブロックまでの出力中のブロックと一致する。(2) 行は `begin_line` から `end_line` の間だけ開いている。(3) 作り直しのバッファの区切り文字の仮の位置は、作り直しの終わりにすべて決まる。(4) 最初の失敗の後は何も出力先に渡らない。(5) バッファの出力先は、失敗で終われば呼び出し前の長さ。
 
-### Logical Data Model（内部）
+### Logical Data Model（内部、`src/render/md_internal.h`）
 ```c
-/* src/render/markdown_internal.h（要点） */
-typedef struct amark_md_piece {
-    size_t start, length;            /* 葉のバッファの中の位置 */
-    uint8_t kind;                    /* TEXT、FIXED、MARKUP、DELIMITER、LINE_BREAK */
-    uint8_t encoding;                /* 0：素、1：バックスラッシュ、2：文字参照（TEXT の各文字は別の配列） */
-    const amark_node_t *owner;
-    amark_source_id_t source; size_t origin;   /* 元の位置（なければ SIZE_MAX） */
-    uint32_t delimiter;              /* DELIMITER のとき：区切りの表の添字 */
-} amark_md_piece_t;
-
-typedef struct amark_md_info {     /* ノードの情報の表の要素 */
+typedef struct amark_md_frame
+{
     const amark_node_t *node;
-    uint32_t state;                  /* AMARK_MARKDOWN_STATE_* と、汚れた子孫を持つ印 */
-    amark_source_id_t source;
-    size_t first_offset, first_line, last_offset, last_line;
-    size_t trailing_blank_lines, trailing_blank_offset;
-} amark_md_info_t;
+    uint8_t kind;                    /* 帯を持つコンテナ、通り抜け、葉 */
+    bool first_line_done, has_first_margins;
+    amark_markdown_spacing_t spacing;
+    size_t child_index;
+    int64_t value;
+    const amark_markdown_node_slot_t *margin_slot;
+} amark_md_frame_t;
 
-struct amark_markdown_context {
+typedef struct amark_md_segment     /* 行の区切り */
+{
+    amark_line_id_t line;            /* AMARK_LINE_NONE ならバイト */
+    uint32_t column_start, column_end;
+    size_t byte_start, byte_length;  /* ctx->line_bytes の中 */
+    bool expandable;                 /* 帯と葉自身の表記 */
+} amark_md_segment_t;
+
+typedef struct amark_md_run
+{
+    const amark_node_t *node;
+    size_t position;                 /* 作り直しのバッファの中 */
+    uint32_t length;
+    char candidates[4];
+    bool opening;
+    size_t scope;
+} amark_md_run_t;
+
+struct amark_markdown_context
+{
     const amark_document_t *document; const amark_node_t *root;
-    amark_markdown_options_t options; /* 既定を補った値 */
-    amark_md_dispatch_t dispatch;    /* 連鎖の表、フックの一覧と状態 */
-    amark_md_info_t *info; size_t info_capacity;
-    amark_md_lines_t lines;         /* 出力先、現在の行、接頭辞の積み重ね */
-    amark_md_leaf_t leaf;           /* 断片、行の表示、区切りの表、要求 */
-    amark_md_call_t call;           /* 現在の呼び出しの文脈 */
-    amark_error_t error; amark_markdown_report_t report;
+    amark_markdown_options_t options;                 /* 既定を補ったもの */
+    /* MdDispatch */ void *chains; size_t chain_count; void *hooks; size_t hook_count;
+    uint32_t special[4]; void *delimiters;
+    /* MdLines */ amark_md_frame_t *frames; size_t frame_count, frame_capacity;
+    amark_md_segment_t *segments; size_t segment_count; amark_buffer_t line_bytes;
+    amark_line_id_t line; bool line_open, line_blank;
+    /* MdContent */ amark_buffer_t content; unsigned char *content_kind; amark_md_run_t *runs;
+    void *content_lines; size_t content_line_count; bool rebuilding;
+    /* MdEngine */ const amark_node_t **forced; size_t forced_count; const amark_node_t *previous_block;
+    bool separated; amark_markdown_report_t first_report; void *call;
+    /* MdOutput */ amark_buffer_t *out; size_t out_start; amark_write_fn_t write; void *write_user_data;
+    amark_buffer_t staging; amark_eol_t held_eol; bool held, line_was_empty;
+    amark_error_t error;
 };
 ```
 
 ## Error Handling
 
 ### Error Strategy
-- 引数とオプションの誤り、不正なスロットは `AMARK_ERROR_INVALID_ARGUMENT` で何も出力しない。文脈の誤用は `AMARK_ERROR_INVALID_STATE`。
-- 表現できない木は `AMARK_ERROR_UNREPRESENTABLE`（上流で追加）で、最初の問題の `{problem, node, extension}` を報告する。黙って違う意味の出力を返す経路を持たない：エンジンの検査（処理のない型、保護できない範囲、区切り文字、隣接、改行を許さない葉の改行）と、処理の検査（CoreMarkdown の表）のどちらかで必ず失敗にする。
-- 確保の失敗は `AMARK_ERROR_OUT_OF_MEMORY`、サイズの桁あふれは `AMARK_ERROR_OVERFLOW`。書き出しの関数と処理の失敗はその値を返す。どの失敗でも、バッファを戻し、`finish` を呼び、確保したものを解放する。
+- 入口は、オプションとスロットの検査を出力の前にすべて行い、違反なら何も出力しない。
+- 出力の途中の失敗（確保、問い合わせ、書き出しの関数、出力の処理、フック、フィルタ、表現できない木）は、最初の失敗を文脈に保持して以降を止め、`finish` と解放を行ってから返す。バッファの出力先は呼び出し前の長さに戻す。
+- サイズの計算は `amark_size_add` / `amark_size_mul` で検査し、桁あふれは `AMARK_ERROR_OVERFLOW`。
 
 ### Error Categories and Responses
-- **利用者の誤り**：NULL、未知のフラグ、選べない値、大きさの不足 → `INVALID_ARGUMENT`。
-- **拡張の誤り**：不正なスロット → `INVALID_ARGUMENT`。文脈の誤用 → `INVALID_STATE`。
-- **表現できない木**：→ `UNREPRESENTABLE` と報告。利用者は報告のノードを直して出力し直せる。
-- **資源の不足**：→ `OUT_OF_MEMORY` / `OVERFLOW`。
-- **規定しない使い方（文書化する）**：出力中の木の変更、文脈を処理の外へ持ち出すこと、追跡を無効にした状態での編集（元の表記が古いまま出力されうる。`syntax-tree` の規則）。
-
-### Monitoring
-- INTERNAL のカウンタ（行、合成した接頭辞、元の表記の行、符号化の回数、照合の呼び出し、情報の表の要素）と、元の表記で出したブロックの追跡を、テストが計算量と局所性の検査に使う。
+- **利用者の誤り**：NULL、未知のオプション、範囲外の style、不正なスロット、現在のノードでない `write_next`、行の表にない行 → `AMARK_ERROR_INVALID_ARGUMENT`。
+- **状態の誤り**：処理やフィルタやフックの外での文脈の操作、行の外の書き出し、作り直しの外のインラインの関数 → `AMARK_ERROR_INVALID_STATE`。
+- **表現できない**：`AMARK_ERROR_UNREPRESENTABLE`（報告に原因のノードと分類）。
+- **資源**：`AMARK_ERROR_OUT_OF_MEMORY`（`syntax-tree` の問い合わせからのものを含む）、`AMARK_ERROR_OVERFLOW`。
+- **利用者の関数の失敗**：書き出しの関数、出力の処理、フック、フィルタが返した値をそのまま返す。
+- **規定しない使い方**（文書化する）：文脈を呼び出しの外で使うこと、出力の処理の中での木の変更、同じ文書の同時の出力。
 
 ## Testing Strategy
 
-### Unit Tests（`tests/markdown/`）
-- **entry**：根・途中・切り離したノードの出力（1.1）、バッファへの追加と書き出しの関数の一致（1.2、1.3）、書き出しの関数の失敗の伝播（1.4）、処理の失敗でバッファが戻りリークしないこと（1.5）、出力の前後で木のダンプ（トークンと編集の記録を含む）が同じこと（1.6）、2 回の出力の一致（1.7）。
-- **options**：既定の表記（7.2）、各表記の選択（7.1、6.2）、改行コードの 3 つの選択と文書の改行コードの判定（6.4）、大きさの不足・未知のフラグ・選べない値の拒否（7.3）、段落の直後の `-` の区切り線が `*` になること（7.4）、`report` が成否で書かれること（4.2）、v1 の大きさのオプションが後の版でも同じ出力になる形（7.5）。
-- **slot**：登録と構文セットの順の連鎖（9.1）、`render_next`、子の省略、`amark.core.markdown` の差し替え（9.2）、フックの `begin`/`end`/`finish` の順と状態（9.3）、不正なスロットの各種（9.8）、処理のない型の無編集と編集（9.9、4.4）、汚れの印で元の表記が使われないこと（9.6）。
-- **lines**（INTERNAL）：移動したノードの接頭辞の合成と移動元の接頭辞が出ないこと（8.1、8.3）、遅延継続の保持（8.2、2.3）、部分的なタブの分割と空白への置き換え（8.4、2.2）、合成した接頭辞の後ろのタブの幅（8.4）、マーカーの幅の変化と続く行（8.5）、同じ元の行の 2 回目のアンカー、改行のない最後の行。
-- **inline**（INTERNAL）：E のエスケープと既存のエスケープの保持（3.3、5.3）、行頭と行末の空白（3.4）、`BLOCK_GUARD` の行頭、`trailing_chars`、保護の範囲、`guard_next`、区切り文字の希望の割り当ての検証と構成的な割り当て（3.5、6.5）、`*foo**bar**baz*` を編集した葉の中でそのまま保つこと（5.3）、符号化の手段がない構文セット（3.8）。
-- **blocks**：元の隣接の判定（削除・移動・挿入）、`KEEP`/`NONE`/`BLANK`、`can_follow` の偽での報告、末尾の空行の省略（3.6、5.2）。
-- **core_blocks / core_inlines**：CoreMarkdown の表の各行の分岐（`data/*_cases.txt` と手書き）。リスト参照定義の編集・追加・削除・移動で参照のリンクと `UNMATCHED` のテキストが正しく出ること（3.7）、元の表記の引き継ぎ（5.4）、新しい項目のマーカー（6.3）、最初の項目の番号（8.6）、構文を取り除いた構文セット（3.8）。
-- **report**：4.3 の各木が対応する `problem` とノードで報告されること（4.1–4.3）。
+### Unit Tests（Naos、`tests/markdown/`）
+- **output（INTERNAL）**：バッファと書き出しの関数の出力が一致し 8 KiB を超えると分かれること（1.2、1.3）、書き出しの関数の失敗が直ちに返ること（1.4）、BOM（2.5）、新しい行の改行が既定の改行であること（7.4）、CR の後の空の LF の行で CRLF になること（8.8）、改行のない行の後に行が続けば既定の改行が入ること（8.9）。
+- **dispatch（INTERNAL）**：連鎖が構文セットの順に並ぶこと、`margin` と `follow` の最後のものの選び方、区切り文字の表が後のスロットを使うこと、宣言の文字の和、不正なスロットの拒否（9.1–9.4、9.7）。
+- **lines（INTERNAL）**：引用の中のリストの帯が元のバイトで出ること（8.1）、帯のない行と新しい行の合成（8.2）、遅延継続の行が段落の 2 行目以降でだけ省かれること（8.3）、`>\t\tfoo` を新しい引用へ移したときのタブの展開と、ずれていない範囲で元のタブが戻ること（8.4）、空行の 4 つの合成（8.5）、記号だけの行（空白で始まる中身、`- ---`）（8.6）、最初の出力の行が元の記号の行でないときの合成（8.7）。
+- **content（INTERNAL）**：中身の 4 つの種類の選び方と行の対応（6.2–6.4）、続く 2 つのソフトブレークと末尾のハードブレークの空の行の報告（4.1）、特別な文字と LF・CR のエスケープ（3.2、3.3）、行の端の空白の文字参照、区切り文字の決定（`* a*`、`a_b_`、入れ子の同じ文字、`***a***` の作り直し）と照合で合わないときの報告（3.4）、`guard_next`、フィルタが RELOCATED と作り直した行にだけ当たること（3.10）、`write_spelling` の子の間のトークン。
+- **escape**：0x00–0xFF の全バイトのエスケープ、文字参照の範囲（13.5）。
+- **render_entry**：木の途中と切り離したノードの出力、インラインの根（無編集の元のバイトと、編集した強調）、根の祖先の帯を除くこと（1.1、1.8）、処理の失敗でバッファが戻ること（1.5）、出力の前後で `AMARK_DUMP_STYLE | AMARK_DUMP_LAYOUT | AMARK_DUMP_SPELLING` のダンプが同じこと（1.6）、2 回の出力が同じこと（1.7）。
+- **options**：小さい `struct_size`、未知の印、範囲外の style、未知のエスケープの方式の拒否（7.5）、既定と各 style のオプションの出力（7.1–7.3、7.6）。
+- **slot / context / hooks_filter**：拡張の型の処理と後の拡張の処理と `write_next` の包み込み（9.1–9.3）、不正なスロット（9.4）、フックの順と状態と `finish`、フィルタの順と転送と省略（9.5）、文脈の関数の契約と誤用の拒否（9.6）、`declare_special` と拡張のフィルタ（9.7）、`amark.core.markdown` のない構文セットで UNIT の部分だけが出て、合成が要るところで NO_OUTPUT になること（10.3）、差し替え（10.4）、`amark_markdown_core_extension()` の取得（10.1）、CommonMark の構文セットに含まれること（10.2）。
 
 ### Integration Tests
-- **property**（`data/corpus.txt`、`data/gfm_corpus.txt`、spec.txt の全例）：往復（2.1–2.6、11.1）、作り直し（4.5、6.1、11.2）、全ノードの編集（4.5、5.4）、編集の手順（3.1、3.2、11.3）、テキストの置換と一括設定の成功と局所性（5.1、5.2、11.4）。spec.txt がないときのスキップ（11.6）。
-- **gfm_md**：GFM 相当の部品の往復、作り直し、編集、拡張オートリンクになりうるテキスト、セルの `|`（10.1–10.5）。
-- **oom**：`AMARK_CHECK_OOM_SWEEP` で、元の表記の出力、作り直しを含む出力、表現できない木の出力のそれぞれで、メモリ不足が返りリークがなくバッファが戻ること（12.3）。
-- 公開ヘッダの単独コンパイルと C++ からの利用、エクスポートの検査（`foundation` の仕組み。13.1、13.2）。
+- **msgstr（msgstr_test）**：`> - one *two\n>   three* four\n> - five\n` の最初の段落を `いち *に さん* よん` の断片で置き換えると `> - いち *に さん* よん\n> - five\n` になること（6.1、6.4、6.6）。3 行の msgstr で 3 行目に `>   ` が合成されること（6.3）。遅延継続の段落で 2 行目の帯が省かれたままになること（6.2）。行頭が `# ` や `1. ` の msgstr、ブラケットが新しい定義に当たる msgstr がエスケープされ、断片の木と意味が等しいこと（6.5）。コードブロック、HTML、定義、空行を含む文書で、置き換えていない行が同じこと（6.6）。
+- **separation**：段落の後の新しい段落、リストの後のインデントのコード、引用の後の段落、同じ記号のリストの隣接、削除で生まれた隣接（3.6）、タイトの上書きで空行を足すことと取り除くこと、すべての綴りを捨てたリスト（3.9）、空行なしで区切れないタイトな項目と、ルーズにできない 1 項目のリスト（4.1）。
+- **unrepresentable**：4.1 の各場合で `AMARK_ERROR_UNREPRESENTABLE` と報告のノードと分類、報告先がないときも同じエラー（4.2）、処理のない拡張の型（4.3）、拡張の分類（4.4）。
+- **生成テスト**：`new_block_cases.txt` と `new_inline_cases.txt` で、新しいノードと値の出力と再パースの一致（3.2–3.5、5.5、7.1–7.3、8.5、8.6）。`roundtrip_cases.txt` で、タブ、改行の混在、改行のない最後の行、行末の空白、遅延継続、NUL、不正な UTF-8、BOM の往復（2.1、2.2）、処理のない拡張の型を含む往復（2.3）。`edit_cases.txt` で、編集の期待する出力（3.7、3.8、3.10、5.1–5.4、8.7）。
+- **spec の全例（md_spec）**：往復（12.1）、MdEdits のすべての操作の意味の保存（12.2）と局所性（12.3）。
+- **gfm_md**：`gfm_cases.txt` と単体のテストで、表、取り消し線、タスクリスト、脚注、拡張オートリンクの往復と編集（11.1–11.3）。部品のソースが `src/` を include せず Naos にリンクしないことを CMake で保証する（11.4）。
 
-### Performance / Robustness
-- **scale**（INTERNAL）：深さ 10 万の手で組み立てた引用の鎖と強調の鎖が、スタックを使い果たさずに出力か報告で終わること（12.2）。1 MiB 級の文書の往復と、葉の 1 つを編集した出力で、入力を倍にしたときのカウンタの比が 2.2 倍以下（12.1）。2 つの文書を 2 つのスレッドで同時に出力して結果が単独と同じ（12.4）。
-- **fuzz**：`md_roundtrip_fuzz`（CommonMark と GFM 相当の構文セットで往復の一致）、`md_edit_fuzz`（入力の後半を編集の手順として適用し、意味の保存か報告。確保の失敗も注入）（11.5）。
+### Robustness / Performance
+- **oom_test**：`AMARK_CHECK_OOM_SWEEP` で、無編集と編集した文書、作り直し、フックの状態、報告の経路について、メモリ不足が返りリークがなくバッファが元の長さであること（1.5、13.2）。
+- **scale_test**：深さ 10 万の引用の鎖（下から組み立てる）と強調の鎖を出力すること（13.3）。10 万行の平らな文書と、深さ 100 の入れ子で 1 万行の文書の時間が、行の数と深さの積におおむね比例すること（13.4）。
+- **ファジング**：`markdown_render_fuzz` で異常終了、リーク、意味の保存の不一致がないこと（12.4、13.5）。
+- 公開ヘッダの単独コンパイルと C++ からの利用、ヘッダの順、エクスポート、ライセンスヘッダの検査（13.1）。
 
 ## Security Considerations
-- 信頼できない木と入力に対して、範囲の検査、サイズの桁あふれの検査、再帰の不使用で、時間とメモリを入力の大きさにほぼ比例させる。
-- Markdown の出力は HTML の安全性を持たない（生の HTML はリテラルのまま出る）。安全性は HTML の出力の責務であることを文書化する。
+- 入力と木は信頼しない。走査は長さで境界を確かめ、NUL を終端として扱わない。生の HTML の値は、HTML として成り立つ形でだけ書き、成り立たなければ報告する（違う構文を作らない）。危険な URL の判断は HTML の出力の責任であり、Markdown の出力では値をそのまま保つ。
 
 ## Performance & Scalability
-- 元の表記の出力は O(T log D)（D は接頭辞を持つコンテナの深さ）、作り直しは葉ごとに中身の大きさに線形（符号化は各文字で高々 2 回、照合は並びの数に線形）。ノードの情報の表は処理を呼ぶ部分の大きさに線形。全体で、木のノードとトークンの数と出力の大きさにほぼ比例する。
-- 確保：表と状態は出力ごとに 1 回、葉の断片と行の表示は葉の間で使い回す、中継のバッファは 8 KiB。
-- 目安：1 MiB の無編集の文書の書き戻しを、一般的な開発機で 20 ms 以内（CI では判定しない）。
+- 判断は `syntax-tree` のキャッシュで、すべてのノードの合計がノードと記録の数に比例する。帯の決定は出力の行ごとに枠の数だけ行い、`amark_block_find_margin` は二分探索である。合計は「出力の行の数 × 深さ × log（帯の数）」、ノードの数、記録の数、出力の大きさの和に比例する（13.4）。
+- 作り直しは葉ごとに、中身の大きさと区切り文字の並びの数に比例する（照合の関数は並びの数に線形）。区切り文字の文字参照による直し直しは並びごとに定数回である。
+- 呼び出しのスタックは木の深さによらず、同じ型のスロットの数に比例する（13.3）。
 
-## Integration & Upstream Changes
-この spec の実装の前に、次の上流の spec を更新する（spec の境界を守るための回避策は作らない）。
-
-- **`foundation`**：`amark_error_t` の末尾に `AMARK_ERROR_UNREPRESENTABLE = 6`（「表現できない」）を追加し、`amark_error_string` に文字列を足す（エラーコードの追加は既定の Revalidation Trigger）。
-- **`syntax-tree`**：API の変更は要らない。`extension.h` のスロットの種類の一覧で割り当てた番号で `AMARK_SLOT_MARKDOWN_NODE`（13）、`AMARK_SLOT_MARKDOWN_HOOKS`（14）を記す（予定どおりの追記）。
-- **`block-parser`**：
-  1. `scan.h` に、`amark_text_input_t` を作らずに使えるバイト列の走査を追加する：`bool amark_scan_html_block_start(const char *line, size_t length, bool interrupting, int *out_kind)`（7 種類の開始の条件。段落を中断する場面では種類 7 を不成立にする）、`bool amark_scan_html_block_end(int kind, const char *line, size_t length)`（種類 1–5 の終わりの条件）、`bool amark_scan_html_open_tag_bytes` / `amark_scan_html_closing_tag_bytes`（同じ規則のバイト列の版）。`commonmark.html_block` と既存の走査はこれらを使い、規則を 1 か所に保つ。
-  2. 構築関数の出力の core 拡張の一覧に `amark_markdown_core_extension()` を足す（予定どおり。この spec のタスクが 1 行を足す）。
-- **`inline-parser`**：
-  1. `inline.h` に純粋な関数を公開し、InlineDelimiters がそれを内部でも使う：`void amark_inline_delimiter_flanks(amark_delimiter_flanking_t flanking, uint32_t before, uint32_t after, bool *out_can_open, bool *out_can_close)`（CommonMark 6.2 の判定）と、`amark_error_t amark_inline_match_delimiters(const amark_inline_run_t *runs, size_t count, amark_inline_run_match_t *out_matches, size_t capacity, size_t *out_count)`（区切りの並びの配列の上の process emphasis。規則 EMPHASIS と EXACT、下限の表を含む）。
-  2. `inline.h` に `bool amark_inline_scan_raw_html(const char *data, size_t length, size_t *out_end)`（開始タグ、終了タグ、コメント、処理命令、宣言、CDATA）を公開し、`commonmark.raw_html` がそれを使う。
-  3. InlineText の規則を追加する：テキストの走査の一致の範囲に `ESCAPE` か `CHAR_REF` のトークンで表された文字が含まれるなら、その一致を採らない（範囲の後ろから走査を続ける）。エスケープしたテキストが拡張オートリンクなどのきっかけの文字のない構文にならないようにするため。
-  4. テストの基盤：`tests/support/gen_examples.cmake` の `CHECK=` は `inline-parser` が所有して実装する（`inline-parser` のタスク 1.4。2026-11-25 に取り込み済み）。この spec が `inline-parser` の所有するファイルに行う編集は、`tests/extensions/gfm_set.c`（`amark_test_gfm_set_create` が HTML の部品の後に `amark_test_md_gfm` の拡張を加える）と `tests/extensions/CMakeLists.txt`（`amark_test_gfm` が `amark_test_md_gfm` に依存する）だけ（この spec のタスク 4.2。brief の Extends）。
-  5. 検証用拡張：`test.inline.autolink` が作る link の長さ 0 の `TEXT` の役割を、拡張オートリンクの役割の定数 `AMARK_TEST_GFM_ROLE_EXT_AUTOLINK`（0x0E50u）として `tests/extensions/gfm_inline_ext.h` に公開する（同じヘッダに `AMARK_TEST_GFM_ROLE_STRIKE_MARKER` 0x0E40u、`AMARK_TEST_GFM_ROLE_FOOTNOTE_REF_MARKER` 0x0E60u、`AMARK_TEST_GFM_ROLE_FOOTNOTE_REF_LABEL` 0x0E61u）。`amark_test_gfm` は Naos に依存せず、Naos の補助は `amark_test_gfm_check` に分ける（`foundation` のファジングの規則）。この spec の生成テストは `amark_test_gfm`（構文セット）だけを使い、ファジングのターゲットは `amark_test_gfm_check` をリンクしない。
-  6. `amark_inline_match_delimiters` の `capacity` は「長さの合計の半分（切り捨て）以上」、`amark_inline_run_t` は `use_mask` を持つ（取り込み済みの形）。この spec は MdDispatch の対応の表でそれに合わせる。
-- **`html-renderer`**：`render.h` の `amark_write_fn_t` を共有する。テストの基盤として、`html-renderer` が定める共有のケースの生成の契約（`tests/html/gen_html_cases.cmake`。形式 `### name [options]`・S 式・`---`・期待する出力・`===`。オプションは解釈せず 1 つの文字列で渡す。ARGS `CHECK=`（既定 `html_test_check_case`）と `INCLUDE=`（既定 `html_test_support.h`）。生成テストは `CHECK(name, options, sexpr, sexpr_length, expected, expected_length)` を呼ぶ）をそのまま使う。この spec は `CHECK=amark_test_md_check_case`、`INCLUDE=md_check.h` を指定するだけで、`gen_md_cases.cmake` を作らない（2026-11-25 に `html-renderer` の design に定義済み）。
-- **断片のパース**：Markdown の断片を木に差し込む編集 API は `block-parser` の `amark_parse_fragment` が担う（brief の Out of Boundary の決定）。挿入したノードはトークンを持ち `RELOCATED` になるので、このレンダラは元の表記を保ったまま出力する。
+## Migration Strategy
+- 前の版の design のファイルは作られていないので、削除するものはない。新しいファイルは File Structure Plan のとおりに作る。
