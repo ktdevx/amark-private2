@@ -1159,6 +1159,160 @@ NAOS_TEST(discarding_the_spelling_of_a_facet_keeps_its_value)
     amark_document_destroy(document);
 }
 
+/* A value derived from the tokens may be one that the setters refuse (a
+ * character reference to LF in a text, only structural tokens of a code span):
+ * dropping the spelling keeps it as the set value all the same (6.13), and the
+ * internal check accepts it. Found by the edit fuzzing (tree_edit_fuzz). */
+NAOS_TEST(dropping_the_spelling_keeps_a_derived_value_the_setters_refuse)
+{
+    amark_document_t *document = NEW_DOCUMENT("a&#10;b``\n");
+    amark_node_t *paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    amark_node_t *first;
+    amark_node_t *second;
+    amark_node_t *code;
+
+    add_content(paragraph, 0, 0, 9);
+    first = new_child(paragraph, AMARK_NODE_TEXT);
+    second = new_child(paragraph, AMARK_NODE_TEXT);
+    code = new_child(paragraph, AMARK_NODE_CODE);
+    token(first, paragraph, 0, 1, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL);
+    token(first, paragraph, 1, 6, AMARK_SPELL_CHAR_REF, AMARK_TEXT_LITERAL);
+    token(second, paragraph, 6, 7, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL);
+    token(code, paragraph, 7, 9, AMARK_SPELL_DELIMITER, AMARK_CODE_LITERAL);
+    CHECK_TEXT(first, AMARK_TEXT_LITERAL, "a\n");
+    CHECK_TEXT(code, AMARK_CODE_LITERAL, "");
+    /* The setters refuse these values. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_set_string(second, AMARK_TEXT_LITERAL, "a\n", 2));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_set_string(code, AMARK_CODE_LITERAL, "", 0));
+    CHECK_TREE_OK(document);
+
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_discard_facet_spelling(first, AMARK_TEXT_LITERAL));
+    CHECK_TEXT(first, AMARK_TEXT_LITERAL, "a\n");
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, first->facets[AMARK_TEXT_LITERAL - 1].state);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_discard_spelling(code));
+    CHECK_TEXT(code, AMARK_CODE_LITERAL, "");
+    NAOS_CHECK_INT_EQ(AMARK_TREE_FACET_SET, code->facets[AMARK_CODE_LITERAL - 1].state);
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* A token whose bytes do not match its kind is refused (8.4), so that no
+ * derived value holds NUL or invalid UTF-8: a content token of kind TEXT over a
+ * NUL byte or an invalid sequence (spelled by REPLACED), on laid and on free
+ * content. Found by the edit fuzzing (tree_edit_fuzz). */
+NAOS_TEST(text_content_tokens_over_bad_bytes_are_refused)
+{
+    amark_document_t *document = NEW_DOCUMENT("a\0b\xFF\n");
+    amark_node_t *paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    amark_node_t *text;
+
+    add_content(paragraph, 0, 0, 4);
+    text = new_child(paragraph, AMARK_NODE_TEXT);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      try_token(text, paragraph, 0, 4, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      try_token(text, paragraph, 0, 2, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL));
+    NAOS_CHECK_UINT_EQ(0, amark_node_content_token_count(text));
+    /* Spelled as a parser does. */
+    token(text, paragraph, 0, 1, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL);
+    token(text, paragraph, 1, 2, AMARK_SPELL_REPLACED, AMARK_TEXT_LITERAL);
+    token(text, paragraph, 2, 3, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL);
+    token(text, paragraph, 3, 4, AMARK_SPELL_REPLACED, AMARK_TEXT_LITERAL);
+    CHECK_TEXT(text, AMARK_TEXT_LITERAL, "a\xEF\xBF\xBD" "b\xEF\xBF\xBD");
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_discard_facet_spelling(text, AMARK_TEXT_LITERAL));
+    CHECK_TEXT(text, AMARK_TEXT_LITERAL, "a\xEF\xBF\xBD" "b\xEF\xBF\xBD");
+    CHECK_TREE_OK(document);
+
+    /* Free content. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_unlink(text));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_set_free_content(paragraph, "\xFF\xFE", 2));
+    text = new_child(paragraph, AMARK_NODE_TEXT);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      try_token(text, paragraph, 0, 2, AMARK_SPELL_TEXT, AMARK_TEXT_LITERAL));
+    token(text, paragraph, 0, 2, AMARK_SPELL_REPLACED, AMARK_TEXT_LITERAL);
+    CHECK_TEXT(text, AMARK_TEXT_LITERAL, "\xEF\xBF\xBD\xEF\xBF\xBD");
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
+/* The layout tokens that spell a facet follow the same rules on the bytes of
+ * their columns: an ESCAPE over a backslash and NUL or an invalid byte, a
+ * CHAR_REF that is not a character reference, a TEXT over NUL or invalid
+ * UTF-8, an ESCAPE over a backslash and NUL for a RAW label (whose escapes
+ * derive as their bytes), and an ESCAPE, CHAR_REF or REPLACED that cuts a tab
+ * are refused; a matching token, and a structural token (of no facet) over any
+ * bytes, are accepted. The same holds for the token that trimming the start of
+ * the content makes. Found by the review of the edit fuzzing (tree_edit_fuzz). */
+NAOS_TEST(layout_tokens_of_a_facet_must_match_their_bytes)
+{
+    static const char source[] = "\\\0\n\\\xFF\na\xFF\na\0\n\\*&amp;\xFF\n\t\\*\nx\0y\n";
+    amark_document_t *document = new_document_n(source, sizeof(source) - 1, false);
+    amark_node_t *code;
+    amark_node_t *definition;
+    amark_node_t *paragraph;
+    amark_line_id_t line;
+
+    /* Lines 0-2: an info spelled by an ESCAPE or a CHAR_REF over bad bytes. */
+    for (line = 0; line < 3; line++)
+    {
+        code = new_block(document, AMARK_NODE_CODE_BLOCK, line, 1);
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                          try_layout_token(code, line, 0, 2,
+                                           line < 2 ? AMARK_SPELL_ESCAPE : AMARK_SPELL_CHAR_REF,
+                                           AMARK_CODE_BLOCK_INFO));
+        NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                          try_layout_token(code, line, 0, 2, AMARK_SPELL_TEXT,
+                                           AMARK_CODE_BLOCK_INFO));
+        NAOS_CHECK_UINT_EQ(0, amark_block_token_count(code));
+        /* Structural: any bytes. */
+        layout_token(code, line, 0, 2, AMARK_SPELL_ESCAPE, AMARK_FACET_NONE);
+        amark_node_destroy(code);
+    }
+    /* Line 3: an ESCAPE over "a\0" for the RAW label of a definition. */
+    definition = new_block(document, AMARK_NODE_LINK_DEFINITION, 3, 1);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      try_layout_token(definition, 3, 0, 2, AMARK_SPELL_ESCAPE,
+                                       AMARK_LINK_DEFINITION_LABEL));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      try_layout_token(definition, 3, 0, 2, AMARK_SPELL_TEXT,
+                                       AMARK_LINK_DEFINITION_LABEL));
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(definition));
+    /* Line 4: matching tokens. */
+    code = new_block(document, AMARK_NODE_CODE_BLOCK, 4, 1);
+    layout_token(code, 4, 0, 2, AMARK_SPELL_ESCAPE, AMARK_CODE_BLOCK_INFO);
+    layout_token(code, 4, 2, 7, AMARK_SPELL_CHAR_REF, AMARK_CODE_BLOCK_INFO);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      try_layout_token(code, 4, 7, 8, AMARK_SPELL_TEXT, AMARK_CODE_BLOCK_INFO));
+    layout_token(code, 4, 7, 8, AMARK_SPELL_REPLACED, AMARK_CODE_BLOCK_INFO);
+    CHECK_TEXT(code, AMARK_CODE_BLOCK_INFO, "*&\xEF\xBF\xBD");
+    /* Line 5: an ESCAPE that cuts the tab before it. */
+    code = new_block(document, AMARK_NODE_CODE_BLOCK, 5, 1);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      try_layout_token(code, 5, 2, 6, AMARK_SPELL_ESCAPE, AMARK_CODE_BLOCK_INFO));
+    layout_token(code, 5, 2, 4, AMARK_SPELL_TEXT, AMARK_CODE_BLOCK_INFO);
+    layout_token(code, 5, 4, 6, AMARK_SPELL_ESCAPE, AMARK_CODE_BLOCK_INFO);
+    CHECK_TEXT(code, AMARK_CODE_BLOCK_INFO, "  *");
+    CHECK_TREE_OK(document);
+
+    /* Line 6: trimming "x\0" into a TEXT token of a facet is refused. */
+    paragraph = new_block(document, AMARK_NODE_CODE_BLOCK, 6, 1);
+    add_content(paragraph, 6, 0, 3);
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_trim_content_start(paragraph, 2, AMARK_SPELL_TEXT,
+                                                     AMARK_CODE_BLOCK_INFO, 0));
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(paragraph));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE,
+                      amark_block_trim_content_start(paragraph, 1, AMARK_SPELL_TEXT,
+                                                     AMARK_CODE_BLOCK_INFO, 0));
+    CHECK_TEXT(paragraph, AMARK_CODE_BLOCK_INFO, "x");
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
 NAOS_TEST(discarding_all_spelling_keeps_the_values_and_frees_the_content)
 {
     link_fixture_t f = new_link_fixture();
@@ -1643,6 +1797,9 @@ NAOS_SUITE(derive,
     NAOS_ADD_TEST(setting_a_layout_spelled_facet_drops_only_its_layout_tokens),
     NAOS_ADD_TEST(literals_of_content_facets_round_trip),
     NAOS_ADD_TEST(discarding_the_spelling_of_a_facet_keeps_its_value),
+    NAOS_ADD_TEST(dropping_the_spelling_keeps_a_derived_value_the_setters_refuse),
+    NAOS_ADD_TEST(text_content_tokens_over_bad_bytes_are_refused),
+    NAOS_ADD_TEST(layout_tokens_of_a_facet_must_match_their_bytes),
     NAOS_ADD_TEST(discarding_all_spelling_keeps_the_values_and_frees_the_content),
     NAOS_ADD_TEST(discarding_all_spelling_of_containers_and_code_blocks),
     NAOS_ADD_TEST(discarding_all_spelling_of_a_list_or_its_item_keeps_tight),

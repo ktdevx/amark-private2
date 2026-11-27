@@ -133,8 +133,8 @@ typedef struct amark_layout_token
  * the range; first is then ignored). AMARK_ERROR_INVALID_ARGUMENT for NULL, a node
  * that is not a block, a range outside the line table, and a range that leaves
  * out a record or a content piece of the block (a range cannot be removed
- * while the block has records or pieces). Setting the same range changes nothing; otherwise the change is
- * notified.
+ * while the block has records or pieces). Setting the same range changes
+ * nothing; otherwise the change is notified.
  */
 AMARK_API amark_error_t amark_block_set_lines(amark_node_t *block, amark_line_id_t first,
                                               uint32_t count);
@@ -175,11 +175,17 @@ AMARK_API amark_error_t amark_block_add_blank_line(amark_node_t *block,
  * Appends a layout token to block. AMARK_ERROR_INVALID_ARGUMENT, with the block
  * unchanged, for NULL, a struct_size below sizeof(amark_layout_token_t), a node
  * that is not a block, an unknown kind or AMARK_SPELL_LINE_BREAK or
- * AMARK_SPELL_TAB_REMAINDER, a facet the type does not have, a line outside the
- * line table or the line range of the block, an empty range of columns, a column
- * beyond the width of the line or inside a character other than a tab, and a
- * token that does not come after the last token (on a later line, or on the same
- * line from its end on). AMARK_ERROR_OUT_OF_MEMORY leaves the block unchanged.
+ * AMARK_SPELL_TAB_REMAINDER, a facet the type does not have or whose spelling
+ * is dropped, a line outside the line table or the line range of the block, an
+ * empty range of columns, a column beyond the width of the line or inside a
+ * character other than a tab, a token that spells a facet whose kind does not
+ * match the bytes of its columns (the rules of the content tokens below for
+ * AMARK_SPELL_TEXT, AMARK_SPELL_REPLACED, AMARK_SPELL_ESCAPE and
+ * AMARK_SPELL_CHAR_REF, on the bytes without the part of a tab cut by a
+ * boundary; the last three may not cut a tab), and a token that does not come
+ * after the last token (on a later line, or on the same line from its end on).
+ * A structural token (AMARK_FACET_NONE) holds any bytes.
+ * AMARK_ERROR_OUT_OF_MEMORY leaves the block unchanged.
  */
 AMARK_API amark_error_t amark_block_add_token(amark_node_t *block,
                                               const amark_layout_token_t *token);
@@ -206,8 +212,8 @@ AMARK_API amark_error_t amark_block_add_token(amark_node_t *block,
  * The margins belong to the containers and are not moved (a leaf with a margin
  * or a blank line on the lines is refused). to is another block with content of
  * the same document, with no line range, no content, no records and no content
- * tokens yet; each moved layout token must spell a facet of the type of to (or
- * none).
+ * tokens yet; each moved layout token must spell a facet of the type of to
+ * whose spelling is not dropped on to (or none).
  */
 AMARK_API amark_error_t amark_block_move_lines(amark_node_t *from, amark_node_t *to,
                                                amark_line_id_t first, uint32_t count);
@@ -376,6 +382,8 @@ AMARK_API amark_error_t amark_block_content_piece_at(const amark_node_t *leaf, s
  *   - AMARK_SPELL_REPLACED: NUL bytes and invalid UTF-8 sequences only;
  *   - AMARK_SPELL_ESCAPE: a backslash and an ASCII punctuation character;
  *   - AMARK_SPELL_CHAR_REF: one character reference (amark_char_ref_decode);
+ *   - AMARK_SPELL_TEXT: valid UTF-8 without NUL (a NUL byte or an invalid
+ *     sequence is spelled by AMARK_SPELL_REPLACED);
  *   - the other kinds: any bytes.
  * Both ends of a token are boundaries of the UTF-8 characters of the content
  * (an invalid sequence decodes as the bytes of its maximal subpart).
@@ -401,11 +409,12 @@ typedef struct amark_content_token
  * NULL, a struct_size below sizeof(amark_content_token_t), a leaf that is not a
  * block with content or has none, a node that is neither leaf nor an inline
  * descendant of it, a node whose tokens are on another content object, an
- * unknown kind, a facet the type of node does not have, an empty range, a range
- * outside the content or with an end inside a UTF-8 character, a kind that does
- * not match the bytes, and a token that starts before the end of the last token
- * of node. AMARK_ERROR_OUT_OF_MEMORY leaves the node unchanged. The derived
- * values of node are dropped and the change is notified.
+ * unknown kind, a facet the type of node does not have or whose spelling is
+ * dropped on node, an empty range, a range outside the content or with an end
+ * inside a UTF-8 character, a kind that does not match the bytes, and a token
+ * that starts before the end of the last token of node.
+ * AMARK_ERROR_OUT_OF_MEMORY leaves the node unchanged. The derived values of
+ * node are dropped and the change is notified.
  */
 AMARK_API amark_error_t amark_node_add_content_token(amark_node_t *node, const amark_node_t *leaf,
                                                      const amark_content_token_t *token);
@@ -426,7 +435,8 @@ AMARK_API amark_error_t amark_node_content_token_at(const amark_node_t *node, si
  * node, nodes of different documents, a count of 0 or a range beyond the tokens
  * of from, a to that is neither an inline node nor a block with content, a to
  * whose tokens are on another content object, a token whose facet the type of
- * to does not have, and tokens that would overlap the tokens of to.
+ * to does not have or whose spelling is dropped on to, and tokens that would
+ * overlap the tokens of to.
  * AMARK_ERROR_OUT_OF_MEMORY leaves both nodes unchanged. The derived values of
  * both nodes are dropped and the changes are notified.
  */

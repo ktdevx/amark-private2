@@ -222,6 +222,34 @@ static void column_to_byte(const amark_tree_line_t *entry, const char *data, uin
     *byte = entry->length;
 }
 
+bool amark_tree_layout_bytes_ok(const amark_document_t *document, amark_line_id_t line,
+                                uint32_t start, uint32_t end, amark_spell_kind_t kind)
+{
+    const amark_tree_line_t *entry = &document->lines[line];
+    const char *data = document->sources[entry->source].data + entry->offset;
+    size_t start_byte = 0;
+    size_t end_byte = 0;
+    uint32_t start_offset = 0;
+    uint32_t end_offset = 0;
+    size_t body;
+    bool whole = (kind == AMARK_SPELL_ESCAPE) || (kind == AMARK_SPELL_CHAR_REF) ||
+                 (kind == AMARK_SPELL_REPLACED);
+
+    column_to_byte(entry, data, start, &start_byte, &start_offset);
+    column_to_byte(entry, data, end, &end_byte, &end_offset);
+    if (whole && ((start_offset > 0) || (end_offset > 0)))
+    {
+        return false;
+    }
+    body = (start_offset > 0) ? start_byte + 1 : start_byte;
+    if (body >= end_byte)
+    {
+        /* Only the columns of a cut tab: spaces. */
+        return !whole;
+    }
+    return amark_tree_spelled_bytes_ok(kind, data + body, end_byte - body);
+}
+
 /* Writes the contribution of a layout token: the bytes of its columns (a tab
  * cut by a boundary as spaces for its columns in the range), decoded by kind. */
 static void emit_layout_token(sink_t *sink, const amark_document_t *document,
@@ -332,6 +360,11 @@ bool amark_tree_mixes_spelling(const amark_node_t *node, amark_facet_t facet, bo
         return false;
     }
     return layout ? amark_tree_content_spells(node, facet) : amark_tree_layout_spells(node, facet);
+}
+
+bool amark_tree_facet_dropped(const amark_node_t *node, amark_facet_t facet)
+{
+    return (facet != AMARK_FACET_NONE) && ((node->dropped & (1u << facet)) != 0);
 }
 
 static derivation_t derivation_of(const amark_node_t *node, amark_facet_t facet,

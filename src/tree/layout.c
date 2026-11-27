@@ -651,7 +651,8 @@ amark_error_t amark_block_add_token(amark_node_t *block, const amark_layout_toke
         (block->desc->level != AMARK_NODE_LEVEL_BLOCK) || (token->kind < AMARK_SPELL_TEXT) ||
         (token->kind > AMARK_SPELL_REPLACED) || (token->facet > block->desc->facet_count) ||
         (token->column_start >= token->column_end) ||
-        amark_tree_mixes_spelling(block, token->facet, true))
+        amark_tree_mixes_spelling(block, token->facet, true) ||
+        amark_tree_facet_dropped(block, token->facet))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -671,6 +672,12 @@ amark_error_t amark_block_add_token(amark_node_t *block, const amark_layout_toke
     if (error != AMARK_ERROR_NONE)
     {
         return error;
+    }
+    if ((token->facet != AMARK_FACET_NONE) &&
+        !amark_tree_layout_bytes_ok(block->document, token->line, token->column_start,
+                                    token->column_end, token->kind))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
     }
 
     error = open_records(block, &target, &created);

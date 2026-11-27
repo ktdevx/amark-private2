@@ -1020,8 +1020,6 @@ static amark_error_t check_token_bytes(const amark_document_t *document,
 {
     const char *bytes = content->bytes;
     size_t i;
-    uint32_t codepoints[2];
-    size_t count = 0;
     bool ok = false;
     amark_error_t error;
 
@@ -1054,19 +1052,31 @@ static amark_error_t check_token_bytes(const amark_document_t *document,
             return error;
         }
         return ok ? AMARK_ERROR_NONE : AMARK_ERROR_INVALID_ARGUMENT;
-    case AMARK_SPELL_REPLACED:
-        return all_replaced(bytes, start, end) ? AMARK_ERROR_NONE : AMARK_ERROR_INVALID_ARGUMENT;
-    case AMARK_SPELL_ESCAPE:
-        return ((end - start == 2) && (bytes[start] == '\\') &&
-                is_ascii_punctuation(bytes[start + 1]))
-                   ? AMARK_ERROR_NONE
-                   : AMARK_ERROR_INVALID_ARGUMENT;
-    case AMARK_SPELL_CHAR_REF:
-        return amark_char_ref_decode(bytes + start, end - start, codepoints, &count)
-                   ? AMARK_ERROR_NONE
-                   : AMARK_ERROR_INVALID_ARGUMENT;
     default:
-        return AMARK_ERROR_NONE;
+        return amark_tree_spelled_bytes_ok(kind, bytes + start, end - start)
+                   ? AMARK_ERROR_NONE
+                   : AMARK_ERROR_INVALID_ARGUMENT;
+    }
+}
+
+bool amark_tree_spelled_bytes_ok(amark_spell_kind_t kind, const char *bytes, size_t length)
+{
+    uint32_t codepoints[2];
+    size_t count = 0;
+
+    switch (kind)
+    {
+    case AMARK_SPELL_TEXT:
+        /* A NUL byte or an invalid sequence is spelled with a REPLACED token. */
+        return (memchr(bytes, '\0', length) == NULL) && amark_utf8_validate(bytes, length, NULL);
+    case AMARK_SPELL_REPLACED:
+        return all_replaced(bytes, 0, length);
+    case AMARK_SPELL_ESCAPE:
+        return (length == 2) && (bytes[0] == '\\') && is_ascii_punctuation(bytes[1]);
+    case AMARK_SPELL_CHAR_REF:
+        return amark_char_ref_decode(bytes, length, codepoints, &count);
+    default:
+        return true;
     }
 }
 
@@ -1101,7 +1111,8 @@ amark_error_t amark_node_add_content_token(amark_node_t *node, const amark_node_
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
-    if (amark_tree_mixes_spelling(node, token->facet, false))
+    if (amark_tree_mixes_spelling(node, token->facet, false) ||
+        amark_tree_facet_dropped(node, token->facet))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -1200,7 +1211,8 @@ amark_error_t amark_node_move_content_tokens(amark_node_t *from, amark_node_t *t
     for (i = 0; i < count; i++)
     {
         if ((moved[i].facet > to->desc->facet_count) ||
-            amark_tree_mixes_spelling(to, moved[i].facet, false))
+            amark_tree_mixes_spelling(to, moved[i].facet, false) ||
+            amark_tree_facet_dropped(to, moved[i].facet))
         {
             return AMARK_ERROR_INVALID_ARGUMENT;
         }
@@ -1488,7 +1500,8 @@ static amark_error_t take_lines(amark_node_t *from, amark_node_t *to, amark_line
     {
         for (i = token_low; i < token_high; i++)
         {
-            if (records->tokens[i].facet > to->desc->facet_count)
+            if ((records->tokens[i].facet > to->desc->facet_count) ||
+                amark_tree_facet_dropped(to, records->tokens[i].facet))
             {
                 return AMARK_ERROR_INVALID_ARGUMENT;
             }
@@ -1647,7 +1660,7 @@ amark_error_t amark_block_trim_content_start(amark_node_t *leaf, uint32_t column
 
     if (!block_stage(leaf) || (leaf->content == NULL) || (columns == 0) ||
         (kind < AMARK_SPELL_TEXT) || (kind > AMARK_SPELL_REPLACED) ||
-        (facet > leaf->desc->facet_count))
+        (facet > leaf->desc->facet_count) || amark_tree_facet_dropped(leaf, facet))
     {
         return AMARK_ERROR_INVALID_ARGUMENT;
     }
@@ -1671,6 +1684,11 @@ amark_error_t amark_block_trim_content_start(amark_node_t *leaf, uint32_t column
     if (error != AMARK_ERROR_NONE)
     {
         return error;
+    }
+    if ((facet != AMARK_FACET_NONE) &&
+        !amark_tree_layout_bytes_ok(document, line, start, new_start, kind))
+    {
+        return AMARK_ERROR_INVALID_ARGUMENT;
     }
     /* The place of the token among the layout tokens (in the order of the lines
      * and the columns), without overlapping its neighbours. */

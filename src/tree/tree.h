@@ -734,6 +734,37 @@ bool amark_tree_content_spells(const amark_node_t *node, amark_facet_t facet);
  * records refuse such a token. */
 bool amark_tree_mixes_spelling(const amark_node_t *node, amark_facet_t facet, bool layout);
 
+/*
+ * Whether bytes, of length bytes, can be spelled by a token of kind (8.4, 7.7):
+ * TEXT holds valid UTF-8 without NUL (a NUL byte or an invalid sequence is
+ * spelled by REPLACED); REPLACED holds NUL bytes and invalid sequences only;
+ * ESCAPE is a backslash and an ASCII punctuation character; CHAR_REF is one
+ * character reference (amark_char_ref_decode); the other kinds hold any bytes
+ * (LINE_BREAK and TAB_REMAINDER are checked against the content by their
+ * record). Used by the records of content tokens (Content) and layout tokens
+ * (Layout), so that no derived value holds NUL or invalid UTF-8.
+ */
+bool amark_tree_spelled_bytes_ok(amark_spell_kind_t kind, const char *bytes, size_t length);
+
+/*
+ * Whether a layout token of kind that spells a facet, on the columns
+ * [start, end) of line, can spell them (a structural layout token, of no
+ * facet, derives nothing and holds any bytes: the backslash alone of an
+ * escaped pipe in a table cell, for example): the bytes of the columns
+ * (without the part of a tab cut by a boundary) pass
+ * amark_tree_spelled_bytes_ok, and an ESCAPE, CHAR_REF or REPLACED token
+ * cuts no tab (a tab cut becomes spaces, which these kinds cannot hold). The
+ * columns are within the width of the line. Allocates nothing.
+ */
+bool amark_tree_layout_bytes_ok(const amark_document_t *document, amark_line_id_t line,
+                                uint32_t start, uint32_t end, amark_spell_kind_t kind);
+
+/* Whether the spelling of facet of node is dropped (false for
+ * AMARK_FACET_NONE). No token spells such a facet: the records refuse a new
+ * token of it (and the moves of tokens onto node). facet is at most the facet
+ * count of the type of node. */
+bool amark_tree_facet_dropped(const amark_node_t *node, amark_facet_t facet);
+
 /* For the internal check: whether the cache of facet of node, if any, is the
  * value derived now (a cache of a facet that derives nothing is not).
  * Allocates nothing. */

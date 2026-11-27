@@ -142,9 +142,13 @@ static bool check_cache(check_context_t *context, const amark_node_t *node)
 }
 
 /* Whether the stored string of a facet (desc) with a value is well formed: an
- * owned text terminated by NUL at its length, of valid UTF-8 without NUL, and
- * within the flags that the setters and the records enforce (no line break,
- * not empty, normalized to LF and ending with LF for LINES). */
+ * owned text terminated by NUL at its length, of valid UTF-8 without NUL, and,
+ * for LINES, normalized to LF and ending with LF. The other flags
+ * (NO_LINE_BREAK, NO_BLANK_LINE, NONEMPTY) are not invariants of the storage:
+ * the setters and the records enforce them on their arguments, but dropping
+ * the spelling keeps the value derived from the tokens as the set value
+ * (6.13), and a derived value may break them (a character reference to LF in a
+ * text, only structural tokens of a code span). */
 static bool stored_string_ok(const amark_facet_desc_t *desc, const amark_tree_facet_t *slot)
 {
     if (slot->text == NULL || slot->text[slot->length] != '\0' ||
@@ -153,17 +157,8 @@ static bool stored_string_ok(const amark_facet_desc_t *desc, const amark_tree_fa
     {
         return false;
     }
-    if ((desc->flags & AMARK_FACET_NONEMPTY) != 0 && slot->length == 0)
-    {
-        return false;
-    }
-    if ((desc->flags & (AMARK_FACET_NO_LINE_BREAK | AMARK_FACET_LINES)) != 0 &&
+    if ((desc->flags & AMARK_FACET_LINES) != 0 &&
         memchr(slot->text, '\r', slot->length) != NULL)
-    {
-        return false;
-    }
-    if ((desc->flags & AMARK_FACET_NO_LINE_BREAK) != 0 &&
-        memchr(slot->text, '\n', slot->length) != NULL)
     {
         return false;
     }

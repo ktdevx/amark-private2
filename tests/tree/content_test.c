@@ -2445,6 +2445,105 @@ NAOS_TEST(out_of_memory_leaves_moved_removed_and_trimmed_lines_unchanged)
     AMARK_CHECK_OOM_SWEEP(lines_oom_scenario, NULL);
 }
 
+/* A token cannot spell a facet whose spelling was dropped (the internal check
+ * refuses such a token): recording one, moving one onto such a node, moving
+ * lines whose tokens spell it and trimming into it are refused, with nothing
+ * changed; a token of another facet or of none is still accepted. Found by the
+ * edit fuzzing (tree_edit_fuzz). */
+NAOS_TEST(tokens_of_a_facet_whose_spelling_is_dropped_are_refused)
+{
+    amark_document_t *document = new_document("abc\n```\nx\n");
+    amark_node_t *paragraph;
+    amark_node_t *text = NULL;
+    amark_node_t *other = NULL;
+    amark_node_t *code = NULL;
+    amark_node_t *definition = NULL;
+    amark_content_token_t token;
+    amark_layout_token_t layout;
+
+    NAOS_REQUIRE_TRUE(document != NULL);
+    paragraph = new_block(document, AMARK_NODE_PARAGRAPH, 0, 1);
+    NAOS_REQUIRE_TRUE(paragraph != NULL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(paragraph, 0, 0, 3));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &text));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_create(document, AMARK_NODE_TEXT, &other));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(paragraph, text));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_append_child(paragraph, other));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_string(text, AMARK_TEXT_LITERAL, "x", 1));
+
+    /* Recording a content token of the dropped literal. */
+    memset(&token, 0, sizeof(token));
+    token.struct_size = sizeof(token);
+    token.start = 0;
+    token.end = 1;
+    token.kind = AMARK_SPELL_TEXT;
+    token.facet = AMARK_TEXT_LITERAL;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_add_content_token(text, paragraph, &token));
+    NAOS_CHECK_UINT_EQ(0, amark_node_content_token_count(text));
+    CHECK_TREE_OK(document);
+    /* A structural token of the same node is accepted. */
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, add_token(text, paragraph, 0, 1, AMARK_SPELL_TEXT));
+    CHECK_TREE_OK(document);
+
+    /* Moving a token of the literal onto it. */
+    token.start = 1;
+    token.end = 3;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_node_add_content_token(other, paragraph, &token));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_node_move_content_tokens(other, text, 0, 1));
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(text));
+    NAOS_CHECK_UINT_EQ(1, amark_node_content_token_count(other));
+    CHECK_TREE_OK(document);
+
+    /* A layout token of the dropped info of a code block. */
+    code = new_block(document, AMARK_NODE_CODE_BLOCK, 1, 2);
+    NAOS_REQUIRE_TRUE(code != NULL);
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_string(code, AMARK_CODE_BLOCK_INFO, "c", 1));
+    memset(&layout, 0, sizeof(layout));
+    layout.struct_size = sizeof(layout);
+    layout.line = 1;
+    layout.column_start = 0;
+    layout.column_end = 3;
+    layout.kind = AMARK_SPELL_MARKER;
+    layout.facet = AMARK_CODE_BLOCK_INFO;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_add_token(code, &layout));
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(code));
+    layout.facet = AMARK_FACET_NONE;
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_NONE, amark_block_add_token(code, &layout));
+    CHECK_TREE_OK(document);
+
+    /* Trimming the start of the content into the dropped info. */
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(code, 2, 0, 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT,
+                      amark_block_trim_content_start(code, 1, AMARK_SPELL_TEXT,
+                                                     AMARK_CODE_BLOCK_INFO, 0));
+    NAOS_CHECK_UINT_EQ(1, amark_block_token_count(code));
+    CHECK_CONTENT(code, "x", 1);
+    CHECK_TREE_OK(document);
+
+    /* Moving lines whose layout token spells a facet dropped on the target: the
+     * token of the first line spells the info (facet 1) of the code block, and
+     * the label (facet 1) of the definition is dropped. */
+    amark_node_destroy(code);
+    code = new_block(document, AMARK_NODE_CODE_BLOCK, 1, 2);
+    NAOS_REQUIRE_TRUE(code != NULL);
+    layout.facet = AMARK_CODE_BLOCK_INFO;
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_token(code, &layout));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE, amark_block_add_content(code, 2, 0, 1));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_create(document, AMARK_NODE_LINK_DEFINITION, &definition));
+    NAOS_REQUIRE_INT_EQ(AMARK_ERROR_NONE,
+                        amark_node_set_string(definition, AMARK_LINK_DEFINITION_LABEL, "a", 1));
+    NAOS_CHECK_INT_EQ(AMARK_ERROR_INVALID_ARGUMENT, amark_block_move_lines(code, definition, 1, 1));
+    CHECK_LINES(code, 1, 2);
+    NAOS_CHECK_UINT_EQ(0, amark_block_token_count(definition));
+    CHECK_TREE_OK(document);
+    amark_document_destroy(document);
+}
+
 NAOS_SUITE(content,
     NAOS_ADD_TEST(a_new_leaf_has_no_content),
     NAOS_ADD_TEST(input_3_1_laid_content_joins_lines_with_a_virtual_line_break),
@@ -2479,7 +2578,8 @@ NAOS_SUITE(content,
     NAOS_ADD_TEST(appending_to_unshared_content_with_tokens_does_not_copy),
     NAOS_ADD_TEST(content_with_an_outside_base_is_copied_before_it_changes),
     NAOS_ADD_TEST(content_with_two_owners_is_copied_before_it_changes),
-    NAOS_ADD_TEST(out_of_memory_leaves_moved_removed_and_trimmed_lines_unchanged)
+    NAOS_ADD_TEST(out_of_memory_leaves_moved_removed_and_trimmed_lines_unchanged),
+    NAOS_ADD_TEST(tokens_of_a_facet_whose_spelling_is_dropped_are_refused)
 )
 
 NAOS_MAIN(
